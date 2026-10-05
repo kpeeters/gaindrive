@@ -1216,7 +1216,6 @@ void MediaStore::create_schema()
 			password_enc   TEXT NOT NULL,
 			email          TEXT,
 			is_admin       INTEGER DEFAULT 0,
-			max_bitrate    INTEGER DEFAULT 0,
 			created        DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_access    DATETIME,
 			upload_allowed INTEGER DEFAULT 0,
@@ -4796,7 +4795,7 @@ std::optional<MediaStore::UserInfo> MediaStore::get_user(const std::string& user
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement sel(db_music_,
-		"SELECT username, email, is_admin, max_bitrate, upload_allowed, disabled, cast_allowed"
+		"SELECT username, email, is_admin, upload_allowed, disabled, cast_allowed"
 		" FROM client.users WHERE username = ?");
 	sel.bind(1, username);
 	if (!sel.executeStep()) return std::nullopt;
@@ -4804,10 +4803,9 @@ std::optional<MediaStore::UserInfo> MediaStore::get_user(const std::string& user
 	u.username       = sel.getColumn(0).getString();
 	u.email          = sel.getColumn(1).isNull() ? "" : sel.getColumn(1).getString();
 	u.is_admin       = sel.getColumn(2).getInt() != 0;
-	u.max_bitrate    = sel.getColumn(3).getInt();
-	u.upload_allowed = sel.getColumn(4).getInt() != 0;
-	u.disabled       = sel.getColumn(5).getInt() != 0;
-	u.cast_allowed   = sel.getColumn(6).getInt() != 0;
+	u.upload_allowed = sel.getColumn(3).getInt() != 0;
+	u.disabled       = sel.getColumn(4).getInt() != 0;
+	u.cast_allowed   = sel.getColumn(5).getInt() != 0;
 	return u;
 	}
 
@@ -4815,7 +4813,7 @@ std::vector<MediaStore::UserInfo> MediaStore::list_users()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement sel(db_music_,
-		"SELECT username, email, is_admin, max_bitrate, upload_allowed, disabled, cast_allowed"
+		"SELECT username, email, is_admin, upload_allowed, disabled, cast_allowed"
 		" FROM client.users ORDER BY username");
 	std::vector<UserInfo> result;
 	while (sel.executeStep()) {
@@ -4823,10 +4821,9 @@ std::vector<MediaStore::UserInfo> MediaStore::list_users()
 		u.username       = sel.getColumn(0).getString();
 		u.email          = sel.getColumn(1).isNull() ? "" : sel.getColumn(1).getString();
 		u.is_admin       = sel.getColumn(2).getInt() != 0;
-		u.max_bitrate    = sel.getColumn(3).getInt();
-		u.upload_allowed = sel.getColumn(4).getInt() != 0;
-		u.disabled       = sel.getColumn(5).getInt() != 0;
-		u.cast_allowed   = sel.getColumn(6).getInt() != 0;
+		u.upload_allowed = sel.getColumn(3).getInt() != 0;
+		u.disabled       = sel.getColumn(4).getInt() != 0;
+		u.cast_allowed   = sel.getColumn(5).getInt() != 0;
 		result.push_back(u);
 		}
 	return result;
@@ -4836,7 +4833,6 @@ bool MediaStore::update_user(const std::string& username,
                               const std::string& new_password,
                               const std::string& email,
                               bool is_admin,
-                              int  max_bitrate,
                               bool upload_allowed,
                               bool disabled,
                               bool cast_allowed)
@@ -4845,30 +4841,28 @@ bool MediaStore::update_user(const std::string& username,
 	if (new_password.empty()) {
 		SQLite::Statement upd(db_music_,
 			"UPDATE client.users"
-			" SET email=?, is_admin=?, max_bitrate=?, upload_allowed=?, disabled=?, cast_allowed=?"
+			" SET email=?, is_admin=?, upload_allowed=?, disabled=?, cast_allowed=?"
 			" WHERE username=?");
 		upd.bind(1, email);
 		upd.bind(2, is_admin       ? 1 : 0);
-		upd.bind(3, max_bitrate);
-		upd.bind(4, upload_allowed ? 1 : 0);
-		upd.bind(5, disabled       ? 1 : 0);
-		upd.bind(6, cast_allowed   ? 1 : 0);
-		upd.bind(7, username);
+		upd.bind(3, upload_allowed ? 1 : 0);
+		upd.bind(4, disabled       ? 1 : 0);
+		upd.bind(5, cast_allowed   ? 1 : 0);
+		upd.bind(6, username);
 		upd.exec();
 		}
 	else {
 		SQLite::Statement upd(db_music_,
 			"UPDATE client.users"
-			" SET password_enc=?, email=?, is_admin=?, max_bitrate=?, upload_allowed=?, disabled=?, cast_allowed=?"
+			" SET password_enc=?, email=?, is_admin=?, upload_allowed=?, disabled=?, cast_allowed=?"
 			" WHERE username=?");
 		upd.bind(1, new_password);
 		upd.bind(2, email);
 		upd.bind(3, is_admin       ? 1 : 0);
-		upd.bind(4, max_bitrate);
-		upd.bind(5, upload_allowed ? 1 : 0);
-		upd.bind(6, disabled       ? 1 : 0);
-		upd.bind(7, cast_allowed   ? 1 : 0);
-		upd.bind(8, username);
+		upd.bind(4, upload_allowed ? 1 : 0);
+		upd.bind(5, disabled       ? 1 : 0);
+		upd.bind(6, cast_allowed   ? 1 : 0);
+		upd.bind(7, username);
 		upd.exec();
 		}
 	return db_music_.getChanges() > 0;

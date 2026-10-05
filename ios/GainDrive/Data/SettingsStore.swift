@@ -36,11 +36,17 @@ final class SettingsStore {
 		didSet { defaults.set(mergeDuplicateAlbums, forKey: Self.mergeAlbumsKey) }
 	}
 
-	/// One global quality, capped per track by *that track's* account ceiling -
-	/// a queue spanning servers crosses caps at every boundary, so this is
-	/// deliberately not per server.
+	/// One global quality rather than one per server: a queue spanning
+	/// servers would otherwise change quality at every boundary.
 	var audioQuality: AudioQuality {
 		didSet { defaults.set(audioQuality.tag, forKey: Self.audioQualityKey) }
+	}
+
+	/// What to encode to when a ceiling makes an encode unavoidable. Kept
+	/// apart from `audioQuality` only so that it survives a spell on
+	/// `.original`, which has no format; while a ceiling is set the two agree.
+	var transcodeFormat: AudioFormat {
+		didSet { defaults.set(transcodeFormat.rawValue, forKey: Self.transcodeFormatKey) }
 	}
 
 	/// Stored music only - no server is contacted at all.
@@ -167,6 +173,7 @@ final class SettingsStore {
 	private static let selectedServerKey = "selected_server"
 	private static let mergeAlbumsKey = "merge_duplicate_albums"
 	private static let audioQualityKey = "audio_quality"
+	private static let transcodeFormatKey = "transcode_format"
 	private static let albumSortsKey = "album_sort"
 	private static let cacheCapKey = "cache_max_bytes"
 	private static let offlineKey = "offline_mode"
@@ -191,8 +198,12 @@ final class SettingsStore {
 			defaults.object(forKey: Self.mergeAlbumsKey) as? Bool ?? true
 		// Stored as the tag so it is a single value - a format and a bitrate
 		// that could disagree would be two settings pretending to be one.
-		audioQuality =
+		let quality =
 			defaults.string(forKey: Self.audioQualityKey).flatMap(AudioQuality.parse) ?? .default
+		audioQuality = quality
+		transcodeFormat =
+			defaults.string(forKey: Self.transcodeFormatKey).flatMap(AudioFormat.init(rawValue:))
+			?? (quality.format == .original ? AudioQuality.default.format : quality.format)
 		albumSorts = defaults.dictionary(forKey: Self.albumSortsKey) as? [String: String] ?? [:]
 		// `double(forKey:)` answers 0 for an absent key, which would be a cap
 		// of nothing rather than the default - the same trap the merge switch

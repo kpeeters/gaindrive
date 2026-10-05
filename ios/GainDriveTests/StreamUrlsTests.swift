@@ -31,12 +31,8 @@ struct StreamUrlsTests {
 		}
 	}
 
-	private func target(
-		_ quality: AudioQuality = .default, cap: Int = 0, id: String = "42"
-	) -> StreamTarget {
-		StreamUrls.target(
-			for: ItemRef(server: server, id: id), client: client(), wanted: quality,
-			accountCap: cap)
+	private func target(_ quality: AudioQuality = .default, id: String = "42") -> StreamTarget {
+		StreamUrls.target(for: ItemRef(server: server, id: id), client: client(), quality: quality)
 	}
 
 	@Test func addressesTheStreamEndpoint() {
@@ -82,30 +78,6 @@ struct StreamUrlsTests {
 		#expect(!built.url.absoluteString.contains("secret"))
 	}
 
-	// MARK: - Caps
-
-	/// The cap belongs to *this track's* server, so it arrives as a parameter
-	/// rather than being read from anywhere - a queue spanning servers crosses
-	/// caps at every boundary.
-	@Test func anAccountCapLowersTheRequestedBitrate() {
-		let built = target(.default, cap: 96)
-		#expect(query(built.url)["maxBitRate"] == "96")
-		#expect(built.quality.bitRate == 96)
-	}
-
-	@Test func aCapAboveTheRequestedQualityChangesNothing() {
-		#expect(query(target(.default, cap: 320).url)["maxBitRate"] == "160")
-	}
-
-	/// A capped account asking for the raw file is answered with MP3 at the
-	/// cap, so the request and the key must both say so.
-	@Test func theOriginalUnderACapBecomesMP3() {
-		let built = target(.original, cap: 128)
-		#expect(query(built.url)["format"] == "mp3")
-		#expect(query(built.url)["maxBitRate"] == "128")
-		#expect(built.cacheKey.hasSuffix("@mp3128"))
-	}
-
 	// MARK: - The cache key
 
 	@Test func theCacheKeyNamesTheRefAndTheQuality() {
@@ -118,10 +90,10 @@ struct StreamUrlsTests {
 	@Test func theCacheKeyIsStableAcrossSessions() {
 		let first = StreamUrls.target(
 			for: ItemRef(server: server, id: "42"), client: client(salt: "aaaa"),
-			wanted: .default, accountCap: 0)
+			quality: .default)
 		let second = StreamUrls.target(
 			for: ItemRef(server: server, id: "42"), client: client(salt: "bbbb"),
-			wanted: .default, accountCap: 0)
+			quality: .default)
 
 		#expect(first.url != second.url)
 		#expect(first.cacheKey == second.cacheKey)
@@ -129,12 +101,12 @@ struct StreamUrlsTests {
 
 	/// The URL and the key must move together: bytes filed under a name that
 	/// promises a different quality cannot be detected downstream.
-	@Test func aCapChangesTheUrlAndTheKeyTogether() {
-		let uncapped = target()
-		let capped = target(.default, cap: 96)
-		#expect(uncapped.url != capped.url)
-		#expect(uncapped.cacheKey != capped.cacheKey)
-		#expect(capped.cacheKey.hasSuffix("@m4a96"))
+	@Test func aCeilingChangesTheUrlAndTheKeyTogether() {
+		let at160 = target()
+		let at96 = target(AudioQuality(format: .m4a, bitRate: 96))
+		#expect(at160.url != at96.url)
+		#expect(at160.cacheKey != at96.cacheKey)
+		#expect(at96.cacheKey.hasSuffix("@m4a96"))
 	}
 
 	@Test func theSameSongOnTwoServersGivesTwoKeys() {
@@ -144,7 +116,7 @@ struct StreamUrlsTests {
 			client: SubsonicClient(
 				serverId: other, baseURL: URL(string: "http://other:4040")!,
 				auth: AuthParameters(username: "admin", password: "secret", salt: "aa11")),
-			wanted: .default, accountCap: 0)
+			quality: .default)
 		#expect(target().cacheKey != elsewhere.cacheKey)
 	}
 }

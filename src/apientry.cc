@@ -9,50 +9,28 @@
 
 using namespace tinyxml2;
 
-// What stream.view would actually send for this song, when that differs from
-// the stored file.  Mirrors the branch order in Streamer::serve() - a format
-// override wins over the per-user bitrate cap, and the cap alone means mp3.
-// Empty when the source is served as-is.
+// What stream.view would send for a video, when that differs from the stored
+// file.  Audio is never advertised: what it becomes depends on the format,
+// maxBitRate and playable of the stream request, which a listing cannot know.
 struct TranscodeInfo
 	{
 	std::string_view mime;
 	std::string_view suffix;
-	int              bitrate;
 	};
 
-static std::optional<TranscodeInfo> transcode_target(
-	const MediaStore::ChildEntry& c, int max_bitrate,
-	const std::string& format = "")
+static std::optional<TranscodeInfo> transcode_target(const MediaStore::ChildEntry& c)
 	{
-	// Video: the container is what changes, not the audio muxer, so none of
-	// the negotiation below applies.  Anything that is not already in a
-	// browser-playable container arrives as MP4, whether that took a remux or
-	// a full re-encode.  Whether it is *seekable* is a different question and
-	// is answered separately by nativeSeek - see song_entry_json().
-	if (is_video_ext(c.codec)) {
-		// Same predicate serve_video() picks its tier with, so the advertised
-		// type cannot disagree with what the stream turns out to be.
-		if (video_direct_playable(c.codec, c.video_codec, c.audio_codec))
-			return std::nullopt;   // served untouched
-		return TranscodeInfo{ VIDEO_MP4_MIME, "mp4", 0 };
-		}
-
-	auto source = target_for(c.codec);
-	std::optional<Target> wanted;
-	if (!format.empty() && format != "raw")
-		wanted = target_for(format);
-	// Same muxer and encoder is the same audio, whatever the caller spelled it.
-	if (wanted && (!source || source->muxer   != wanted->muxer
-	                       || source->encoder != wanted->encoder)) {
-		// Keep this rule identical to the one in Streamer::serve(); a client
-		// that trusts transcodedBitRate and then receives something else has
-		// no way to tell which of the two lied.
-		int bitrate = (max_bitrate > 0 && max_bitrate < 320) ? max_bitrate : 320;
-		return TranscodeInfo{ wanted->mime, wanted->name, bitrate };
-		}
-	if (max_bitrate <= 0 || c.bitrate <= 0 || c.bitrate <= max_bitrate)
-		return std::nullopt;
-	return TranscodeInfo{ "audio/mpeg", "mp3", max_bitrate };
+	// The container is what changes, not the audio muxer.  Anything that is
+	// not already in a browser-playable container arrives as MP4, whether that
+	// took a remux or a full re-encode.  Whether it is *seekable* is a
+	// different question and is answered separately by nativeSeek - see
+	// song_entry_json().
+	if (!is_video_ext(c.codec)) return std::nullopt;
+	// Same predicate serve_video() picks its tier with, so the advertised
+	// type cannot disagree with what the stream turns out to be.
+	if (video_direct_playable(c.codec, c.video_codec, c.audio_codec))
+		return std::nullopt;   // served untouched
+	return TranscodeInfo{ VIDEO_MP4_MIME, "mp4" };
 	}
 
 // The artist to report for a song: the file's own tag when it is a different
@@ -76,13 +54,10 @@ static std::string artist_of(const MediaStore::ChildEntry& c)
 	return tag_key == dir_key ? c.artist : c.track_artist;
 	}
 
-// Serialises a song ChildEntry into a JSON object.  When max_bitrate causes a
-// transcode, also emits transcodedContentType / transcodedSuffix (standard
-// Subsonic) and transcodedBitRate (gaindrive extension; ignored by clients
-// that don't know it) so the client knows the actual stream format.
-nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
-                               int max_bitrate,
-                               const std::string& format)
+// Serialises a song ChildEntry into a JSON object.  A video that would be
+// transcoded also gets transcodedContentType / transcodedSuffix, so the client
+// knows the actual stream format.
+nlohmann::json song_entry_json(const MediaStore::ChildEntry& c)
 	{
 	// Video rows live in the same table and come back through the same
 	// queries; the extension is what distinguishes them, so codecs.hh answers
@@ -135,12 +110,9 @@ nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 	// when the query that produced this entry does not select the dimensions.
 	if (c.width  > 0) s["originalWidth"]  = c.width;
 	if (c.height > 0) s["originalHeight"] = c.height;
-	if (auto t = transcode_target(c, max_bitrate, format)) {
+	if (auto t = transcode_target(c)) {
 		s["transcodedContentType"] = std::string(t->mime);
 		s["transcodedSuffix"]      = std::string(t->suffix);
-		// Video has no meaningful single bitrate to promise - the encode is
-		// CRF-driven - so the field is omitted rather than sent as 0.
-		if (t->bitrate > 0) s["transcodedBitRate"] = t->bitrate;
 		}
 	// gaindrive extension.  Says whether the stream this entry would produce
 	// carries a Content-Length and answers Range requests, so the client can
@@ -172,9 +144,7 @@ nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
 // Creates an XML element for a song with the given tag name.
 XMLElement* song_entry_xml(XMLDocument& doc,
                            const MediaStore::ChildEntry& c,
-                           const char* tag,
-                           int max_bitrate,
-                           const std::string& format)
+                           const char* tag)
 	{
 	bool  is_video = is_video_ext(c.codec);
 	auto* el = doc.NewElement(tag);
@@ -208,11 +178,9 @@ XMLElement* song_entry_xml(XMLDocument& doc,
 	if (c.season > 0) el->SetAttribute("season", c.season);
 	if (!c.starred.empty())
 		el->SetAttribute("starred", iso8601(c.starred).c_str());
-	if (auto t = transcode_target(c, max_bitrate, format)) {
+	if (auto t = transcode_target(c)) {
 		el->SetAttribute("transcodedContentType", std::string(t->mime).c_str());
 		el->SetAttribute("transcodedSuffix",      std::string(t->suffix).c_str());
-		if (t->bitrate > 0)
-			el->SetAttribute("transcodedBitRate", t->bitrate);
 		}
 	if (is_video)
 		el->SetAttribute("nativeSeek",
@@ -245,26 +213,14 @@ Streamer::SongInfo streamer_song(const MediaStore::SongInfo& s,
 	return si;
 	}
 
-// Looks up the authenticated user's max_bitrate so song entries can advertise
-// the transcoded* fields.  Must be called only after check_auth has succeeded.
-// Returns 0 (= unlimited / no transcode) if the user record can't be read.
-int request_max_bitrate(const httplib::Request& req, MediaStore& store)
-	{
-	auto it = req.params.find("u");
-	if (it == req.params.end()) return 0;
-	auto u = store.get_user(it->second);
-	return u ? u->max_bitrate : 0;
-	}
-
 // Builds the full subsonic response body for a playlist with its songs.
-std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_json,
-                          int max_bitrate)
+std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_json)
 	{
 	if (use_json)
-		return subsonic_ok_json([&pl, max_bitrate](nlohmann::json& r) {
+		return subsonic_ok_json([&pl](nlohmann::json& r) {
 			nlohmann::json entries = nlohmann::json::array();
 			for (auto& c : pl.songs)
-				entries.push_back(song_entry_json(c, max_bitrate));
+				entries.push_back(song_entry_json(c));
 			r["playlist"] = {
 				{"id",        sid(pl.id)},
 				{"name",      pl.name},
@@ -278,7 +234,7 @@ std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_json,
 				{"entry",     entries}
 				};
 			});
-	return subsonic_ok([&pl, max_bitrate](XMLDocument& doc, XMLElement* root) {
+	return subsonic_ok([&pl](XMLDocument& doc, XMLElement* root) {
 		auto* playlist = doc.NewElement("playlist");
 		playlist->SetAttribute("id",        pl.id);
 		playlist->SetAttribute("name",      pl.name.c_str());
@@ -290,7 +246,7 @@ std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_json,
 		playlist->SetAttribute("created",   iso8601(pl.created).c_str());
 		playlist->SetAttribute("changed",   iso8601(pl.updated).c_str());
 		for (auto& c : pl.songs)
-			playlist->InsertEndChild(song_entry_xml(doc, c, "entry", max_bitrate));
+			playlist->InsertEndChild(song_entry_xml(doc, c, "entry"));
 		root->InsertEndChild(playlist);
 		});
 	}

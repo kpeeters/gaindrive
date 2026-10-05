@@ -11,11 +11,10 @@ import SwiftUI
 /// What this track is, and what was asked of the server for it - the
 /// counterpart of `ui/player/TrackInfoDialog.kt`.
 ///
-/// The last row is the reason the screen exists. "Why does this sound different
-/// here" is answerable only from the **capped** quality: the account ceiling
-/// belongs to that track's own server, is applied per track, and appears on no
-/// settings screen. Everything above it is on the row already and is here so
-/// the answer arrives with its context.
+/// The last row says what was asked of the server, which with a receiver in
+/// use is the cast route's setting rather than the playback one. Everything
+/// above it is on the row already and is here so the answer arrives with its
+/// context.
 struct TrackInfoView: View {
 	let song: Song
 
@@ -79,15 +78,14 @@ struct TrackInfoView: View {
 	private var delivery: [Fact] {
 		var facts: [Fact] = [
 			Fact("Stored", stored),
-			// **Where, before what.** With a receiver in the picture "Sent" is
+			// **Where, before what.** With a receiver in the picture "Asked for" is
 			// answering a different question - what went over the network to
 			// something else - and reading it without knowing that is how "why
 			// does this sound different" acquires a wrong answer.
 			Fact("Playing on", player.castDevice?.name),
-			// nil while the account ceiling is still being asked for, which is
-			// a request to that track's own server and can be the slow half of
-			// a first play.
-			Fact("Sent", sent?.label),
+			// What was asked for, not what arrived: within the ceiling a
+			// file this device plays is sent as stored, whatever the format.
+			Fact("Asked for", sent?.label),
 		]
 		if player.castSendsSoundOnly { facts.append(Fact("Picture", "Not sent")) }
 		return facts

@@ -163,6 +163,20 @@ static std::string playable_log(const Playable& p)
 	return out.empty() ? "none" : out;
 	}
 
+// The rate a file is compared against maxBitRate with, in kbps; 0 when
+// nothing is known.  The scanned bitrate first, because the file size also
+// counts embedded artwork: a 1 MB cover on a three-minute MP3 adds 44 kbps,
+// which alone would push an ordinary 128 kbps file over a 128 cap.  The size
+// is the fallback for a row the scan left at 0, mostly FLAC without a bitrate
+// tag, which would otherwise never count as over any cap.
+static int effective_kbps(const Streamer::SongInfo& song)
+	{
+	if (song.bitrate > 0) return song.bitrate;
+	if (song.file_size <= 0 || song.duration <= 0) return 0;
+	return static_cast<int>(static_cast<double>(song.file_size) * 8.0
+	                        / song.duration / 1000.0);
+	}
+
 Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
                                                  const std::string& format,
                                                  int max_bitrate,
@@ -171,28 +185,78 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 	{
 	auto source = target_for(song.codec);
 
-	// The client said it can take this file as it sits on disk, so the format
-	// it also asked for is a preference rather than a requirement -- see
-	// audio_declared() in codecs.hh for what a declaration promises.
+	std::optional<Target> wanted;
+	if (!format.empty() && format != "raw")
+		wanted = target_for(format);
+
+	// maxBitRate is a rough ceiling, not an exact one: lossy files rarely sit
+	// on round numbers (a "128" VBR MP3 reports anything from 115 to 140), and
+	// re-encoding one that is a few percent over saves little and adds a
+	// second generation of loss.  Hence the 10% slack.
+	const int  rate = effective_kbps(song);
+	const bool over = max_bitrate > 0 && rate > 0
+	               && static_cast<long>(rate) * 10 > static_cast<long>(max_bitrate) * 11;
+	// A lossy encode never goes above 320, whatever the ceiling.  For a
+	// lossless target the figure is not a bitrate at all: -b:a is meaningless
+	// there and ffmpeg_argv() does not pass it; it only has to be non-zero,
+	// which is what tells that function to encode rather than copy.  Reported
+	// to clients as 0, since a number that describes nothing is worse than no
+	// number.
+	const int  lossy_rate = (max_bitrate > 0 && max_bitrate < 320) ? max_bitrate : 320;
+	const auto fallback   = wanted ? wanted : target_for("mp3");
+
+	// What to encode to, if anything.  Two rule sets, chosen by whether the
+	// client said what it can be sent untouched.
 	//
 	// !is_video is load-bearing rather than tidiness.  An audio-only request
 	// against a film reaches here with is_video set, and there `format` names
 	// the soundtrack the client wants extracted; honouring a declaration would
 	// hand it the film's own codec instead of the one it asked for.
-	bool declared = !song.is_video
-	             && audio_declared({ song.audio_container, song.audio_codec },
-	                               playable);
+	std::optional<Target> to;
+	int                   to_rate = 0;
+	if (!song.is_video && !playable.empty()) {
+		// A gaindrive client.  `format` is only a preference for when an
+		// encode cannot be avoided, and `maxBitRate` 0 means "the original,
+		// unless I cannot play it" - see audio_declared() in codecs.hh for what
+		// a declaration promises.
+		bool declared = audio_declared({ song.audio_container, song.audio_codec },
+		                               playable);
+		if (declared && !over) {
+			// Untouched, lossless included: a FLAC under the ceiling is
+			// smaller than what was allowed, so there is nothing to save.
+			}
+		else if (max_bitrate > 0) {
+			to      = fallback;
+			to_rate = lossy_rate;
+			}
+		else if (playable.count("flac/flac")) {
+			// The original was asked for and cannot be played.  FLAC rather
+			// than a high-rate lossy encode, for the reason
+			// CAST_AUDIO_ONLY_FORMAT gives: a lossless source loses nothing,
+			// and a lossy one is not given a second generation of loss.
+			to      = target_for("flac");
+			to_rate = 320;
+			}
+		else {
+			to      = fallback;
+			to_rate = 320;
+			}
+		}
+	else {
+		// Everybody else, third-party Subsonic clients included: `format` is a
+		// demand, and maxBitRate alone means the format, or mp3 when none was
+		// named.
+		if (wanted)    { to = wanted;   to_rate = wanted->lossy ? lossy_rate : 320; }
+		else if (over) { to = fallback; to_rate = lossy_rate; }
+		}
 
-	// A format request that resolves to the same muxer and encoder as the
-	// source is not a change: ".oga" and "ogg" are the same thing spelled two
-	// ways, and re-encoding one into the other would lose quality for nothing.
-	std::optional<Target> wanted;
-	if (!format.empty() && format != "raw")
-		wanted = target_for(format);
-	bool format_change = wanted && !declared && (!source
-	                     || source->muxer   != wanted->muxer
-	                     || source->encoder != wanted->encoder);
-	bool bitrate_limit = max_bitrate > 0 && song.bitrate > 0 && song.bitrate > max_bitrate;
+	// A target that resolves to the same muxer and encoder as the source is not
+	// a change unless the ceiling forces a re-encode: ".oga" and "ogg" are the
+	// same thing spelled two ways, and re-encoding one into the other would
+	// lose quality for nothing.
+	if (to && source && !over
+	    && source->muxer == to->muxer && source->encoder == to->encoder)
+		to.reset();
 
 	// A video's soundtrack already in a codec the requested container can hold
 	// is a remux, not an encode - see audio_copy_target() in codecs.hh for
@@ -213,7 +277,7 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 	               && copy_t->name == wanted->name;
 
 	TranscodePlan plan;
-	plan.needed = time_offset > 0 || format_change || bitrate_limit;
+	plan.needed = time_offset > 0 || to.has_value();
 
 	// When only a time-offset seek is needed (no format conversion, no bitrate
 	// limit) preserve the original codec via ffmpeg -c:a copy so there is no
@@ -223,22 +287,9 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 		plan.target  = wanted;
 		plan.bitrate = 0;
 		}
-	else if (format_change) {
-		plan.target = wanted;
-		// For a *lossless* target this is not a bitrate at all.  -b:a is
-		// meaningless there and ffmpeg_argv() does not pass it; the figure only
-		// has to be non-zero, which is what tells that function to encode
-		// rather than copy.  Pinned rather than following the account ceiling,
-		// so a given file has one cache key whoever asks for it - and reported
-		// to clients as 0, since a number that describes nothing is worse than
-		// no number.
-		plan.bitrate = wanted->lossy
-		    ? ((max_bitrate > 0 && max_bitrate < 320) ? max_bitrate : 320)
-		    : 320;
-		}
-	else if (bitrate_limit) {
-		plan.target  = target_for("mp3");
-		plan.bitrate = max_bitrate;
+	else if (to) {
+		plan.target  = to;
+		plan.bitrate = to_rate;
 		}
 	else {
 		plan.target  = source;

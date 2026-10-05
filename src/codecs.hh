@@ -229,8 +229,7 @@ bool video_direct_playable_for(std::string_view container,
                                std::string_view audio_codec,
                                const Playable& client);
 
-// The audio twin: whether this client asked to be sent this file as it sits on
-// disk, rather than an encode of it.
+// The audio twin: whether this client can play this file as it sits on disk.
 //
 // A separate function from video_direct_playable_for() rather than a fourth
 // argument on it, for the reason that one already documents -- two callers that
@@ -238,12 +237,10 @@ bool video_direct_playable_for(std::string_view container,
 // The questions differ anyway: video widens a *container* test and keeps the
 // server's codec rule, while here the client supplies the codec rule itself.
 //
-// **Declaring something means "send me this", not merely "I can decode this".**
-// A client that asked for Opus 160 and also declares flac gets FLAC, which is
-// the opposite of what it asked for -- so it must not declare flac.  The server
-// deliberately has no guard against that: a guard would be the server
-// second-guessing the one party that knows, which is the whole thing this
-// parameter exists to stop.
+// **A declaration is a capability, not a request for the file.**  Size is the
+// job of maxBitRate: a declared file is sent untouched only when it is within
+// that ceiling, so a client may declare FLAC whatever quality it asked for.
+// See Streamer::plan_transcode() for the whole rule.
 //
 // Neither half is validated against a table.  Both are compared verbatim
 // against what the scan stored, so a spelling this server does not use simply
@@ -257,10 +254,9 @@ bool audio_declared(const AudioForm& form, const Playable& client);
 // How a Chromecast is sent a video: the file as it stands, or as HLS.
 //
 // A cast URL carries no format, no size, no maxBitRate and no timeOffset - the
-// receiver seeks natively and the account ceiling is skipped for a cast token -
-// so the answer follows from the file alone.  That is what makes it answerable
-// before a byte is served, which the LOAD needs: it announces a contentType in
-// advance.  Written on video_seeks_natively() *and* video_direct_playable(), as
+// receiver seeks natively - so the answer follows from the file alone.  That is
+// what makes it answerable before a byte is served, which the LOAD needs: it
+// announces a contentType in advance.  Written on video_seeks_natively() *and* video_direct_playable(), as
 // serve_video() writes its direct tier, so a receiver is never sent untouched
 // a file serve_video() would not send untouched.  It is stricter in one way:
 // AV1 goes as HLS, since browsers decode it and most receivers do not.

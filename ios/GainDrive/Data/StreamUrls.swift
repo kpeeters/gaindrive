@@ -57,15 +57,10 @@ enum CacheKeys {
 /// a request - the same shape as `SubsonicClient.url`, `AuthParameters` and
 /// `CoverUrls`.
 enum StreamUrls {
-	/// The account ceiling is passed in rather than looked up, because it
-	/// belongs to **this track's** server. A queue may span servers and crosses
-	/// caps at every boundary, so there is no single "current" cap to read and
-	/// nothing here may close over one.
 	static func target(
-		for ref: ItemRef, client: SubsonicClient, wanted: AudioQuality, accountCap: Int,
+		for ref: ItemRef, client: SubsonicClient, quality: AudioQuality,
 		playable: Set<String> = []
 	) -> StreamTarget {
-		let quality = wanted.cappedBy(accountCap)
 		let parameters = audioParameters(
 			id: ref.id, quality: quality, playable: playable)
 		// Two parameters are never sent at all, and both omissions are
@@ -99,8 +94,8 @@ enum StreamUrls {
 	/// `LOAD` announced the transcode's type, and refuses the media outright.
 	///
 	/// `format` and `maxBitRate` go together or not at all, and are what the
-	/// declaration is *not*: they say what to produce, `playable` says what to
-	/// leave alone, and the two are independent.
+	/// declaration is *not*: they say what to produce, `playable` says what
+	/// this device can play as stored.
 	///
 	/// Sorted for the reason the video list is: a `Set` promises no iteration
 	/// order, and one request must not be able to build two different URLs.
@@ -117,7 +112,8 @@ enum StreamUrls {
 			p["maxBitRate"] = String(quality.bitRate)
 		}
 		// For the original neither is sent: the server serves the file with no
-		// ffmpeg involved at all.
+		// ffmpeg involved at all, unless `playable` says this device cannot
+		// play it, in which case it arrives as FLAC.
 		if !playable.isEmpty {
 			p["playable"] = playable.sorted().joined(separator: ",")
 		}

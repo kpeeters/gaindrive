@@ -243,7 +243,6 @@ private struct TestResultRow: View {
 			var roles: [String] = []
 			if user.isAdmin { roles.append("admin") }
 			if user.canUpload { roles.append("upload") }
-			if let limit = user.maxBitRate, limit > 0 { roles.append("max \(limit) kbps") }
 			return roles.isEmpty ? nil : roles.joined(separator: ", ")
 		case .unverified:
 			return "The server did not report account details."

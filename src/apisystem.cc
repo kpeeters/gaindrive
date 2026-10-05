@@ -301,7 +301,6 @@ void GainDrive::routes_system()
 					{"streamRole",        true},
 					{"jukeboxRole",       false},
 					{"shareRole",         false},
-					{"maxBitRate",        ui->max_bitrate},
 					{"disabled",          ui->disabled},
 					{"castRole",          ui->cast_allowed}
 					};
@@ -323,7 +322,6 @@ void GainDrive::routes_system()
 				u->SetAttribute("streamRole",        true);
 				u->SetAttribute("jukeboxRole",       false);
 				u->SetAttribute("shareRole",         false);
-				u->SetAttribute("maxBitRate",        ui->max_bitrate);
 				u->SetAttribute("disabled",          ui->disabled);
 				u->SetAttribute("castRole",          ui->cast_allowed);
 				root->InsertEndChild(u);
@@ -366,7 +364,6 @@ void GainDrive::routes_system()
 						{"streamRole",        true},
 						{"jukeboxRole",       false},
 						{"shareRole",         false},
-						{"maxBitRate",        u.max_bitrate},
 						{"disabled",          u.disabled},
 				{"castRole",          u.cast_allowed}
 						});
@@ -391,7 +388,6 @@ void GainDrive::routes_system()
 					ue->SetAttribute("streamRole",        true);
 					ue->SetAttribute("jukeboxRole",       false);
 					ue->SetAttribute("shareRole",         false);
-					ue->SetAttribute("maxBitRate",        u.max_bitrate);
 					ue->SetAttribute("disabled",          u.disabled);
 					ue->SetAttribute("castRole",          u.cast_allowed);
 					us->InsertEndChild(ue);
@@ -435,14 +431,12 @@ void GainDrive::routes_system()
 		bool upload_allowed = (qp("uploadRole") == "true");
 		bool disabled       = (qp("disabled")   == "true");
 		bool cast_allowed   = (qp("castRole")   == "true");
-		int  max_bitrate    = 0;
-		if (!qp("maxBitRate").empty()) max_bitrate = to_int(qp("maxBitRate"), 0);
 
 		if (!store_.add_user(username, password, is_admin)) {
 			err(0, "User already exists.");
 			return;
 			}
-		store_.update_user(username, "", qp("email"), is_admin, max_bitrate, upload_allowed, disabled, cast_allowed);
+		store_.update_user(username, "", qp("email"), is_admin, upload_allowed, disabled, cast_allowed);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -476,7 +470,6 @@ void GainDrive::routes_system()
 		bool upload_allowed = qp("uploadRole").empty() ? existing->upload_allowed : (qp("uploadRole") == "true");
 		bool disabled       = qp("disabled").empty()   ? existing->disabled       : (qp("disabled")   == "true");
 		bool cast_allowed   = qp("castRole").empty()   ? existing->cast_allowed   : (qp("castRole")   == "true");
-		int  max_bitrate    = qp("maxBitRate").empty()  ? existing->max_bitrate    : std::max(0, to_int(qp("maxBitRate"), existing->max_bitrate));
 		std::string email   = qp("email").empty()       ? existing->email          : qp("email");
 		// enc: decoded before storing, as in createUser.
 		auto pw_dec = MediaStore::decode_enc_password(qp("password"));
@@ -487,7 +480,7 @@ void GainDrive::routes_system()
 		if (username == qp("u") && disabled)
 			{ err(0, "You cannot disable your own account."); return; }
 
-		store_.update_user(username, pw, email, is_admin, max_bitrate, upload_allowed, disabled, cast_allowed);
+		store_.update_user(username, pw, email, is_admin, upload_allowed, disabled, cast_allowed);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -526,7 +519,7 @@ void GainDrive::routes_system()
 		if (!existing) { err(70, "User not found."); return; }
 
 		store_.update_user(target, password, existing->email, existing->is_admin,
-		                   existing->max_bitrate, existing->upload_allowed, existing->disabled,
+		                   existing->upload_allowed, existing->disabled,
 		                   existing->cast_allowed);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();

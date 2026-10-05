@@ -39,11 +39,17 @@ actor TranscodePrewarmer {
 	}
 
 	func warm(_ target: StreamTarget) async {
-		// The original is served straight off disk with no ffmpeg involved, so
-		// there is no transcode to build and nothing to wait for. That covers
-		// every film too, whose target always says `.original`: the server
-		// sends it as the file or as a stream made while it is read.
-		guard target.quality.format != .original else { return }
+		// Without a `format` the file is served straight off disk with no
+		// ffmpeg involved, so there is no transcode to build and nothing to
+		// wait for. That covers every film too: the server sends it as the
+		// file or as a stream made while it is read. The URL rather than the
+		// quality, because a cast of an original the receiver cannot play
+		// says `.original` and still asks for FLAC.
+		//
+		// Not warmed, and accepted: an original this device cannot play, which
+		// the server converts to FLAC on the strength of `playable` alone. It
+		// is rare, and the wait happens when the track is reached.
+		guard hasFormat(target.url) else { return }
 		// A stream from an offset is piped and builds no cache file, so there
 		// is nothing to warm, and a GET would read the whole of it.
 		guard !hasTimeOffset(target.url) else { return }
@@ -88,4 +94,10 @@ actor TranscodePrewarmer {
 			attempted.remove(claim)
 		}
 	}
+}
+
+/// Whether a URL names a `format`, which is what makes the server transcode.
+private func hasFormat(_ url: URL) -> Bool {
+	URLComponents(url: url, resolvingAgainstBaseURL: false)?
+		.queryItems?.contains { $0.name == "format" } == true
 }

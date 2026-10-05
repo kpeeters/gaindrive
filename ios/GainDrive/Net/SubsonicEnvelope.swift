@@ -82,7 +82,6 @@ struct SubsonicUser: Decodable, Sendable, Equatable {
 	let castRole: Bool?
 	let downloadRole: Bool?
 	let disabled: Bool?
-	let maxBitRate: Int?
 
 	/// Roles are per server: the same person can be an admin on one and a
 	/// restricted account on another, so any UI gated on a role is gated on

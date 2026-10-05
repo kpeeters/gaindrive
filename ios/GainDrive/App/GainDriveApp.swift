@@ -65,7 +65,7 @@ struct GainDriveApp: App {
 		// Downloads. `StreamTargets` is shared with the player deliberately:
 		// a download that asked for different bytes than a play would store
 		// them under a key nothing looks for.
-		let targets = StreamTargets(registry: registry, settings: settings, accounts: accounts)
+		let targets = StreamTargets(registry: registry, settings: settings)
 		let queue = DownloadQueue(store: store)
 		let pins = PinRepository(
 			library: library, store: store, queue: queue, targets: targets, settings: settings,

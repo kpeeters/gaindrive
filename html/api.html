@@ -288,21 +288,6 @@
 <p><code>isVideo</code> is a property of a <em>song</em>, so nothing on an album entry otherwise says that opening it will start a film - a client would have to fetch every album&#x27;s tracks to find out. A count rather than a flag because the two cases differ: a folder holding one bonus documentary beside its songs is not a folder of films, and <code>videoCount</code> equal to <code>songCount</code> is what a season of a series or a film looks like.</p>
 <div class="note"><p>The album entries returned by <code>getMusicDirectory</code>, <code>getStarred</code>, <code>getStarred2</code>, <code>search2</code> and <code>search3</code> do <b>not</b> carry it, so its absence there is not a claim that an album has no video.</p></div></div>
 </div>
-<div class="api-ep">
-<h3 id="ep-any-endpoint-returning-song-entries">any endpoint returning song entries</h3>
-<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
-<p>Carried by <code>any endpoint returning song entries</code>. Only the gaindrive additions are listed here.</p>
-<p>One extra field on every song entry.</p>
-<h4>Response</h4>
-<table class="doc-table">
-<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
-<tbody>
-<tr><td><code>transcodedBitRate</code> <span class="api-on">on Child</span></td><td>int</td><td>The bitrate the stream would carry, in kbps, when this entry would be transcoded.</td></tr>
-</tbody>
-</table>
-<div class="api-note"><p class="api-note-h"><code>transcodedBitRate</code></p>
-<p>Subsonic defines <code>transcodedContentType</code> and <code>transcodedSuffix</code> but no bitrate, so a client could see that a track would be converted without being able to say to what. It is computed the same way <code>stream</code> decides, including the account&#x27;s own ceiling, so the two cannot disagree.</p></div>
-</div>
 </div>
 <div class="doc-sec" id="playback">
 <h2>Playback</h2>
@@ -349,7 +334,7 @@
 <tr><td><code>castRedirect</code></td><td>bool</td><td>Send <code>false</code> to be served the stream even though you own the live cast session. default <code>true</code>.</td></tr>
 <tr><td><code>size</code></td><td>string</td><td>Video only. A cap on the output frame size, as <code>WxH</code> - <code>640x480</code>.</td></tr>
 <tr><td><code>duration</code></td><td>int</td><td>Video only. Bound the output to this many seconds from <code>timeOffset</code>, and switch the container to MPEG-TS. That is one HLS segment.</td></tr>
-<tr><td><code>playable</code></td><td>string</td><td>A comma list of what this client can be sent untouched, so the server skips work it would otherwise pay - <code>mpeg/mp3,mp4/aac</code> for audio, <code>mkv,mov,avi</code> for video.</td></tr>
+<tr><td><code>playable</code></td><td>string</td><td>A comma list of what this client can play as stored, so the server skips work it would otherwise pay - <code>mpeg/mp3,mp4/aac,flac/flac</code> for audio, <code>mkv,mov,avi</code> for video.</td></tr>
 <tr><td><code>startImmediately</code></td><td>bool</td><td>Video only. Be sent a stream that starts at once rather than one that can be seeked, when the two conflict.</td></tr>
 </tbody>
 </table>
@@ -362,7 +347,7 @@
 <div class="api-note"><p class="api-note-h"><code>castToken</code></p>
 <p>A receiver fetches the media for itself and has no account, so the token is what authorises it. It is not single-use per request - the receiver makes many range requests for one track - but it <b>is</b> scoped to one song and to a limited lifetime. Presenting it for a different <code>id</code> is refused as though it were absent.</p>
 <p><b>Two different tokens travel on this parameter</b>, and a URL looks the same whichever issued it. They are not interchangeable behind it:</p>
-<ul class="doc-list"><li><code>castLoad</code>&#x27;s belongs to the server&#x27;s own cast session. There is genuinely no account behind a request carrying it, so it skips the account bitrate ceiling, and the request is also subject to the session&#x27;s own offset - the receiver probes with <code>timeOffset</code> stripped, and the server answers from what the <code>LOAD</code> declared rather than from the URL. On <code>getCaptions</code> it authorises the caption ids that <code>LOAD</code> declared, and nothing else.</li><li><code>getCastToken</code>&#x27;s belongs to an account, for a cast some <em>other</em> sender is driving. So the ceiling <b>is</b> applied - there is somebody to apply it to - and nothing about a session applies: such a request is an ordinary one that happens to carry a token where a password would be, <code>timeOffset</code> and all. It also reaches <code>getCoverArt</code>, which the session token does not, because the server&#x27;s own cast sends a receiver no artwork and a client&#x27;s does.</li></ul></div>
+<ul class="doc-list"><li><code>castLoad</code>&#x27;s belongs to the server&#x27;s own cast session. A request carrying it is subject to the session&#x27;s own offset - the receiver probes with <code>timeOffset</code> stripped, and the server answers from what the <code>LOAD</code> declared rather than from the URL. On <code>getCaptions</code> it authorises the caption ids that <code>LOAD</code> declared, and nothing else.</li><li><code>getCastToken</code>&#x27;s belongs to an account, for a cast some <em>other</em> sender is driving. Nothing about a session applies: such a request is an ordinary one that happens to carry a token where a password would be, <code>timeOffset</code> and all. It also reaches <code>getCoverArt</code>, which the session token does not, because the server&#x27;s own cast sends a receiver no artwork and a client&#x27;s does.</li></ul></div>
 <div class="api-note"><p class="api-note-h"><code>castController</code></p>
 <p>While a cast session is live, a request from the client that <b>owns</b> it is answered <code>204</code> and the track is sent to the Chromecast instead, so that client does not play it a second time itself. Every other caller - a client that sent no <code>castController</code>, one whose id does not match, or a different account - is served the stream normally.</p>
 <p>Without this the redirect was global: any request in the server was answered <code>204</code> while anyone was casting, so starting a track on a phone played it on whatever receiver a browser had picked earlier.</p></div>
@@ -379,10 +364,12 @@
 <p>That is why audio has no bare form. A <code>.ogg</code> and a <code>.oga</code> are one container under two extensions, and a <code>.m4a</code> is an MP4 - so a token naming an extension would reach some of a container&#x27;s files and not others. Naming the container itself, <code>ogg</code> or <code>mp4</code>, reaches all of them, and <code>mp3</code> alongside <code>mpeg/mp3</code> would be two spellings of one thing.</p>
 <p>Containers are the real ones: <code>mpeg</code>, <code>flac</code>, <code>ogg</code>, <code>mp4</code>, <code>adts</code>, <code>riff</code>, <code>asf</code>. Codec names are lowercase and spelled as ffprobe spells them: <code>mp3</code>, <code>aac</code>, <code>alac</code>, <code>vorbis</code>, <code>opus</code>, <code>flac</code>, <code>speex</code>, <code>pcm</code>.</p>
 <p>Neither half is checked against a list. Both are compared for equality with what was stored, so a spelling this server does not use simply never matches and the file is converted exactly as it was before.</p>
-<p><b>Declaring something means &quot;send me this&quot;, not &quot;I can decode this.&quot;</b> They are different claims, and only the second is about your decoder. A client set to Opus 160 that also declares <code>flac</code> will be sent FLAC, which is the opposite of what it asked for. There is deliberately no server-side guard against that: a guard would be the server overruling the one party that knows what it wants.</p>
-<p>What it does is narrow, and deliberately so.</p>
-<ul class="doc-list"><li>It <b>only ever skips work</b>. On audio it skips a re-encode, on video a remux; it never changes what a transcode produces when one happens.</li><li>It <b>never beats a constraint</b>. <code>maxBitRate</code> and <code>timeOffset</code> each force a transcode, and <code>size</code> and <code>duration</code> do on video. A declared 320 kbps MP3 under a 160 ceiling is still converted.</li><li>On video the codec pair still has to be one the server would have served directly anyway, so an HEVC or AC3 file is unaffected - the saving is the container work alone.</li><li>An unrecognised token is ignored rather than rejected, so naming a new one costs nothing against an older server.</li><li><code>vob</code> is <b>refused</b>. A DVD titleset is one continuous stream split across numbered VOBs and the stored path names only the first, so serving it untouched would hand back twenty minutes of a two-hour film with nothing reporting an error.</li><li>A pair naming <code>riff</code> or <code>asf</code> will never match. Those forms are recorded, but a client that wants a lossless or legacy file untouched asks for the original instead - no <code>format</code> at all, which is served straight off disk.</li></ul>
-<p><code>transcodedContentType</code>, <code>transcodedSuffix</code>, <code>transcodedBitRate</code> and <code>nativeSeek</code> are <b>not</b> affected by it, deliberately. They describe what any client would be sent, so they stay cacheable and stay right for the one consumer that is not you - a Cast receiver being told what it is about to fetch.</p>
+<p><b>On audio, a declaration changes what <code>format</code> and <code>maxBitRate</code> mean.</b> Declare everything you can decode, lossless included; size is the job of <code>maxBitRate</code>, which is a rough ceiling (a file up to 10% over it counts as within it) and <code>0</code> for &quot;the original&quot;. <code>format</code> becomes the encoder to use when an encode cannot be avoided, never a demand. The server then decides:</p>
+<ul class="doc-list"><li><b>Declared and within the ceiling</b>: sent untouched, whatever the codec. A FLAC under the ceiling is smaller than what was allowed.</li><li><b>Over the ceiling, or not declared, with a ceiling</b>: <code>format</code> at the ceiling (at most 320).</li><li><b>Not declared, no ceiling</b>: FLAC when <code>flac/flac</code> is declared, so a lossy file the client cannot play gets no second generation of loss; otherwise <code>format</code> at 320.</li></ul>
+<p>The bitrate compared is the scanned one, or, where the scan recorded none, the file size over the duration. Without any audio declaration, <code>format</code> is a demand as in Subsonic, and <code>maxBitRate</code> alone converts to MP3 when the file is over it.</p>
+<p>On video it <b>only ever skips work</b>: a remux, never a change to what a transcode produces. <code>size</code>, <code>duration</code>, <code>maxBitRate</code> and <code>timeOffset</code> each still force an encode there, as <code>timeOffset</code> does on audio.</p>
+<ul class="doc-list"><li>On video the codec pair still has to be one the server would have served directly anyway, so an HEVC or AC3 file is unaffected - the saving is the container work alone.</li><li>An unrecognised token is ignored rather than rejected, so naming a new one costs nothing against an older server.</li><li><code>vob</code> is <b>refused</b>. A DVD titleset is one continuous stream split across numbered VOBs and the stored path names only the first, so serving it untouched would hand back twenty minutes of a two-hour film with nothing reporting an error.</li><li>A pair naming <code>riff</code> or <code>asf</code> will never match. Those forms are recorded, but a client that wants such a file untouched sends no declaration and no <code>format</code> at all, which is served straight off disk.</li></ul>
+<p><code>transcodedContentType</code>, <code>transcodedSuffix</code> and <code>nativeSeek</code> are <b>not</b> affected by it, deliberately. They describe what any client would be sent, so they stay cacheable and stay right for the one consumer that is not you - a Cast receiver being told what it is about to fetch.</p>
 <p>Ignored when a <code>castToken</code> is presented, and ignored on <code>hls.m3u8</code>, where every segment is bounded by <code>duration</code> and is therefore an encode whatever the container holds.</p>
 <div class="note"><p><b>Never put this on a URL you are handing to something else</b> - a Cast receiver above all. The <code>LOAD</code> you sent it declared a <code>contentType</code> taken from <code>transcodedContentType</code>, and a receiver told <code>video/mp4</code> while being sent Matroska refuses the media outright, which looks like a broken file rather than a mislabelled one. The audio half is no safer: the same <code>LOAD</code> named the type the transcode was going to produce. Apply it where the request is made, not where the URL is built.</p></div></div>
 <div class="api-note"><p class="api-note-h"><code>startImmediately</code></p>
@@ -972,7 +959,7 @@
 <h3 id="ep-getuser-getusers-createuser-updateuser">getUser / getUsers / createUser / updateUser</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
 <p>Carried by <code>getUser</code>, <code>getUsers</code>, <code>createUser</code>, <code>updateUser</code>. Only the gaindrive additions are listed here.</p>
-<p>One role Subsonic does not define.</p>
+<p>One role Subsonic does not define, and no bitrate limit.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -990,6 +977,7 @@
 </tbody>
 </table>
 <p>Roles gaindrive does not implement are still reported, with fixed values, so that clients expecting them do not break. That behaviour is standard-shaped and documented with the endpoints themselves.</p>
+<p><code>maxBitRate</code> is not reported, and is ignored on <code>createUser</code> and <code>updateUser</code>. A bitrate limit belongs to the player, which knows its own network and storage, and it says so with <code>maxBitRate</code> on <code>stream</code>.</p>
 </div>
 </div>
 <div class="doc-sec" id="upload">
@@ -1357,9 +1345,8 @@ and is the info-panel&#x27;s business, not the picture&#x27;s.
 <tr><td><code>castLoad.contentType</code></td><td>string</td><td>The <code>contentType</code> declared in the Cast <code>LOAD</code>, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as <code>video/mp4</code>, and a VP9/Opus <code>.mkv</code> is announced as <code>video/webm</code> although its bytes go out untouched.</td></tr>
 <tr><td><code>castLoad.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two. A soundtrack reports whatever it was put in: <code>m4a</code>, <code>mp3</code>, <code>flac</code>, <code>opus</code> or <code>ogg</code> when the track was copied, and <code>flac</code> when it had to be encoded.</td></tr>
 <tr><td><code>castLoad.sentBitRate</code></td><td>int</td><td>Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
-file byte-ranged - no <code>format</code>, no <code>maxBitRate</code>, and the account ceiling is
-exempt for a cast token - so this is the file&#x27;s own bitrate rather than anything
-the <code>transcoded*</code> fields describe. A video remux keeps the source&#x27;s rate and a
+file byte-ranged - no <code>format</code> and no <code>maxBitRate</code> - so this is the file&#x27;s own
+bitrate rather than anything the <code>transcoded*</code> fields describe. A video remux keeps the source&#x27;s rate and a
 re-encode is not fixed-rate, so both report 0. So does a copied soundtrack - the
 track&#x27;s own rate is not the container&#x27;s, and nearly right is the worst thing a
 diagnostic can be - and so does an encoded one, FLAC having no target rate at
@@ -1449,9 +1436,8 @@ session has no device list to look the id up in.
 <tr><td><code>castSession.contentType</code></td><td>string</td><td>The <code>contentType</code> declared in the Cast <code>LOAD</code>, which is what the receiver picks its decode pipeline from. Not the source container: everything the remux or re-encode tier touches is announced as <code>video/mp4</code>, and a VP9/Opus <code>.mkv</code> is announced as <code>video/webm</code> although its bytes go out untouched.</td></tr>
 <tr><td><code>castSession.sentSuffix</code></td><td>string</td><td>The container the receiver actually receives. The source extension on the <code>direct</code> tier, <code>mp4</code> on the other two. A soundtrack reports whatever it was put in: <code>m4a</code>, <code>mp3</code>, <code>flac</code>, <code>opus</code> or <code>ogg</code> when the track was copied, and <code>flac</code> when it had to be encoded.</td></tr>
 <tr><td><code>castSession.sentBitRate</code></td><td>int</td><td>Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
-file byte-ranged - no <code>format</code>, no <code>maxBitRate</code>, and the account ceiling is
-exempt for a cast token - so this is the file&#x27;s own bitrate rather than anything
-the <code>transcoded*</code> fields describe. A video remux keeps the source&#x27;s rate and a
+file byte-ranged - no <code>format</code> and no <code>maxBitRate</code> - so this is the file&#x27;s own
+bitrate rather than anything the <code>transcoded*</code> fields describe. A video remux keeps the source&#x27;s rate and a
 re-encode is not fixed-rate, so both report 0. So does a copied soundtrack - the
 track&#x27;s own rate is not the container&#x27;s, and nearly right is the worst thing a
 diagnostic can be - and so does an encoded one, FLAC having no target rate at

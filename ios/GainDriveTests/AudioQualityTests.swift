@@ -35,37 +35,10 @@ struct AudioQualityTests {
 		#expect(AudioQuality.default.bitRate > 0)
 	}
 
-	// MARK: - Capping
-
-	@Test func noCapChangesNothing() {
-		#expect(AudioQuality.default.cappedBy(0) == .default)
-		#expect(AudioQuality.original.cappedBy(0) == .original)
-	}
-
-	@Test func aCapBelowTheRequestedBitrateLowersIt() {
-		#expect(
-			AudioQuality(format: .m4a, bitRate: 256).cappedBy(128)
-				== AudioQuality(format: .m4a, bitRate: 128))
-	}
-
-	@Test func aCapAboveTheRequestedBitrateChangesNothing() {
-		#expect(AudioQuality(format: .m4a, bitRate: 96).cappedBy(320).bitRate == 96)
-	}
-
-	/// The branch that looks cosmetic and is not: `streamer.cc`'s bitrate-limit
-	/// path answers a raw request on a capped account with **MP3 at the cap**.
-	/// Modelling anything else would file MP3 bytes under a key promising the
-	/// original.
-	@Test func theOriginalUnderACapBecomesMP3() {
-		let capped = AudioQuality.original.cappedBy(128)
-		#expect(capped == AudioQuality(format: .mp3, bitRate: 128))
-		#expect(capped.tag == "mp3128")
-	}
-
 	@Test func labelsReadAsAPersonWouldSayThem() {
 		#expect(AudioQuality.original.label == "Original")
-		#expect(AudioQuality(format: .m4a, bitRate: 160).label == "AAC 160")
-		#expect(AudioQuality(format: .mp3, bitRate: 96).label == "MP3 96")
+		#expect(AudioQuality(format: .m4a, bitRate: 160).label == "Up to 160 kbps")
+		#expect(AudioQuality(format: .mp3, bitRate: 96).label == "Up to 96 kbps")
 	}
 
 	/// **Every format the app can ask for must name a file extension**, because

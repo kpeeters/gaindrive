@@ -62,6 +62,10 @@ enum AudioFormat: String, CaseIterable, Sendable {
 	}
 }
 
+/// The quality setting: `.original`, or a ceiling of `bitRate` with `format`
+/// as what to encode to when the ceiling (or this device) makes an encode
+/// unavoidable. A file this device plays and that fits under the ceiling is
+/// sent as stored, whatever its format - see `avfoundationAudio`.
 struct AudioQuality: Hashable, Sendable {
 	let format: AudioFormat
 	let bitRate: Int
@@ -88,22 +92,9 @@ struct AudioQuality: Hashable, Sendable {
 		format == .original ? "orig" : "\(format.rawValue)\(bitRate)"
 	}
 
+	/// A ceiling, not a format: what arrives is often the stored file.
 	var label: String {
-		format == .original ? "Original" : "\(format.label) \(bitRate)"
-	}
-
-	/// Applies an account's `maxBitRate` ceiling.
-	///
-	/// The `.original` branch looks cosmetic and is not: a capped account asking
-	/// for the raw file is answered with **MP3 at the cap** by `streamer.cc`'s
-	/// bitrate-limit branch. Without modelling that, the cache key would claim
-	/// `@orig` for bytes that are really MP3, and a later request for genuinely
-	/// original audio would be served them.
-	func cappedBy(_ accountCap: Int) -> AudioQuality {
-		guard accountCap > 0 else { return self }
-		if format == .original { return AudioQuality(format: .mp3, bitRate: accountCap) }
-		guard bitRate > accountCap else { return self }
-		return AudioQuality(format: format, bitRate: accountCap)
+		format == .original ? "Original" : "Up to \(bitRate) kbps"
 	}
 
 	/// This quality as it applies to a video played for its soundtrack.

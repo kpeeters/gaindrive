@@ -329,27 +329,14 @@ function sameEncoder(fmt, suffix) {
    return want !== undefined && want === FORMAT_ENCODERS[suffix];
 }
 
-// Whether asking for `fmt` leaves this song's bytes untouched.
-//
-// Two ways the server can decide to convert and this is both of them, so that
-// the answer is "the file arrives as it is" rather than merely "the format
-// matches".  The account ceiling is the second: it is applied server-side
-// whatever the client asks for, and a file above it becomes mp3 at the cap
-// even when the requested format was already its own.  `bitrate_limit` in
-// `plan_transcode` is the same test.
-//
-// An unknown bitrate reads as "the cap does not bite", which is not optimism
-// but the server's own rule: `bitrate_limit` requires `song.bitrate > 0`, so a
-// file whose rate was never read is passed through too.
+// Whether asking for `fmt` leaves this song's bytes untouched.  This client
+// sends no maxBitRate, so the format is the only thing that can convert.
 //
 // A missing suffix answers false, and the two callers both fail safe that way:
 // the info row falls back to what the server itself reported, and the seek
 // falls back to re-fetching rather than to a seek that goes nowhere.
 function servedUnchanged(fmt, song) {
-   if (!sameEncoder(fmt, song?.suffix)) return false;
-   const cap = currentUser?.maxBitRate || 0;
-   if (cap > 0 && (song?.bitRate || 0) > cap) return false;
-   return true;
+   return sameEncoder(fmt, song?.suffix);
 }
 
 // Which container to ask for when playing a video as audio only.
@@ -1760,14 +1747,6 @@ async function viewUserEdit(user, refreshFn) {
       return el;
       }
 
-   function numInput(value) {
-      const el = document.createElement('input');
-      el.type  = 'number';
-      el.min   = '0';
-      el.value = value ?? 0;
-      return el;
-      }
-
    const fUsername   = addField('Username',       textInput(user?.username,  '',                   !isNew));
    const fPassword   = addField('Password',       pwInput(isNew ? '' : 'Leave blank to keep current'));
    const fEmail      = addField('Email',          textInput(user?.email,     ''));
@@ -1780,7 +1759,6 @@ async function viewUserEdit(user, refreshFn) {
       fDisabled.disabled = true;
       fDisabled.title    = 'You cannot disable your own account.';
       }
-   const fMaxBitrate = addField('Max bitrate (0 = unlimited)', numInput(user?.maxBitRate ?? 0));
 
    const actions = document.createElement('div');
    actions.className = 'form-actions';
@@ -1831,7 +1809,6 @@ async function viewUserEdit(user, refreshFn) {
          params.set('uploadRole',  fUpload.checked  ? 'true' : 'false');
          params.set('castRole',    fCast.checked    ? 'true' : 'false');
          params.set('disabled',    fDisabled.checked ? 'true' : 'false');
-         params.set('maxBitRate',  fMaxBitrate.value);
 
          if (isNew) {
             if (!fUsername.value.trim()) { formStatus.textContent = 'Username is required.'; saveBtn.disabled = false; return; }
@@ -4426,8 +4403,8 @@ async function openInfoModal() {
 
    // What is actually going out.  While casting that is the server's answer,
    // read back rather than worked out again here: a cast URL carries no
-   // format, no maxBitRate and no timeOffset, and the account ceiling is
-   // exempt for a cast token, so none of the transcoded* fields describe it.
+   // format, no maxBitRate and no timeOffset, so none of the transcoded*
+   // fields describe it.
    let sent = null;
    if (casting && castStream) {
       const kbps = castStream.sentBitRate > 0
@@ -4448,28 +4425,26 @@ async function openInfoModal() {
       sent = kbps ? `${kbps} - ${how}` : how;
       }
    else {
-      // Local playback.  Two independent transcode triggers exist: (a) the
-      // server caps bitrate per user - reflected in the transcoded* fields;
-      // (b) the browser asked for format=mp3 because it cannot decode the
-      // source codec (or fell back after a decode error), which only the
-      // client knows about.  player.streamFormat is the format the player
-      // asked for on the most recent playerPlay() call.
+      // Local playback.  The one transcode trigger is the browser asking for
+      // format=mp3 because it cannot decode the source codec (or fell back
+      // after a decode error), which only the client knows about.
+      // player.streamFormat is the format the player asked for on the most
+      // recent playerPlay() call.
       //
       // **Asking is not the same as being converted.** A format naming the
       // source's own encoder is served untouched, so servedUnchanged() takes
-      // that request back out of case (b) and lets the file describe itself.
+      // that request back out and lets the file describe itself.
       // This row read "MP3 320 kbps" over a 128 kbps MP3 before it did.
       let suffix, bitRate;
       if (player.streamFormat && !servedUnchanged(player.streamFormat, song)) {
-         // Streamer's format_change branch: target bitrate is max_bitrate when
-         // the user has one set and it is below 320, else 320 kbps.
+         // plan_transcode encodes a requested format at 320 kbps when no
+         // maxBitRate is given.
          suffix  = player.streamFormat;
-         const cap = currentUser?.maxBitRate || 0;
-         bitRate = (cap > 0 && cap < 320) ? cap : 320;
+         bitRate = 320;
          }
       else {
-         suffix  = song.transcodedSuffix  ?? song.suffix;
-         bitRate = song.transcodedBitRate ?? song.bitRate;
+         suffix  = song.suffix;
+         bitRate = song.bitRate;
          }
       if (suffix || bitRate)
          sent = bitRate ? `${(suffix ?? '').toUpperCase()} ${bitRate} kbps`.trim()
@@ -7621,11 +7596,7 @@ function playerPlay(offset = 0, forceMp3 = false) {
       // except for a soundtrack on a device with no screen, where the server
       // adds one.  Cleared because it describes the *local* element's stream
       // and there is no local stream while casting; the info dialog reads
-      // castStream instead, which the reply below fills in.  It used to fall
-      // back to the server's transcodedSuffix/transcodedBitRate here, and that
-      // was wrong: those describe the account bitrate ceiling, which
-      // stream.view exempts for a cast token, so the dialog reported a
-      // conversion that was not happening.
+      // castStream instead, which the reply below fills in.
       player.streamFormat = null;
       player.posToken     = null;
       const params = {id: song.id};

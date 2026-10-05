@@ -286,43 +286,6 @@ void GainDrive::routes_stream()
 				}
 			}
 
-		// Enforce the user account's max_bitrate as a ceiling (0 = unlimited).
-		// Cast requests authenticate via token and have no 'u' param; skip for those.
-		//
-		// Skipped for video, and that exemption is load-bearing rather than a
-		// policy preference.  Any non-zero max_bitrate sets `constrained` in
-		// serve_video and disqualifies both the direct and remux tiers - while
-		// nativeSeek is a pure function of the codec pair and never sees it.  A
-		// capped account would therefore be told every video is Range-seekable
-		// and handed a chunked stream with Accept-Ranges: none, and would have
-		// H.264/AAC MP4s re-encoded that could have been served off disk
-		// untouched.  Subsonic defines maxBitRate as an audio ceiling anyway,
-		// and a client that really wants a smaller picture still says so with
-		// size= or maxBitRate=, which constrains exactly as before.
-		//
-		// An audio-only request is *not* a video request - it produces an
-		// ordinary audio transcode through the ordinary audio path - so the
-		// ceiling applies to it exactly as it does to a music track.  That is
-		// why the format is parsed above rather than below: the ceiling now
-		// depends on it.
-		bool audio_only = audio_only_request(song->is_video, format,
-		                                     song->audio_codec);
-		//
-		// A *grant* does not escape it, which is where the two tokens part
-		// company. The session token skips this because there is genuinely no
-		// account behind the request; a grant names one, so the person's
-		// ceiling follows their music onto the receiver exactly as it follows
-		// it into their browser.
-		if (!cast_authed && (!song->is_video || audio_only)) {
-			int acct_max;
-			if (grant_authed) {
-				auto gu  = store_.get_user(grant_user);
-				acct_max = gu ? gu->max_bitrate : 0;
-				}
-			else acct_max = request_max_bitrate(req, store_);
-			if (acct_max > 0 && (max_bitrate == 0 || max_bitrate > acct_max))
-				max_bitrate = acct_max;
-			}
 		// The Chromecast sometimes probes the stream URL with timeOffset stripped.
 		// Always use the authoritative offset stored at castLoad time for cast
 		// requests so the probe and the real request both start at the right position.
@@ -479,11 +442,9 @@ void GainDrive::routes_stream()
 		                use_json ? "application/json" : "application/xml");
 		});
 
-	// download - the original file, never transcoded and never bitrate-capped.
-	// The per-user max_bitrate is deliberately not consulted: "download" is
-	// defined by the API as the original media data, and a capped download
-	// would silently hand the user a different file than the one they asked
-	// for.  Only song ids are supported; zipping a folder is out of scope.
+	// download - the original file, never transcoded and never bitrate-capped:
+	// "download" is defined by the API as the original media data.  Only song
+	// ids are supported; zipping a folder is out of scope.
 	server_.Get("/rest/download.view", [this](const httplib::Request& req,
 	                                           httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
@@ -548,21 +509,20 @@ void GainDrive::routes_stream()
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
 		auto videos   = store_.get_videos();
-		int  mbr      = request_max_bitrate(req, store_);
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&videos, mbr](nlohmann::json& r) {
+			body = subsonic_ok_json([&videos](nlohmann::json& r) {
 				nlohmann::json entries = nlohmann::json::array();
 				for (auto& v : videos)
-					entries.push_back(song_entry_json(v, mbr));
+					entries.push_back(song_entry_json(v));
 				r["videos"] = {{ "video", entries }};
 				});
 		else
-			body = subsonic_ok([&videos, mbr](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&videos](XMLDocument& doc, XMLElement* root) {
 				auto* el = doc.NewElement("videos");
 				for (auto& v : videos)
-					el->InsertEndChild(song_entry_xml(doc, v, "video", mbr));
+					el->InsertEndChild(song_entry_xml(doc, v, "video"));
 				root->InsertEndChild(el);
 				});
 		res.set_content(body, use_json ? "application/json" : "application/xml");

@@ -460,10 +460,9 @@ void GainDrive::routes_browse()
 		auto dir = store_.get_directory(dir_id, flat_multi_disc_);
 		if (!dir) { err(70, "Directory not found."); return; }
 
-		int mbr = request_max_bitrate(req, store_);
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&dir, mbr](nlohmann::json& r) {
+			body = subsonic_ok_json([&dir](nlohmann::json& r) {
 				nlohmann::json children = nlohmann::json::array();
 				for (auto& c : dir->children) {
 					nlohmann::json child;
@@ -474,7 +473,7 @@ void GainDrive::routes_browse()
 						if (c.cover_art_id >= 0) child["coverArt"] = sid(c.cover_art_id);
 						if (c.year > 0)          child["year"]     = c.year;
 						} else {
-						child = song_entry_json(c, mbr);
+						child = song_entry_json(c);
 						}
 					children.push_back(child);
 					}
@@ -487,7 +486,7 @@ void GainDrive::routes_browse()
 				if (dir->cover_art_id >= 0) r["directory"]["coverArt"] = sid(dir->cover_art_id);
 				});
 		else
-			body = subsonic_ok([&dir, mbr](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&dir](XMLDocument& doc, XMLElement* root) {
 				auto* directory = doc.NewElement("directory");
 				directory->SetAttribute("id",   dir->id);
 				directory->SetAttribute("name", dir->name.c_str());
@@ -511,7 +510,7 @@ void GainDrive::routes_browse()
 						if (c.year > 0)
 							child->SetAttribute("year", c.year);
 						} else {
-						child = song_entry_xml(doc, c, "child", mbr);
+						child = song_entry_xml(doc, c, "child");
 						}
 					directory->InsertEndChild(child);
 					}
@@ -549,25 +548,24 @@ void GainDrive::routes_browse()
 		int offset = std::clamp(to_int(qp("offset", "0"), 0), 0, MAX_LIST_OFFSET);
 
 		auto entries = store_.get_recent_songs(user, size, offset);
-		int max_br   = request_max_bitrate(req, store_);
 
 		bool use_json = (fmt_of(req) == "json");
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&entries, max_br](nlohmann::json& r) {
+			body = subsonic_ok_json([&entries](nlohmann::json& r) {
 				nlohmann::json arr = nlohmann::json::array();
 				for (const auto& e : entries) {
-					auto s = song_entry_json(e.song, max_br);
+					auto s = song_entry_json(e.song);
 					if (!e.last_played.empty()) s["lastPlayed"] = e.last_played;
 					arr.push_back(std::move(s));
 					}
 				r["recentSongs"] = {{"song", arr}};
 				});
 		else
-			body = subsonic_ok([&entries, max_br](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&entries](XMLDocument& doc, XMLElement* root) {
 				auto* rs = doc.NewElement("recentSongs");
 				for (const auto& e : entries) {
-					auto* el = song_entry_xml(doc, e.song, "song", max_br);
+					auto* el = song_entry_xml(doc, e.song, "song");
 					if (!e.last_played.empty())
 						el->SetAttribute("lastPlayed", e.last_played.c_str());
 					rs->InsertEndChild(el);
@@ -587,7 +585,6 @@ void GainDrive::routes_browse()
 		if (!check_auth(req, res, store_)) return;
 
 		auto entries = store_.get_now_playing();
-		int max_br   = request_max_bitrate(req, store_);
 
 		std::erase_if(entries, [&](const MediaStore::NowPlayingEntry& e) {
 			return !item_read_allowed(req, store_, uploads_root_name_, e.song_path);
@@ -596,11 +593,11 @@ void GainDrive::routes_browse()
 		bool use_json = (fmt_of(req) == "json");
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&entries, max_br](nlohmann::json& r) {
+			body = subsonic_ok_json([&entries](nlohmann::json& r) {
 				nlohmann::json arr = nlohmann::json::array();
 				int idx = 0;
 				for (const auto& e : entries) {
-					auto s = song_entry_json(e.song, max_br);
+					auto s = song_entry_json(e.song);
 					s["username"]   = e.username;
 					s["minutesAgo"] = e.minutes_ago;
 					s["playerId"]   = ++idx;
@@ -615,11 +612,11 @@ void GainDrive::routes_browse()
 				r["nowPlaying"] = {{"entry", arr}};
 				});
 		else
-			body = subsonic_ok([&entries, max_br](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&entries](XMLDocument& doc, XMLElement* root) {
 				auto* np = doc.NewElement("nowPlaying");
 				int idx = 0;
 				for (const auto& e : entries) {
-					auto* el = song_entry_xml(doc, e.song, "entry", max_br);
+					auto* el = song_entry_xml(doc, e.song, "entry");
 					el->SetAttribute("username", e.username.c_str());
 					el->SetAttribute("minutesAgo", e.minutes_ago);
 					el->SetAttribute("playerId", ++idx);
@@ -1203,7 +1200,6 @@ void GainDrive::routes_browse()
 		                          album_rel, use_json)) return;
 		auto info = store_.get_album(album_fid, flat_multi_disc_, user);
 		if (!info) { err(70, "Album not found."); return; }
-		int mbr = request_max_bitrate(req, store_);
 		// Reported for the same reason chapters.writable is: the client draws an
 		// Edit affordance from this rather than guessing at the rule, which it
 		// cannot do - an album reached from search or from the player carries no
@@ -1213,10 +1209,10 @@ void GainDrive::routes_browse()
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&info, mbr, writable](nlohmann::json& r) {
+			body = subsonic_ok_json([&info, writable](nlohmann::json& r) {
 				nlohmann::json songs = nlohmann::json::array();
 				for (auto& s : info->songs)
-					songs.push_back(song_entry_json(s, mbr));
+					songs.push_back(song_entry_json(s));
 				auto& al = info->album;
 				nlohmann::json entry = {
 					{"id",        sid(al.id)},
@@ -1238,7 +1234,7 @@ void GainDrive::routes_browse()
 				r["album"] = std::move(entry);
 				});
 		else
-			body = subsonic_ok([&info, mbr, writable](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&info, writable](XMLDocument& doc, XMLElement* root) {
 				auto& al = info->album;
 				auto* el = doc.NewElement("album");
 				el->SetAttribute("id",        al.id);
@@ -1256,7 +1252,7 @@ void GainDrive::routes_browse()
 				if (!al.starred.empty())
 					el->SetAttribute("starred", iso8601(al.starred).c_str());
 				for (auto& s : info->songs)
-					el->InsertEndChild(song_entry_xml(doc, s, "song", mbr));
+					el->InsertEndChild(song_entry_xml(doc, s, "song"));
 				root->InsertEndChild(el);
 				});
 		res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -1314,16 +1310,15 @@ void GainDrive::routes_browse()
 		if (!song) { err(70, "Song not found."); return; }
 		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
 		                          song->path, use_json)) return;
-		int mbr = request_max_bitrate(req, store_);
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&song, mbr](nlohmann::json& r) {
-				r["song"] = song_entry_json(*song, mbr);
+			body = subsonic_ok_json([&song](nlohmann::json& r) {
+				r["song"] = song_entry_json(*song);
 				});
 		else
-			body = subsonic_ok([&song, mbr](XMLDocument& doc, XMLElement* root) {
-				root->InsertEndChild(song_entry_xml(doc, *song, "song", mbr));
+			body = subsonic_ok([&song](XMLDocument& doc, XMLElement* root) {
+				root->InsertEndChild(song_entry_xml(doc, *song, "song"));
 				});
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
@@ -1392,21 +1387,20 @@ void GainDrive::routes_browse()
 		                        0, MAX_LIST_OFFSET);
 
 		auto songs = store_.get_songs_by_genre(genre, count, offset);
-		int  mbr   = request_max_bitrate(req, store_);
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&songs, mbr](nlohmann::json& r) {
+			body = subsonic_ok_json([&songs](nlohmann::json& r) {
 				nlohmann::json entries = nlohmann::json::array();
 				for (auto& s : songs)
-					entries.push_back(song_entry_json(s, mbr));
+					entries.push_back(song_entry_json(s));
 				r["songsByGenre"] = {{ "song", entries }};
 				});
 		else
-			body = subsonic_ok([&songs, mbr](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&songs](XMLDocument& doc, XMLElement* root) {
 				auto* el = doc.NewElement("songsByGenre");
 				for (auto& s : songs)
-					el->InsertEndChild(song_entry_xml(doc, s, "song", mbr));
+					el->InsertEndChild(song_entry_xml(doc, s, "song"));
 				root->InsertEndChild(el);
 				});
 		res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -1463,11 +1457,10 @@ void GainDrive::routes_browse()
 		                        song_count,   song_offset,
 		                        chapter_count, chapter_offset,
 		                        pu);
-		int mbr = request_max_bitrate(req, store_);
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&sr, key, mbr](nlohmann::json& r) {
+			body = subsonic_ok_json([&sr, key](nlohmann::json& r) {
 				nlohmann::json artists = nlohmann::json::array();
 				for (auto& a : sr.artists)
 					artists.push_back({{"id", sid(a.id)}, {"name", a.title}});
@@ -1488,7 +1481,7 @@ void GainDrive::routes_browse()
 
 				nlohmann::json songs = nlohmann::json::array();
 				for (auto& s : sr.songs)
-					songs.push_back(song_entry_json(s, mbr));
+					songs.push_back(song_entry_json(s));
 
 				// A list of its own, never entries in `song`. A chapter has
 				// no id anything can stream, star or queue, so a client told
@@ -1513,7 +1506,7 @@ void GainDrive::routes_browse()
 				if (!sr.chapters.empty()) r[key]["chapter"] = chapters;
 				});
 		else
-			body = subsonic_ok([&sr, key, mbr](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&sr, key](XMLDocument& doc, XMLElement* root) {
 				auto* result = doc.NewElement(key);
 
 				for (auto& a : sr.artists) {
@@ -1536,7 +1529,7 @@ void GainDrive::routes_browse()
 					}
 
 				for (auto& s : sr.songs)
-					result->InsertEndChild(song_entry_xml(doc, s, "song", mbr));
+					result->InsertEndChild(song_entry_xml(doc, s, "song"));
 
 				for (auto& h : sr.chapters) {
 					auto* el = doc.NewElement("chapter");

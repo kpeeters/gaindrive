@@ -86,7 +86,6 @@ struct SubsonicApiTests {
 			expecting: UserBody.self)
 		#expect(body.user.username == "someone")
 		#expect(body.user.adminRole == nil)
-		#expect(body.user.maxBitRate == nil)
 		// The accessors decide the fallback once, rather than at every use.
 		#expect(body.user.isAdmin == false)
 	}

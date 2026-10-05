@@ -619,7 +619,10 @@ CREATE TABLE users (
     password_enc  TEXT NOT NULL,
     email         TEXT,
     is_admin      INTEGER DEFAULT 0,
-    max_bitrate   INTEGER DEFAULT 0,
+    -- Databases created before the account
+    -- bitrate limit was dropped still carry an
+    -- unused max_bitrate column here. The limit
+    -- is now the player's own maxBitRate.
     created       DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_access   DATETIME
 );

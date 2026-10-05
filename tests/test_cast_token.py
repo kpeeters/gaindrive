@@ -97,8 +97,7 @@ def setup():
     # state these tests assume.
     _ok(_get("updateUser", {"username": PLAIN, "password": PPASS,
                             "adminRole": "false", "uploadRole": "false",
-                            "castRole": "false", "disabled": "false",
-                            "maxBitRate": "0"}),
+                            "castRole": "false", "disabled": "false"}),
         f"could not set up {PLAIN}")
 
     sr = _get("search3", {"query": "", "songCount": "2",
@@ -245,39 +244,6 @@ def test_captions_are_scoped_to_the_grants_song():
         f"a grant for {SONGS[0]} served captions for {SONGS[1]}: HTTP {status}")
 
 
-def test_the_account_ceiling_still_applies():
-    """A grant names an account, so the account's bitrate cap follows it.
-
-    This is where the two tokens differ: castLoad's skips the ceiling because
-    there is genuinely nobody to apply it to, and a grant must not, or casting
-    would be a way round your own cap.
-
-    Compared by size rather than asserted outright, because whether a cap
-    changes anything depends on the source file. A source already below
-    32 kbps would legitimately produce no difference, so that case is reported
-    rather than failed.
-    """
-    uncapped = _raw("stream", {"id": SONGS[0], "pace": "true",
-                               "castToken": _get("getCastToken", {"id": SONGS[0]},
-                                                 user=PLAIN, password=PPASS)["castToken"]})[2]
-
-    _ok(_get("updateUser", {"username": PLAIN, "maxBitRate": "32"}),
-        "could not cap the account")
-    try:
-        capped = _raw("stream", {"id": SONGS[0], "pace": "true",
-                                 "castToken": _get("getCastToken", {"id": SONGS[0]},
-                                                   user=PLAIN, password=PPASS)["castToken"]})[2]
-    finally:
-        _get("updateUser", {"username": PLAIN, "maxBitRate": "0"})
-
-    if len(capped) == len(uncapped):
-        print("      (inconclusive: the source is already at or below 32 kbps)")
-        return
-    assert len(capped) < len(uncapped), (
-        f"a 32 kbps cap produced {len(capped)} bytes against an uncapped "
-        f"{len(uncapped)} - the ceiling does not appear to be applied")
-
-
 TESTS = [
     test_needs_authentication,
     test_needs_an_id,
@@ -292,7 +258,6 @@ TESTS = [
     test_the_cover_is_scoped_to_the_grant,
     test_captions_get_past_authentication,
     test_captions_are_scoped_to_the_grants_song,
-    test_the_account_ceiling_still_applies,
 ]
 
 if __name__ == "__main__":

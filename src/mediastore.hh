@@ -140,7 +140,6 @@ class MediaStore {
 			std::string username;
 			std::string email;
 			bool        is_admin;
-			int         max_bitrate;
 			bool        upload_allowed;
 			bool        disabled;
 			bool        cast_allowed;
@@ -158,7 +157,6 @@ class MediaStore {
 		                 const std::string& new_password,
 		                 const std::string& email,
 		                 bool is_admin,
-		                 int  max_bitrate,
 		                 bool upload_allowed,
 		                 bool disabled,
 		                 bool cast_allowed);

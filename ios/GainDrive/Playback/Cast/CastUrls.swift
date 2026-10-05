@@ -169,17 +169,14 @@ struct CastUrls {
 		// `SettingsStore.castOriginal`.
 		let wanted = targets.settings.castOriginal
 			? AudioQuality.original : targets.settings.audioQuality
-		guard var target = await targets.target(for: song.ref, wanted: wanted) else { return nil }
+		guard var target = targets.target(for: song.ref, wanted: wanted) else { return nil }
 		// **The original is only sent when the receiver can decode it.** A
 		// receiver that meets a container it cannot type fails the LOAD, is
 		// retried once by `LoadRetryWatcher`, fails again, and stalls silently.
-		// Falling back to the default transcode costs quality on a route that
-		// is crossing the network twice anyway.
+		// Anything else goes as FLAC, which every receiver plays.
 		if target.quality.format == .original, !castPlaysNatively(song.contentType) {
-			guard let transcoded = await targets.target(for: song.ref, wanted: .default) else {
-				return nil
-			}
-			target = transcoded
+			guard let lossless = targets.lossless(for: song.ref) else { return nil }
+			target = lossless
 		}
 		return StreamTarget(
 			url: paced(target.url), quality: target.quality, cacheKey: target.cacheKey,
@@ -265,9 +262,9 @@ struct CastUrls {
 			let format = song.soundtrackFormat, let mime = song.soundtrackContentType,
 			castPlaysNatively(mime)
 		{
-			found = await targets.soundtrackCopy(for: song.ref, format: format, mime: mime)
+			found = targets.soundtrackCopy(for: song.ref, format: format, mime: mime)
 		}
-		if found == nil { found = await targets.soundtrack(for: song.ref) }
+		if found == nil { found = targets.soundtrack(for: song.ref) }
 		guard let target = found else { return nil }
 		return StreamTarget(
 			url: withTimeOffset(paced(target.url), offset), quality: target.quality,

@@ -10,7 +10,10 @@ feature can cause is not a slow stream but a wrong one:
     without which the first test passes on a server that ignores `format`
   * an ambiguous container is refused bare and honoured only as a pair
   * a pair naming the wrong codec does nothing
-  * a declaration never beats maxBitRate or timeOffset
+  * a declaration never beats maxBitRate or timeOffset, and over the cap the
+    requested format is what arrives, not mp3
+  * a declared lossless file within the cap is sent untouched
+  * the original, undeclared, arrives as FLAC when FLAC is declared
   * it never changes what the browse endpoints advertise, because that is what
     a Cast receiver is told it is about to fetch
 
@@ -123,7 +126,7 @@ def _transcoded(hdrs):
 
 
 def test_declared_source_is_served_untouched():
-    """format=opus plus a matching declaration means no ffmpeg at all.
+    """format=opus plus a matching declaration, uncapped, means no ffmpeg.
 
     Uses the implied forms, which is also what proves the back-fill reached
     every audio row rather than only the containers it had to open.
@@ -135,7 +138,7 @@ def test_declared_source_is_served_untouched():
             continue
         status, hdrs, body = _raw("stream.view",
                                   {"id": s.get("id"), "format": "opus",
-                                   "maxBitRate": "160",
+                                   "maxBitRate": "0",
                                    "playable": form},
                                   {"Range": "bytes=0-1023"})
         assert status == 206, f".{suffix}: expected 206, got {status}"
@@ -295,6 +298,54 @@ def test_declaration_does_not_beat_max_bitrate():
     print("PASS  a declaration does not beat maxBitRate")
 
 
+def test_over_the_cap_the_format_arrives():
+    """Over the cap the requested format is encoded, not mp3."""
+    s = None
+    for c in SONGS:
+        if c.get("suffix") == "mp3" and int(c.get("bitRate") or 0) > 128:
+            s = c
+            break
+    if s is None:
+        print("SKIP  no mp3 above 128 kbps in the library")
+        return
+    _, hdrs, _ = _raw("stream.view",
+                      {"id": s.get("id"), "format": "m4a",
+                       "maxBitRate": "64", "playable": "mpeg/mp3"})
+    assert hdrs.get("Content-Type") == "audio/mp4", \
+        f"expected the requested m4a, got {hdrs.get('Content-Type')!r}"
+    print("PASS  over the cap, the requested format arrives")
+
+
+def test_declared_lossless_within_the_cap_is_untouched():
+    """A cap is a ceiling on size, not a demand for lossy."""
+    s = _song_with("flac")
+    if s is None:
+        print("SKIP  no flac in the library")
+        return
+    status, hdrs, _ = _raw("stream.view",
+                           {"id": s.get("id"), "format": "m4a",
+                            "maxBitRate": "100000", "playable": "flac/flac"},
+                           {"Range": "bytes=0-1023"})
+    assert status == 206 and not _transcoded(hdrs), \
+        "a FLAC within the cap was transcoded: " + str(hdrs)
+    assert hdrs.get("Content-Type") == "audio/flac", hdrs.get("Content-Type")
+    print("PASS  a declared FLAC within the cap is served untouched")
+
+
+def test_unplayable_original_arrives_as_flac():
+    """The original, undeclared, is converted losslessly rather than lossy."""
+    s = _song_with("mp3")
+    if s is None:
+        print("SKIP  no mp3 in the library")
+        return
+    _, hdrs, _ = _raw("stream.view",
+                      {"id": s.get("id"), "format": "m4a",
+                       "maxBitRate": "0", "playable": "flac/flac"})
+    assert hdrs.get("Content-Type") == "audio/flac", \
+        f"expected flac, got {hdrs.get('Content-Type')!r}"
+    print("PASS  an unplayable original arrives as FLAC")
+
+
 def test_declaration_does_not_beat_time_offset():
     """A seek cannot be served from the head of the file."""
     s = _song_with("mp3")
@@ -373,6 +424,9 @@ TESTS = [
     test_ambiguous_container_is_honoured_as_a_pair,
     test_wrong_codec_in_a_pair_does_nothing,
     test_declaration_does_not_beat_max_bitrate,
+    test_over_the_cap_the_format_arrives,
+    test_declared_lossless_within_the_cap_is_untouched,
+    test_unplayable_original_arrives_as_flac,
     test_declaration_does_not_beat_time_offset,
     test_declaration_does_not_change_metadata,
     test_garbage_declaration_is_ignored,

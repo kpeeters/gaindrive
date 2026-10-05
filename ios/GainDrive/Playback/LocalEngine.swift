@@ -304,9 +304,9 @@ final class LocalEngine: PlaybackEngine {
 		// soundtrack, which declares nothing; see `StreamTargets.soundtrack`.
 		let resolved: StreamTarget?
 		if song.isVideo {
-			resolved = await targets.soundtrack(for: song.ref)
+			resolved = targets.soundtrack(for: song.ref)
 		} else {
-			resolved = await targets.target(for: song.ref, playable: avfoundationPlayable(for:))
+			resolved = targets.target(for: song.ref, playable: avfoundationAudio)
 		}
 		guard var target = resolved else { return nil }
 		if let local = await store.storedFile(for: song.ref) {

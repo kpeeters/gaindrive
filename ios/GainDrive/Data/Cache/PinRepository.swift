@@ -343,9 +343,9 @@ final class PinRepository {
 			// resolves it so the two derive one cache key.
 			let resolved: StreamTarget?
 			if videos.contains(ref) {
-				resolved = await targets.soundtrack(for: ref)
+				resolved = targets.soundtrack(for: ref)
 			} else {
-				resolved = await targets.target(for: ref, playable: avfoundationPlayable(for:))
+				resolved = targets.target(for: ref, playable: avfoundationAudio)
 			}
 			guard let target = resolved else { continue }
 			progress[ref] = 0

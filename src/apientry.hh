@@ -18,21 +18,14 @@
 #include "mediastore.hh"
 #include "streamer.hh"
 
-// One <child>/<song>/<entry> element, in both spellings. max_bitrate and
-// format describe what stream.view would send, so that a listing can declare
-// transcodedContentType without the client having to ask.
-nlohmann::json song_entry_json(const MediaStore::ChildEntry& c,
-                               int max_bitrate = 0,
-                               const std::string& format = "");
+// One <child>/<song>/<entry> element, in both spellings.
+nlohmann::json song_entry_json(const MediaStore::ChildEntry& c);
 tinyxml2::XMLElement* song_entry_xml(tinyxml2::XMLDocument& doc,
                                      const MediaStore::ChildEntry& c,
-                                     const char* tag,
-                                     int max_bitrate = 0,
-                                     const std::string& format = "");
+                                     const char* tag);
 
 // A complete getPlaylist response.
-std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_json,
-                          int max_bitrate);
+std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_json);
 
 // Bridges MediaStore's song record to the streamer's.  Written once because
 // the video fields are easy to forget in an aggregate initialiser - and a
@@ -42,9 +35,6 @@ std::string playlist_body(const MediaStore::PlaylistInfo& pl, bool use_json,
 Streamer::SongInfo streamer_song(const MediaStore::SongInfo& s,
                                  const std::string& abs,
                                  int64_t size_override = 0);
-
-// The per-user bitrate cap that applies to this request, or 0 for none.
-int request_max_bitrate(const httplib::Request& req, MediaStore& store);
 
 // A frame size as the API spells it, "WxH", or empty for anything else.
 //

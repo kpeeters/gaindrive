@@ -626,25 +626,6 @@ NOTE: The album entries returned by `getMusicDirectory`, `getStarred`,
 there is not a claim that an album has no video.
 '''
 
-[[endpoint]]
-kind       = 'additions'
-applies_to = ["any endpoint returning song entries"]
-section    = "browsing"
-summary    = 'One extra field on every song entry.'
-
-  [[endpoint.field]]
-  name  = "transcodedBitRate"
-  type  = "int"
-  on    = "Child"
-  doc   = 'The bitrate the stream would carry, in kbps, when this entry would be transcoded.'
-  notes = '''
-Subsonic defines `transcodedContentType` and `transcodedSuffix` but no
-bitrate, so a client could see that a track would be converted without being
-able to say to what. It is computed the same way `stream` decides, including
-the account's own ceiling, so the two cannot disagree.
-'''
-
-
 # ===========================================================================
 # Playback
 # ===========================================================================
@@ -764,16 +745,15 @@ were absent.
 **Two different tokens travel on this parameter**, and a URL looks the same
 whichever issued it. They are not interchangeable behind it:
 
-* `castLoad`'s belongs to the server's own cast session. There is genuinely
-  no account behind a request carrying it, so it skips the account bitrate
-  ceiling, and the request is also subject to the session's own offset - the
-  receiver probes with `timeOffset` stripped, and the server answers from what
-  the `LOAD` declared rather than from the URL. On `getCaptions` it authorises
+* `castLoad`'s belongs to the server's own cast session. A request carrying
+  it is subject to the session's own offset - the receiver probes with
+  `timeOffset` stripped, and the server answers from what the `LOAD` declared
+  rather than from the URL. On `getCaptions` it authorises
   the caption ids that `LOAD` declared, and nothing else.
 * `getCastToken`'s belongs to an account, for a cast some *other* sender is
-  driving. So the ceiling **is** applied - there is somebody to apply it to -
-  and nothing about a session applies: such a request is an ordinary one that
-  happens to carry a token where a password would be, `timeOffset` and all.
+  driving. Nothing about a session applies: such a request is an ordinary one
+  that happens to carry a token where a password would be, `timeOffset` and
+  all.
   It also reaches `getCoverArt`, which the session token does not, because the
   server's own cast sends a receiver no artwork and a client's does.
 '''
@@ -831,7 +811,7 @@ than rejected, and means "do not scale" - the same as omitting it.
   [[endpoint.param]]
   name  = "playable"
   type  = "string"
-  doc   = 'A comma list of what this client can be sent untouched, so the server skips work it would otherwise pay - `mpeg/mp3,mp4/aac` for audio, `mkv,mov,avi` for video.'
+  doc   = 'A comma list of what this client can play as stored, so the server skips work it would otherwise pay - `mpeg/mp3,mp4/aac,flac/flac` for audio, `mkv,mov,avi` for video.'
   notes = '''
 Most players handle more than a browser does, and a server that cannot be told
 so re-encodes for no reason. An MP3 played through a client that decodes MP3
@@ -864,19 +844,29 @@ Neither half is checked against a list. Both are compared for equality with
 what was stored, so a spelling this server does not use simply never matches
 and the file is converted exactly as it was before.
 
-**Declaring something means "send me this", not "I can decode this."** They are
-different claims, and only the second is about your decoder. A client set to
-Opus 160 that also declares `flac` will be sent FLAC, which is the opposite of
-what it asked for. There is deliberately no server-side guard against that: a
-guard would be the server overruling the one party that knows what it wants.
+**On audio, a declaration changes what `format` and `maxBitRate` mean.**
+Declare everything you can decode, lossless included; size is the job of
+`maxBitRate`, which is a rough ceiling (a file up to 10% over it counts as
+within it) and `0` for "the original". `format` becomes the encoder to use
+when an encode cannot be avoided, never a demand. The server then decides:
 
-What it does is narrow, and deliberately so.
+* **Declared and within the ceiling**: sent untouched, whatever the codec. A
+  FLAC under the ceiling is smaller than what was allowed.
+* **Over the ceiling, or not declared, with a ceiling**: `format` at the
+  ceiling (at most 320).
+* **Not declared, no ceiling**: FLAC when `flac/flac` is declared, so a lossy
+  file the client cannot play gets no second generation of loss; otherwise
+  `format` at 320.
 
-* It **only ever skips work**. On audio it skips a re-encode, on video a remux;
-  it never changes what a transcode produces when one happens.
-* It **never beats a constraint**. `maxBitRate` and `timeOffset` each force a
-  transcode, and `size` and `duration` do on video. A declared 320 kbps MP3
-  under a 160 ceiling is still converted.
+The bitrate compared is the scanned one, or, where the scan recorded none,
+the file size over the duration. Without any audio declaration, `format` is a
+demand as in Subsonic, and `maxBitRate` alone converts to MP3 when the file is
+over it.
+
+On video it **only ever skips work**: a remux, never a change to what a
+transcode produces. `size`, `duration`, `maxBitRate` and `timeOffset` each
+still force an encode there, as `timeOffset` does on audio.
+
 * On video the codec pair still has to be one the server would have served
   directly anyway, so an HEVC or AC3 file is unaffected - the saving is the
   container work alone.
@@ -887,11 +877,11 @@ What it does is narrow, and deliberately so.
   untouched would hand back twenty minutes of a two-hour film with nothing
   reporting an error.
 * A pair naming `riff` or `asf` will never match. Those forms are recorded, but
-  a client that wants a lossless or legacy file untouched asks for the original
-  instead - no `format` at all, which is served straight off disk.
+  a client that wants such a file untouched sends no declaration and no
+  `format` at all, which is served straight off disk.
 
-`transcodedContentType`, `transcodedSuffix`, `transcodedBitRate` and
-`nativeSeek` are **not** affected by it, deliberately. They describe what any
+`transcodedContentType`, `transcodedSuffix` and `nativeSeek` are **not**
+affected by it, deliberately. They describe what any
 client would be sent, so they stay cacheable and stay right for the one
 consumer that is not you - a Cast receiver being told what it is about to
 fetch.
@@ -2177,11 +2167,15 @@ included, since that test is on the root and not on whether an album holds video
 kind       = 'additions'
 applies_to = ["getUser", "getUsers", "createUser", "updateUser"]
 section    = "users"
-summary    = 'One role Subsonic does not define.'
+summary    = 'One role Subsonic does not define, and no bitrate limit.'
 notes      = '''
 Roles gaindrive does not implement are still reported, with fixed values, so
 that clients expecting them do not break. That behaviour is standard-shaped
 and documented with the endpoints themselves.
+
+`maxBitRate` is not reported, and is ignored on `createUser` and
+`updateUser`. A bitrate limit belongs to the player, which knows its own
+network and storage, and it says so with `maxBitRate` on `stream`.
 '''
 
   [[endpoint.field]]
@@ -2907,9 +2901,8 @@ and is the info-panel's business, not the picture's.
   type = "int"
   doc  = '''
 Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
-file byte-ranged - no `format`, no `maxBitRate`, and the account ceiling is
-exempt for a cast token - so this is the file's own bitrate rather than anything
-the `transcoded*` fields describe. A video remux keeps the source's rate and a
+file byte-ranged - no `format` and no `maxBitRate` - so this is the file's own
+bitrate rather than anything the `transcoded*` fields describe. A video remux keeps the source's rate and a
 re-encode is not fixed-rate, so both report 0. So does a copied soundtrack - the
 track's own rate is not the container's, and nearly right is the worst thing a
 diagnostic can be - and so does an encoded one, FLAC having no target rate at
@@ -3089,9 +3082,8 @@ session has no device list to look the id up in.
   type = "int"
   doc  = '''
 Kbps, or 0 when the stream is not a fixed-rate encode. An audio cast is the raw
-file byte-ranged - no `format`, no `maxBitRate`, and the account ceiling is
-exempt for a cast token - so this is the file's own bitrate rather than anything
-the `transcoded*` fields describe. A video remux keeps the source's rate and a
+file byte-ranged - no `format` and no `maxBitRate` - so this is the file's own
+bitrate rather than anything the `transcoded*` fields describe. A video remux keeps the source's rate and a
 re-encode is not fixed-rate, so both report 0. So does a copied soundtrack - the
 track's own rate is not the container's, and nearly right is the worst thing a
 diagnostic can be - and so does an encoded one, FLAC having no target rate at

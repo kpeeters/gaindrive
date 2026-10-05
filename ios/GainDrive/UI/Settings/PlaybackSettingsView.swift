@@ -8,33 +8,34 @@
 
 import SwiftUI
 
-/// What the server is asked to send.
+/// What the server is asked to send: the original, or a rough ceiling plus the
+/// format to encode to when the ceiling makes that unavoidable. A file this
+/// device plays and that fits is sent as stored either way.
 ///
 /// One global setting rather than one per server: a queue may span servers and
-/// would otherwise change quality at every boundary. The account's own
-/// `maxBitRate` still applies on top, per track, from that track's own
-/// server - which is why the effective figure is shown in the track-info view
-/// and not here, where it could only be a guess.
+/// would otherwise change quality at every boundary.
 struct PlaybackSettingsView: View {
 	@Environment(SettingsStore.self) private var settings
 
 	var body: some View {
 		Form {
 			Section {
-				Picker("Format", selection: format) {
-					// **`AudioFormat` has no Opus, Vorbis or Ogg entry**, and
-					// this picker is exactly why that absence is in the enum
-					// rather than in the list: Apple ships no Ogg demuxer, so
-					// offering one would let the app be configured into
-					// silence. Android's default is Opus 160; ours cannot be.
-					ForEach(AudioFormat.allCases, id: \.self) { option in
-						Text(option.label).tag(option)
+				Picker("Quality", selection: limit) {
+					Text("Original").tag(0)
+					ForEach(AudioQuality.bitRates, id: \.self) { rate in
+						Text("Up to \(rate) kbps").tag(rate)
 					}
 				}
 				if settings.audioQuality.format != .original {
-					Picker("Bitrate", selection: bitRate) {
-						ForEach(AudioQuality.bitRates, id: \.self) { rate in
-							Text("\(rate) kbps").tag(rate)
+					Picker("Convert to", selection: format) {
+						// **`AudioFormat` has no Opus, Vorbis or Ogg entry**, and
+						// this picker is exactly why that absence is in the enum
+						// rather than in the list: Apple ships no Ogg demuxer, so
+						// offering one would let the app be configured into
+						// silence. Android's default is Opus 160; ours cannot be.
+						ForEach(AudioFormat.allCases.filter { $0 != .original }, id: \.self) {
+							option in
+							Text(option.label).tag(option)
 						}
 					}
 				}
@@ -62,36 +63,39 @@ struct PlaybackSettingsView: View {
 	}
 
 	/// Written as whole `AudioQuality` values rather than as bindings into its
-	/// fields, which are `let`s. That is deliberate in the model: a format and
-	/// a bitrate that could be set independently are two settings pretending to
-	/// be one, and the stored form is a single tag for the same reason.
-	private var format: Binding<AudioFormat> {
+	/// fields, which are `let`s: the stored form is a single tag. 0 is the
+	/// original.
+	private var limit: Binding<Int> {
 		Binding(
-			get: { settings.audioQuality.format },
+			get: { settings.audioQuality.format == .original ? 0 : settings.audioQuality.bitRate },
 			set: {
-				settings.audioQuality = AudioQuality(
-					format: $0, bitRate: settings.audioQuality.bitRate)
+				settings.audioQuality =
+					$0 == 0
+					? .original : AudioQuality(format: settings.transcodeFormat, bitRate: $0)
 			})
 	}
 
-	private var bitRate: Binding<Int> {
+	private var format: Binding<AudioFormat> {
 		Binding(
-			get: { settings.audioQuality.bitRate },
+			get: { settings.transcodeFormat },
 			set: {
+				settings.transcodeFormat = $0
 				settings.audioQuality = AudioQuality(
-					format: settings.audioQuality.format, bitRate: $0)
+					format: $0, bitRate: settings.audioQuality.bitRate)
 			})
 	}
 
 	private var footerText: String {
 		settings.audioQuality.format == .original
 			? """
-			The file is sent as it is stored, with no conversion. \
-			On an account with a bitrate limit the server converts anyway.
+			Files this device can play are sent as stored. Anything else is \
+			converted to FLAC, so nothing is lost.
 			"""
 			: """
-			Applies to every server. A track already playing keeps \
-			the quality it started with.
+			Files this device can play are sent as stored when they fit under \
+			the limit; anything else is converted at the limit. Applies to \
+			every server. A track already playing keeps the quality it \
+			started with.
 			"""
 	}
 }

@@ -307,18 +307,14 @@ def test_download_missing_id():
 
 # ---- metadata ---------------------------------------------------------
 
-def test_transcoded_fields_follow_the_cap():
+def test_audio_entries_advertise_no_transcode():
+    """What audio becomes depends on the stream request, so no listing says."""
     _need_song()
-    root = _xml("getSong.view", {"id": SONG_ID, "maxBitRate": "64"})
+    root = _xml("getSong.view", {"id": SONG_ID})
     song = root.find(f"{{{NS}}}song")
     assert song is not None, ET.tostring(root)
-    # Only advertised when the source actually exceeds the cap.
-    if int(song.get("bitRate") or 0) > 64:
-        assert song.get("transcodedSuffix") == "mp3", ET.tostring(song)
-        assert song.get("transcodedBitRate") == "64", ET.tostring(song)
-        print("PASS  transcoded* fields reflect the bitrate cap")
-    else:
-        print("SKIP  transcoded* fields (source is already below the cap)")
+    assert song.get("transcodedSuffix") is None, ET.tostring(song)
+    print("PASS  audio entries carry no transcoded* fields")
 
 
 TESTS = [
@@ -337,7 +333,7 @@ TESTS = [
     test_download_ignores_transcode_params,
     test_download_ignores_pace,
     test_download_missing_id,
-    test_transcoded_fields_follow_the_cap,
+    test_audio_entries_advertise_no_transcode,
 ]
 
 if __name__ == "__main__":

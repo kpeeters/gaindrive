@@ -61,15 +61,14 @@ void GainDrive::routes_playlist()
 		bool use_json = (fmt_of(req) == "json");
 		std::string user = req.params.find("u")->second;
 		auto pq = store_.get_play_queue(user);
-		int mbr = request_max_bitrate(req, store_);
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&pq, &user, mbr](nlohmann::json& r) {
+			body = subsonic_ok_json([&pq, &user](nlohmann::json& r) {
 				if (!pq) { r["playQueue"] = nlohmann::json::object(); return; }
 				nlohmann::json entries = nlohmann::json::array();
 				for (auto& s : pq->songs)
-					entries.push_back(song_entry_json(s, mbr));
+					entries.push_back(song_entry_json(s));
 				r["playQueue"] = {
 					{"current",    pq->current_id},
 					{"position",   pq->offset_ms},
@@ -80,7 +79,7 @@ void GainDrive::routes_playlist()
 					};
 				});
 		else
-			body = subsonic_ok([&pq, &user, mbr](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&pq, &user](XMLDocument& doc, XMLElement* root) {
 				auto* el = doc.NewElement("playQueue");
 				if (pq) {
 					el->SetAttribute("current",   pq->current_id);
@@ -91,7 +90,7 @@ void GainDrive::routes_playlist()
 					if (!pq->client.empty())
 						el->SetAttribute("changedBy", pq->client.c_str());
 					for (auto& s : pq->songs)
-						el->InsertEndChild(song_entry_xml(doc, s, "entry", mbr));
+						el->InsertEndChild(song_entry_xml(doc, s, "entry"));
 					}
 				root->InsertEndChild(el);
 				});
@@ -250,7 +249,7 @@ void GainDrive::routes_playlist()
 			}
 
 		auto pl = store_.create_playlist(user, name, song_paths);
-		std::string body = playlist_body(pl, use_json, request_max_bitrate(req, store_));
+		std::string body = playlist_body(pl, use_json);
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -277,7 +276,7 @@ void GainDrive::routes_playlist()
 		auto pl = store_.get_playlist(to_int(it->second, -1), user);
 		if (!pl) { err(70, "Playlist not found."); return; }
 
-		std::string body = playlist_body(*pl, use_json, request_max_bitrate(req, store_));
+		std::string body = playlist_body(*pl, use_json);
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
@@ -335,11 +334,10 @@ void GainDrive::routes_playlist()
 		bool use_json = (fmt_of(req) == "json");
 		std::string user = req.params.find("u")->second;
 		auto sr = store_.get_starred(user);
-		int mbr = request_max_bitrate(req, store_);
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&sr, key, mbr](nlohmann::json& r) {
+			body = subsonic_ok_json([&sr, key](nlohmann::json& r) {
 				nlohmann::json artists = nlohmann::json::array();
 				for (auto& a : sr.artists)
 					artists.push_back({{"id", sid(a.id)}, {"name", a.name}});
@@ -360,7 +358,7 @@ void GainDrive::routes_playlist()
 
 				nlohmann::json songs = nlohmann::json::array();
 				for (auto& c : sr.songs)
-					songs.push_back(song_entry_json(c, mbr));
+					songs.push_back(song_entry_json(c));
 
 				r[key] = {
 					{"artist", artists},
@@ -369,7 +367,7 @@ void GainDrive::routes_playlist()
 					};
 				});
 		else
-			body = subsonic_ok([&sr, key, mbr](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&sr, key](XMLDocument& doc, XMLElement* root) {
 				auto* starred = doc.NewElement(key);
 
 				for (auto& a : sr.artists) {
@@ -392,7 +390,7 @@ void GainDrive::routes_playlist()
 					}
 
 				for (auto& c : sr.songs)
-					starred->InsertEndChild(song_entry_xml(doc, c, "song", mbr));
+					starred->InsertEndChild(song_entry_xml(doc, c, "song"));
 
 				root->InsertEndChild(starred);
 				});
@@ -519,11 +517,10 @@ void GainDrive::routes_playlist()
 		bool use_json = (fmt_of(req) == "json");
 		std::string user = req.params.find("u")->second;
 		auto bms = store_.get_bookmarks(user);
-		int mbr = request_max_bitrate(req, store_);
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&bms, mbr](nlohmann::json& r) {
+			body = subsonic_ok_json([&bms](nlohmann::json& r) {
 				nlohmann::json arr = nlohmann::json::array();
 				for (auto& bm : bms) {
 					nlohmann::json b = {
@@ -532,14 +529,14 @@ void GainDrive::routes_playlist()
 						{"comment",  bm.comment},
 						{"created",  iso8601(bm.created)},
 						{"changed",  iso8601(bm.changed)},
-						{"entry",    song_entry_json(bm.entry, mbr)}
+						{"entry",    song_entry_json(bm.entry)}
 						};
 					arr.push_back(b);
 					}
 				r["bookmarks"] = {{"bookmark", arr}};
 				});
 		else
-			body = subsonic_ok([&bms, mbr](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&bms](XMLDocument& doc, XMLElement* root) {
 				auto* bookmarks = doc.NewElement("bookmarks");
 				for (auto& bm : bms) {
 					auto* b = doc.NewElement("bookmark");
@@ -548,7 +545,7 @@ void GainDrive::routes_playlist()
 					b->SetAttribute("comment",  bm.comment.c_str());
 					b->SetAttribute("created",  iso8601(bm.created).c_str());
 					b->SetAttribute("changed",  iso8601(bm.changed).c_str());
-					b->InsertEndChild(song_entry_xml(doc, bm.entry, "entry", mbr));
+					b->InsertEndChild(song_entry_xml(doc, bm.entry, "entry"));
 					bookmarks->InsertEndChild(b);
 					}
 				root->InsertEndChild(bookmarks);

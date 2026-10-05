@@ -17,18 +17,16 @@ import Foundation
 /// looked for another - a track that downloads successfully and then streams
 /// anyway, with nothing to say why.
 ///
-/// `StreamUrls.target` stays the pure part: this only gathers the client and
-/// that track's own account ceiling, and nothing here closes over a "current"
-/// server, which is what lets a queue span two of them.
+/// `StreamUrls.target` stays the pure part: this only gathers that track's
+/// client, and nothing here closes over a "current" server, which is what lets
+/// a queue span two of them.
 @MainActor
 struct StreamTargets {
 	let registry: ServerRegistry
 	let settings: SettingsStore
-	let accounts: Accounts
 
 	/// A film. See `StreamUrls.video` for why it carries neither `format` nor
-	/// `maxBitRate`, why the account ceiling is not applied, and why `files`
-	/// defaults to the server's own set rather than being filled in here.
+	/// `maxBitRate`, and why `files` defaults to the server's own set rather than being filled in here.
 	func video(
 		for song: Song,
 		transcoded: Bool = false,
@@ -41,23 +39,14 @@ struct StreamTargets {
 			for: song, client: client, transcoded: transcoded, files: files)
 	}
 
-	/// `playable` is a **function** rather than a set, unlike `video(for:)`
-	/// above, because the set follows from a quality this resolver reads and
-	/// the caller does not have. A second reading of the setting at the call
-	/// site would be two readings that can disagree - the thing
-	/// `PinRepository` already refuses to do with `isVideo`.
-	///
-	/// It defaults to declaring nothing, and the default is the safety.
-	/// **The cast route reaches this same resolver** - `CastUrls.audio(for:)`
-	/// calls it - and a receiver declares none of this, so the declaration
-	/// belongs at the call sites that read the bytes themselves and nowhere
-	/// else. `LocalEngine` and `PinRepository` pass
-	/// `avfoundationPlayable(for:)`; everything else takes the default.
-	func target(
-		for ref: ItemRef,
-		playable: (AudioQuality) -> Set<String> = { _ in [] }
-	) async -> StreamTarget? {
-		await target(for: ref, wanted: settings.audioQuality, playable: playable)
+	/// `playable` defaults to declaring nothing, and the default is the
+	/// safety. **The cast route reaches this same resolver** -
+	/// `CastUrls.audio(for:)` calls it - and a receiver declares none of this,
+	/// so the declaration belongs at the call sites that read the bytes
+	/// themselves and nowhere else. `LocalEngine` and `PinRepository` pass
+	/// `avfoundationAudio`; everything else takes the default.
+	func target(for ref: ItemRef, playable: Set<String> = []) -> StreamTarget? {
+		target(for: ref, wanted: settings.audioQuality, playable: playable)
 	}
 
 	/// A video's **soundtrack**: the configured quality through
@@ -68,8 +57,8 @@ struct StreamTargets {
 	/// reader to believe it does something. The one resolver for both callers
 	/// that want a film's sound - local playback with "audio only" on, and a
 	/// receiver with no screen - so the two cannot ask for different bytes.
-	func soundtrack(for ref: ItemRef) async -> StreamTarget? {
-		await target(for: ref, wanted: settings.audioQuality.forVideoAudio())
+	func soundtrack(for ref: ItemRef) -> StreamTarget? {
+		target(for: ref, wanted: settings.audioQuality.forVideoAudio())
 	}
 
 	/// A video's soundtrack copied out as it stands, in the `format` the
@@ -77,12 +66,9 @@ struct StreamTargets {
 	///
 	/// No `maxBitRate`: the server only copies when none is given, since a
 	/// video's stored bitrate is the container's and says nothing about its
-	/// audio. Nil on a capped account, where the server would encode at the
-	/// cap after all and `AudioQuality` has no way to name what that sends.
-	func soundtrackCopy(for ref: ItemRef, format: String, mime: String) async -> StreamTarget? {
-		let clients = registry.clientsSnapshot()
-		guard let client = clients.client(for: ref.server) else { return nil }
-		guard await accounts.cap(for: ref.server, using: clients) <= 0 else { return nil }
+	/// audio.
+	func soundtrackCopy(for ref: ItemRef, format: String, mime: String) -> StreamTarget? {
+		guard let client = registry.clientsSnapshot().client(for: ref.server) else { return nil }
 		return StreamTarget(
 			url: client.url("stream", parameters: ["id": ref.id, "format": format]),
 			quality: .original,
@@ -90,33 +76,30 @@ struct StreamTargets {
 			contentType: mime)
 	}
 
-	/// A target at a stated quality rather than the configured one.
-	///
-	/// **The ceiling still applies**, which is the whole reason this is here
-	/// rather than at the call site: the account's `maxBitRate` belongs to that
-	/// track's server, and `AudioQuality.cappedBy` models what the server would
-	/// actually send - including turning a request for the original into MP3 at
-	/// the cap. A caller that skipped this would build a cache key claiming
-	/// bytes it is not going to receive.
-	///
-	/// One caller: the cast route, which must not send a container a receiver
+	/// The original converted to FLAC, for a receiver that cannot play the
+	/// stored file. Lossless rather than a lossy encode, so a lossy source is
+	/// given no second generation of loss: the rule the server applies to an
+	/// original this device cannot play, and to a film's soundtrack on its own
+	/// cast (`CAST_AUDIO_ONLY_FORMAT`).
+	func lossless(for ref: ItemRef) -> StreamTarget? {
+		guard let client = registry.clientsSnapshot().client(for: ref.server) else { return nil }
+		return StreamTarget(
+			url: client.url("stream", parameters: ["id": ref.id, "format": "flac"]),
+			quality: .original,
+			cacheKey: CacheKeys.of(ref, quality: .original),
+			contentType: "audio/flac")
+	}
+
+	/// A target at a stated quality rather than the configured one. One
+	/// caller: the cast route, which must not send a container a receiver
 	/// cannot decode however the local setting is spelled.
 	func target(
-		for ref: ItemRef, wanted: AudioQuality,
-		playable: (AudioQuality) -> Set<String> = { _ in [] }
-	) async -> StreamTarget? {
-		let clients = registry.clientsSnapshot()
-		guard let client = clients.client(for: ref.server) else { return nil }
-		// Resolved from `wanted`, which is the quality **before** the ceiling
-		// below is applied: `cappedBy` turns a request for the original into
-		// mp3 at the cap, and reading the capped value would silently stop
-		// every capped account declaring the lossless half. Computed before
-		// the await as well, so a non-escaping closure never has to survive a
-		// suspension point.
-		let declared = playable(wanted)
-		let cap = await accounts.cap(for: ref.server, using: clients)
+		for ref: ItemRef, wanted: AudioQuality, playable: Set<String> = []
+	) -> StreamTarget? {
+		guard let client = registry.clientsSnapshot().client(for: ref.server) else {
+			return nil
+		}
 		return StreamUrls.target(
-			for: ref, client: client, wanted: wanted, accountCap: cap,
-			playable: declared)
+			for: ref, client: client, quality: wanted, playable: playable)
 	}
 }

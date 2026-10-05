@@ -402,10 +402,8 @@ final class PlayerConnection {
 	/// What was, or would be, asked of that track's own server.
 	///
 	/// Exposed for the track-info view, which answers "why does this sound
-	/// different here" and cannot answer it without the *capped* quality - the
-	/// account ceiling belongs to that track's server and is not a setting
-	/// anyone can read off the Settings screen. It asks the **current** engine,
-	/// so once there is a second one this answers about the route in use.
+	/// different here". It asks the **current** engine, so with a receiver in
+	/// use it answers about the cast route, which has its own setting.
 	func streamQuality(for song: Song) async -> AudioQuality? {
 		await engine.target(for: song)?.quality
 	}
