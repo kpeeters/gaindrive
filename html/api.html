@@ -322,7 +322,7 @@
 <h3 id="ep-stream">stream</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
 <p>Carried by <code>stream</code>. Only the gaindrive additions are listed here.</p>
-<p>Eight gaindrive parameters on the standard streaming endpoint.</p>
+<p>Eight gaindrive parameters on the standard streaming endpoint, and one response header.</p>
 <h4>Parameters</h4>
 <table class="doc-table">
 <thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
@@ -378,6 +378,17 @@
 <ul class="doc-list"><li><code>X-Gaindrive-Transcode: building</code> marks such a response, which is how a client can tell before it tries. <code>hit</code> or <code>miss</code> means the seekable file was there after all and was sent instead.</li><li><b>Send it on a fresh play and not on a seek.</b> Omitting it is what asks for the seekable file, and by the time somebody seeks the background build is usually finished, so a seek costs the wait only once and often not at all.</li><li>It overrides nothing. <code>size</code>, <code>maxBitRate</code> and <code>timeOffset</code> each force a real re-encode, and this does not make one seekable or skip it.</li><li>It does nothing at all on the direct tier, where the file is already served off disk.</li><li>Ignored when a <code>castToken</code> is presented.</li><li>Only the literal <code>true</code> counts.</li></ul>
 <p><code>transcodedContentType</code>, <code>transcodedSuffix</code> and <code>nativeSeek</code> are <b>not</b> affected by it. They describe what any client would be sent, which is what keeps them cacheable and keeps them right for the one consumer that is not you - a Cast receiver being told what it is about to fetch.</p>
 <div class="note"><p><b>Never send it on a URL something else will fetch</b>, a Cast receiver above all. Two things break rather than one: the receiver is handed a stream with no length that it was told was MP4, and a client that fetches one byte ahead of a <code>LOAD</code> in order to <em>make the build happen</em> gets an instant reply having warmed nothing - so the first cast of every affected film fails and the second works, which reads as a random fault rather than as a setting.</p></div></div>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>X-Gaindrive-Sent</code> <span class="api-on">on response header</span></td><td>string</td><td>What an audio response carries: <code>original</code>, a target and its rate (<code>m4a 160</code>), or a target alone (<code>flac</code>).</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>X-Gaindrive-Sent</code></p>
+<p>With a declaration, what arrives is no longer what was asked for, and a client playing the bytes can ask its decoder - but a Cast controller has no decoder, and a re-encode of an MP3 over the ceiling is still MP3. This says what the server decided.</p>
+<ul class="doc-list"><li><code>original</code> - the stored file, or a copy of its own codec for a seek.</li><li><code>&lt;target&gt; &lt;kbps&gt;</code> - a lossy encode. The target is a <code>format</code> name.</li><li><code>&lt;target&gt;</code> alone - a lossless encode (<code>flac</code>), or a film&#x27;s soundtrack copied into that container, neither of which has a rate worth stating.</li></ul>
+<p>Not sent on video. Read it from the cheapest request that runs the same decision: a one-byte <code>Range</code> fetch of the same URL is answered with it, and warms a transcode while doing so.</p></div>
 </div>
 <div class="api-ep">
 <h3 id="ep-hls-m3u8">hls.m3u8</h3>

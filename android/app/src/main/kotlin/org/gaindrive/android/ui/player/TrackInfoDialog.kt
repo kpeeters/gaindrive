@@ -39,11 +39,13 @@ import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.data.trackShareUrl
 import org.gaindrive.android.playback.NowPlaying
+import org.gaindrive.android.playback.SentFormats
 import org.gaindrive.android.playback.demuxedLocally
 import org.gaindrive.android.playback.cast.CastMedia
 import org.gaindrive.android.playback.cast.CastRoute
 import org.gaindrive.android.ui.LocalStars
 import org.gaindrive.android.ui.components.formatDuration
+import java.util.Locale
 
 /**
  * The equivalent of the web client's player-bar info modal, extended to answer
@@ -68,6 +70,8 @@ fun TrackInfoDialog(
 	positionMs: Long,
 	/** What the local player is decoding; `PlayerState.deliveredMime`. */
 	deliveredMime: String?,
+	/** Its sample rate in Hz; `PlayerState.deliveredSampleRate`. */
+	deliveredSampleRate: Int?,
 	onDismiss: () -> Unit,
 	viewModel: TrackInfoViewModel = hiltViewModel(),
 ) {
@@ -99,6 +103,8 @@ fun TrackInfoDialog(
 					serverName = state.serverName,
 					loaded = loaded,
 					deliveredMime = deliveredMime,
+					deliveredSampleRate = deliveredSampleRate,
+					sentFor = viewModel::sent,
 				)
 				// Unlike the stream URL the KDoc above rules out, this link is
 				// safe to show: it names the server and a track id and carries
@@ -149,6 +155,8 @@ private fun PlaybackRows(
 	serverName: String?,
 	loaded: CastMedia?,
 	deliveredMime: String?,
+	deliveredSampleRate: Int?,
+	sentFor: (ItemRef, AudioQuality, Boolean) -> String?,
 ) {
 	InfoRow(
 		"Output",
@@ -166,7 +174,16 @@ private fun PlaybackRows(
 	// resolved separately from the local player's - a queue may have been
 	// playing locally at a quality the cast path then re-decided.
 	val quality = if (casting) loaded?.quality else current.quality
-	InfoRow("Sent", sentLabel(current, song, quality, casting, deliveredMime))
+	// Local playback declares what media3 plays and a cast does not, and the
+	// server's answer depends on that as much as on the quality.
+	val sent = current.ref?.let { ref -> quality?.let { sentFor(ref, it, !casting) } }
+	InfoRow("Sent", sentLabel(current, song, quality, casting, deliveredMime, sent))
+	if (!casting && !current.isVideo) {
+		InfoRow(
+			"Sample rate",
+			deliveredSampleRate?.let { String.format(Locale.ROOT, "%.1f kHz", it / 1000.0) },
+		)
+	}
 
 	if (casting) {
 		InfoRow(
@@ -201,6 +218,9 @@ private fun fileLabel(song: Song): String? {
  * **Audio is now the same shape.** A local playback request declares the
  * formats media3 takes as they stand, so a track asked for at Opus 160 may
  * arrive as the file on the server, and [quality] records only the request.
+ * [sent] is the server's `X-Gaindrive-Sent`, when there is one for this shape
+ * of request, and overrules everything below it.
+ *
  * [deliveredMime] is the decoder's own answer and overrules it: anything that
  * is not the codec the conversion would have produced means no conversion
  * happened. Null before the tracks are known and whenever casting, where
@@ -222,6 +242,7 @@ private fun sentLabel(
 	quality: AudioQuality?,
 	casting: Boolean,
 	deliveredMime: String?,
+	sent: String?,
 ): String? = when {
 	current.isVideo && current.nativeSeek ->
 		// Untouched either because this container goes to every client as it
@@ -234,6 +255,10 @@ private fun sentLabel(
 			(!casting && demuxedLocally(song.suffix))
 		) "As stored" else "HLS, remuxed as it plays"
 	current.isVideo -> "HLS, re-encoded as it plays"
+	// The server's own account, when this session fetched the track in the
+	// shape it is playing in: the only answer for a receiver, and the only one
+	// that tells an MP3 over the ceiling re-encoded as MP3 from the file.
+	sent != null -> SentFormats.describe(sent, song?.suffix)
 	quality == null -> null
 	quality.format == AudioFormat.FLAC -> "FLAC, converted losslessly"
 	quality.format == AudioFormat.ORIGINAL &&

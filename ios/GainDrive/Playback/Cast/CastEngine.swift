@@ -64,6 +64,9 @@ final class CastEngine: PlaybackEngine {
 	/// The song the receiver was last told to play, so a status push can be
 	/// matched to something.
 	private var playing: Song?
+	/// What the receiver was handed for `playing`, so the track-info sheet can
+	/// say what arrived. Nil for a film sent with its picture.
+	private var sentTarget: StreamTarget?
 	/// **The media session we have already acted on the end of.** A receiver
 	/// repeats its idle pushes, and without this each repeat would walk the
 	/// queue forward another track - an album skipping to its end in a second,
@@ -111,6 +114,7 @@ final class CastEngine: PlaybackEngine {
 		case .clear:
 			loaded = []
 			playing = nil
+			sentTarget = nil
 			session.stopPlayback()
 			return true
 		case .rebuild(let songs), .replaceTail(let songs):
@@ -121,6 +125,7 @@ final class CastEngine: PlaybackEngine {
 			guard let song = songs.first else {
 				loaded = []
 				playing = nil
+				sentTarget = nil
 				session.stopPlayback()
 				return true
 			}
@@ -166,6 +171,7 @@ final class CastEngine: PlaybackEngine {
 		streamOffset = fromOffset ? Double(start) : nil
 		loaded = [song.ref]
 		playing = song
+		sentTarget = sendsVideo ? nil : target
 		advancedFrom = 0
 		reported = offset
 		reportedAt = nil
@@ -266,6 +272,7 @@ final class CastEngine: PlaybackEngine {
 		ticker = nil
 		loaded = []
 		playing = nil
+		sentTarget = nil
 		position = 0
 		streamOffset = nil
 		token = nil
@@ -283,6 +290,16 @@ final class CastEngine: PlaybackEngine {
 		if settings.showsPicture(song) { return urls.video(for: song) }
 		if song.isVideo { return await urls.soundtrack(for: song, from: 0) }
 		return await urls.audio(for: song)
+	}
+
+	/// What the server said it sent, read off the warm. A URL with no `format`
+	/// is the stored file by construction, so it needs no request. A
+	/// soundtrack from an offset is piped and never warmed, so it is unknown.
+	func delivered(for song: Song) async -> DeliveredAudio? {
+		guard playing?.ref == song.ref, let target = sentTarget else { return nil }
+		guard hasFormat(target.url) else { return DeliveredAudio(sent: "original", song: song) }
+		guard let sent = await prewarmer.sent(for: target.cacheKey) else { return nil }
+		return DeliveredAudio(sent: sent, song: song)
 	}
 
 	// MARK: - Status

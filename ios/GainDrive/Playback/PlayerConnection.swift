@@ -408,6 +408,12 @@ final class PlayerConnection {
 		await engine.target(for: song)?.quality
 	}
 
+	/// What that track's audio actually arrived as, from the current engine;
+	/// nil when it cannot say, and the track-info view then shows the request.
+	func delivered(for song: Song) async -> DeliveredAudio? {
+		await engine.delivered(for: song)
+	}
+
 	/// Reads `loadingRef`, `current` and `isBuffering` - and deliberately not
 	/// `position`.
 	func trackState(of ref: ItemRef) -> TrackState {

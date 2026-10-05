@@ -6,6 +6,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.gaindrive.android.data.ServerRegistry
 import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.StreamTarget
@@ -14,6 +16,7 @@ import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
+import org.gaindrive.android.di.MediaHttp
 import org.gaindrive.android.net.SubsonicClientFactory
 import org.gaindrive.android.net.requireOk
 import org.gaindrive.android.net.runCatchingCancellable
@@ -215,6 +218,9 @@ class CastUrls @Inject constructor(
 	private val audioCache: AudioCache,
 	private val settings: SettingsStore,
 	private val clients: SubsonicClientFactory,
+	// The media client, for its read timeout and because it is where
+	// `SentFormats` listens.
+	@MediaHttp private val httpClient: OkHttpClient,
 ) {
 
 	/**
@@ -262,6 +268,7 @@ class CastUrls @Inject constructor(
 
 		if (reachability.canReachDirectly(config)) {
 			val direct = directTarget(ref, source) ?: return null
+			if (offset == null) warm(direct)
 			val url = fromOffset(paced(direct.url))
 			val token = reuseToken ?: castToken(ref)
 			return CastTarget(
@@ -371,6 +378,34 @@ class CastUrls @Inject constructor(
 			Log.i(TAG, "no cast token ($it); sending the account's own credentials")
 		}.getOrNull()
 		return token?.takeIf { it.isNotBlank() }
+	}
+
+	/**
+	 * Fetches one byte of a target that names a `format`, before the receiver
+	 * is told anything.
+	 *
+	 * Two answers for one request. The server builds a transcode whole before
+	 * sending a byte of it, and a receiver gives up after about a minute of
+	 * silence, so the build is moved to where nobody is counting. And the reply
+	 * carries `X-Gaindrive-Sent`, which `SentFormats` records: a receiver
+	 * decodes nothing here, so that is the only account of what it was sent.
+	 * Without a `format` the file is served as stored and there is nothing to
+	 * build or learn. Not from an offset, which the server pipes rather than
+	 * builds.
+	 */
+	private suspend fun warm(target: StreamTarget) {
+		val url = target.url.toHttpUrlOrNull() ?: return
+		if (url.queryParameter("format") == null) return
+		withContext(Dispatchers.IO) {
+			runCatchingCancellable {
+				val request = Request.Builder().url(url).header("Range", "bytes=0-0").build()
+				httpClient.newCall(request).execute().use { it.body.bytes() }
+			}.onFailure {
+				// The receiver fetches regardless; the cost is the wait landing
+				// on it, which is what happened before this existed.
+				Log.i(TAG, "cast warm failed ($it)")
+			}
+		}
 	}
 
 	/**

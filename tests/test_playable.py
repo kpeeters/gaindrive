@@ -346,6 +346,31 @@ def test_unplayable_original_arrives_as_flac():
     print("PASS  an unplayable original arrives as FLAC")
 
 
+def test_sent_header_says_what_arrived():
+    """X-Gaindrive-Sent names the server's decision on every audio response."""
+    s = _song_with("mp3")
+    if s is None:
+        print("SKIP  no mp3 in the library")
+        return
+    sid = s.get("id")
+    cases = [
+        ({}, "original"),
+        ({"format": "m4a", "maxBitRate": "100000",
+          "playable": "mpeg/mp3"}, "original"),
+        ({"format": "m4a", "maxBitRate": "0",
+          "playable": "flac/flac"}, "flac"),
+    ]
+    if int(s.get("bitRate") or 0) > 128:
+        cases.append(({"format": "m4a", "maxBitRate": "64",
+                       "playable": "mpeg/mp3"}, "m4a 64"))
+    for extra, want in cases:
+        _, hdrs, _ = _raw("stream.view", {"id": sid, **extra},
+                          {"Range": "bytes=0-0"})
+        got = hdrs.get("X-Gaindrive-Sent")
+        assert got == want, f"{extra}: expected {want!r}, got {got!r}"
+    print(f"PASS  X-Gaindrive-Sent is right in {len(cases)} case(s)")
+
+
 def test_declaration_does_not_beat_time_offset():
     """A seek cannot be served from the head of the file."""
     s = _song_with("mp3")
@@ -427,6 +452,7 @@ TESTS = [
     test_over_the_cap_the_format_arrives,
     test_declared_lossless_within_the_cap_is_untouched,
     test_unplayable_original_arrives_as_flac,
+    test_sent_header_says_what_arrived,
     test_declaration_does_not_beat_time_offset,
     test_declaration_does_not_change_metadata,
     test_garbage_declaration_is_ignored,

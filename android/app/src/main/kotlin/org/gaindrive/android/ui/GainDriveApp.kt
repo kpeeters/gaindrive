@@ -683,6 +683,7 @@ fun GainDriveApp(
 				casting = castDevice != null,
 				positionMs = playerState.positionMs,
 				deliveredMime = playerState.deliveredMime,
+				deliveredSampleRate = playerState.deliveredSampleRate,
 				onDismiss = { trackInfoOpen = false },
 			)
 		}

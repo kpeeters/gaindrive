@@ -11,9 +11,11 @@ import kotlinx.coroutines.launch
 import org.gaindrive.android.data.ChapterTracks
 import org.gaindrive.android.data.ServerRegistry
 import org.gaindrive.android.data.local.LocalLibrary
+import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.playback.SentFormats
 import org.gaindrive.android.playback.cast.CastDevice
 import org.gaindrive.android.playback.cast.CastMedia
 import org.gaindrive.android.playback.cast.CastSession
@@ -53,6 +55,7 @@ class TrackInfoViewModel @Inject constructor(
 	private val local: LocalLibrary,
 	private val registry: ServerRegistry,
 	private val chapterTracks: ChapterTracks,
+	private val sentFormats: SentFormats,
 	castSession: CastSession,
 ) : ViewModel() {
 
@@ -90,6 +93,16 @@ class TrackInfoViewModel @Inject constructor(
 			if (shownRef != ref) return@launch
 			_state.update { it.copy(chapters = list.chapters) }
 		}
+	}
+
+	/**
+	 * What the server said it sent for [ref] at [quality], when this session
+	 * fetched it in that shape; see [SentFormats]. [declared] is whether the
+	 * request carried `playable`, which local playback does and a cast does not.
+	 */
+	fun sent(ref: ItemRef, quality: AudioQuality, declared: Boolean): String? {
+		val serverUrl = _state.value.serverUrl ?: return null
+		return sentFormats.lookup(serverUrl, ref.id, quality, declared)
 	}
 
 	/** The ref the dialog currently describes; late replies for any other are dropped. */

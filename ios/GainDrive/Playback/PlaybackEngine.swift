@@ -135,4 +135,9 @@ protocol PlaybackEngine: AnyObject {
 	/// while a receiver must be handed something *it* can fetch - no `file:`
 	/// URL, no rewritten scheme, and paced.
 	func target(for song: Song) async -> StreamTarget?
+
+	/// What that track's audio actually arrived as, when this engine can say:
+	/// locally the player is asked, on a receiver the server's account of what
+	/// it sent. Nil for a track not loaded, and for a film with its picture.
+	func delivered(for song: Song) async -> DeliveredAudio?
 }

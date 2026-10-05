@@ -693,7 +693,7 @@ there is no need to unregister a finished stream.
 kind       = 'additions'
 applies_to = ["stream"]
 section    = "playback"
-summary    = 'Eight gaindrive parameters on the standard streaming endpoint.'
+summary    = 'Eight gaindrive parameters on the standard streaming endpoint, and one response header.'
 
   [[endpoint.param]]
   name  = "pace"
@@ -942,6 +942,27 @@ with no length that it was told was MP4, and a client that fetches one byte
 ahead of a `LOAD` in order to *make the build happen* gets an instant reply
 having warmed nothing - so the first cast of every affected film fails and the
 second works, which reads as a random fault rather than as a setting.
+'''
+
+  [[endpoint.field]]
+  name  = "X-Gaindrive-Sent"
+  type  = "string"
+  on    = "response header"
+  doc   = 'What an audio response carries: `original`, a target and its rate (`m4a 160`), or a target alone (`flac`).'
+  notes = '''
+With a declaration, what arrives is no longer what was asked for, and a
+client playing the bytes can ask its decoder - but a Cast controller has no
+decoder, and a re-encode of an MP3 over the ceiling is still MP3. This says
+what the server decided.
+
+* `original` - the stored file, or a copy of its own codec for a seek.
+* `<target> <kbps>` - a lossy encode. The target is a `format` name.
+* `<target>` alone - a lossless encode (`flac`), or a film's soundtrack
+  copied into that container, neither of which has a rate worth stating.
+
+Not sent on video. Read it from the cheapest request that runs the same
+decision: a one-byte `Range` fetch of the same URL is answered with it, and
+warms a transcode while doing so.
 '''
 
 [[endpoint]]

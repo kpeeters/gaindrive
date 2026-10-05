@@ -11,8 +11,8 @@ import SwiftUI
 /// What this track is, and what was asked of the server for it - the
 /// counterpart of `ui/player/TrackInfoDialog.kt`.
 ///
-/// The last row says what was asked of the server, which with a receiver in
-/// use is the cast route's setting rather than the playback one. Everything
+/// The last row says what the audio arrived as - the player's answer locally,
+/// the server's on a receiver - or, when neither can say, what was asked for. Everything
 /// above it is on the row already and is here so the answer arrives with its
 /// context.
 struct TrackInfoView: View {
@@ -23,6 +23,7 @@ struct TrackInfoView: View {
 	@Environment(ServerRegistry.self) private var registry
 	@Environment(\.dismiss) private var dismiss
 	@State private var sent: AudioQuality?
+	@State private var delivered: DeliveredAudio?
 	/// Where playback was when this opened, if this is the track playing.
 	/// Taken once, so the link offered does not tick along while it is read.
 	@State private var openedAt: Double = 0
@@ -36,7 +37,10 @@ struct TrackInfoView: View {
 				form
 			#endif
 		}
-		.task { sent = await player.streamQuality(for: song) }
+		.task {
+			sent = await player.streamQuality(for: song)
+			delivered = await player.delivered(for: song)
+		}
 		.task {
 			if player.current?.ref == song.ref { openedAt = player.position.rounded(.down) }
 			chapters = await ChapterTracks(registry: registry).chapters(for: song.ref).chapters
@@ -78,14 +82,15 @@ struct TrackInfoView: View {
 	private var delivery: [Fact] {
 		var facts: [Fact] = [
 			Fact("Stored", stored),
-			// **Where, before what.** With a receiver in the picture "Asked for" is
+			// **Where, before what.** With a receiver in the picture "Received" is
 			// answering a different question - what went over the network to
 			// something else - and reading it without knowing that is how "why
 			// does this sound different" acquires a wrong answer.
 			Fact("Playing on", player.castDevice?.name),
-			// What was asked for, not what arrived: within the ceiling a
-			// file this device plays is sent as stored, whatever the format.
-			Fact("Asked for", sent?.label),
+			// What arrived when the player or the server can say, and what
+			// was asked for only when neither can: within the ceiling a file
+			// this device plays is sent as stored, whatever the format.
+			delivered.map { Fact("Received", $0.label) } ?? Fact("Asked for", sent?.label),
 		]
 		if player.castSendsSoundOnly { facts.append(Fact("Picture", "Not sent")) }
 		return facts

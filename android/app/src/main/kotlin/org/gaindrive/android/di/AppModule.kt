@@ -20,6 +20,7 @@ import okhttp3.logging.HttpLoggingInterceptor
 import org.gaindrive.android.BuildConfig
 import org.gaindrive.android.net.AuthInterceptor
 import org.gaindrive.android.net.SubsonicJson
+import org.gaindrive.android.playback.SentFormats
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -81,13 +82,19 @@ object AppModule {
 		}
 		.build()
 
-	/** See [MediaHttp] for why media bytes need their own timeout. */
+	/**
+	 * See [MediaHttp] for why media bytes need their own timeout. Every stream
+	 * the app fetches comes through here, which is why [SentFormats] listens
+	 * here and nowhere else.
+	 */
 	@Provides
 	@Singleton
 	@MediaHttp
-	fun mediaOkHttp(base: OkHttpClient): OkHttpClient = base.newBuilder()
-		.readTimeout(MEDIA_READ_TIMEOUT_MINUTES, TimeUnit.MINUTES)
-		.build()
+	fun mediaOkHttp(base: OkHttpClient, sentFormats: SentFormats): OkHttpClient =
+		base.newBuilder()
+			.readTimeout(MEDIA_READ_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+			.addInterceptor(sentFormats.interceptor)
+			.build()
 
 	@Provides
 	@Singleton

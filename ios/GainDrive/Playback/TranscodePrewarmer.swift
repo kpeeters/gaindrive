@@ -30,6 +30,9 @@ actor TranscodePrewarmer {
 	/// back across a boundary - and a second request would be wasted even
 	/// though the server would answer it from its own cache.
 	private var attempted: Set<String> = []
+	/// The server's `X-Gaindrive-Sent` for each warmed cache key: the one
+	/// account of what a receiver is sent, since nothing here decodes it.
+	private var sentByKey: [String: String] = [:]
 	private let session: URLSession
 
 	/// `HTTP.media`, not `HTTP.shared`: waiting out the build is the entire
@@ -83,7 +86,12 @@ actor TranscodePrewarmer {
 		var request = URLRequest(url: target.url)
 		request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
 		do {
-			_ = try await session.data(for: request)
+			let (_, response) = try await session.data(for: request)
+			if let sent = (response as? HTTPURLResponse)?
+				.value(forHTTPHeaderField: "X-Gaindrive-Sent")
+			{
+				sentByKey[claim] = sent
+			}
 		} catch {
 			// Nothing here is worth interrupting playback for: the only cost of
 			// failing is that the wait happens when the track is reached, which
@@ -94,10 +102,16 @@ actor TranscodePrewarmer {
 			attempted.remove(claim)
 		}
 	}
+
+	/// What the server said it sent for a warmed key; nil when that warm has
+	/// not answered, or the server predates the header.
+	func sent(for cacheKey: String) -> String? {
+		sentByKey[cacheKey]
+	}
 }
 
 /// Whether a URL names a `format`, which is what makes the server transcode.
-private func hasFormat(_ url: URL) -> Bool {
+func hasFormat(_ url: URL) -> Bool {
 	URLComponents(url: url, resolvingAgainstBaseURL: false)?
 		.queryItems?.contains { $0.name == "format" } == true
 }

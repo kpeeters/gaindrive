@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.view.SurfaceView
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -75,6 +76,8 @@ data class PlayerState(
 	 * being decoded here.
 	 */
 	val deliveredMime: String? = null,
+	/** The decoder's sample rate in Hz, from the same `Format` as [deliveredMime]. */
+	val deliveredSampleRate: Int? = null,
 	/**
 	 * Why playback stopped, when it stopped for a reason worth explaining.
 	 *
@@ -611,7 +614,9 @@ class PlayerConnection @Inject constructor(
 				queue = items,
 				queueIndex = controller.currentMediaItemIndex,
 				textTracks = controller.textTracks(),
-				deliveredMime = controller.deliveredAudioMime(),
+				deliveredMime = controller.deliveredAudioFormat()?.sampleMimeType,
+				deliveredSampleRate = controller.deliveredAudioFormat()?.sampleRate
+					?.takeIf { it != Format.NO_VALUE },
 				error = watchdog.message.value,
 			)
 		}
@@ -659,10 +664,10 @@ class PlayerConnection @Inject constructor(
 	 * a film played for its soundtrack is the case here - and the one being
 	 * decoded is the answer; the others describe bytes nobody is reading.
 	 */
-	private fun MediaController.deliveredAudioMime(): String? =
+	private fun MediaController.deliveredAudioFormat(): Format? =
 		currentTracks.groups
 			.firstOrNull { it.type == C.TRACK_TYPE_AUDIO && it.isSelected }
-			?.mediaTrackGroup?.getFormat(0)?.sampleMimeType
+			?.mediaTrackGroup?.getFormat(0)
 
 	/**
 	 * Marks [ref] as awaited, with a watchdog: a load that neither succeeds nor

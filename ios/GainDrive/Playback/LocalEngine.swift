@@ -283,6 +283,13 @@ final class LocalEngine: PlaybackEngine {
 	/// setting must not stop being playable because the setting changed later;
 	/// the quality is in the key so two copies can coexist without either being
 	/// mislabelled, but the music is the same music.
+	func delivered(for song: Song) async -> DeliveredAudio? {
+		guard !settings.showsPicture(song),
+			let entry = window.first(where: { $0.ref == song.ref })
+		else { return nil }
+		return await DeliveredAudio.probe(entry.item.asset, song: song)
+	}
+
 	func target(for song: Song) async -> StreamTarget? {
 		// A film asks a different question: no format, no ceiling, and a
 		// transport chosen by `nativeSeek` and the container. See

@@ -400,6 +400,22 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	const auto&           target          = plan.target;
 	const int             target_bitrate  = plan.bitrate;
 
+	// What is actually sent, for a client that cannot decode the bytes to
+	// find out - a Cast controller above all - and for one that cannot tell
+	// an over-ceiling re-encode from the file when the codec is the same.  A
+	// copy for a seek is the file's own codec, so it counts as the original;
+	// a soundtrack copied out of a film is named by its container alone, as
+	// a lossless encode is, since neither has a rate worth stating.
+	std::string sent = "original";
+	if (needs_transcode && target) {
+		if (target_bitrate > 0)
+			sent = std::string(target->name)
+			     + (target->lossy ? " " + std::to_string(target_bitrate) : "");
+		else if (song.is_video)
+			sent = std::string(target->name);
+		}
+	res.set_header("X-Gaindrive-Sent", sent);
+
 	// The User-Agent is logged because the process that fetches a stream is
 	// very often not the one that asked for it - a Cast receiver fetches for
 	// itself - and nothing else in the log records what it is.  Behind a

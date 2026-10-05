@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.gaindrive.android.data.cache.AudioCache
+import org.gaindrive.android.playback.SentFormats
 import java.io.BufferedOutputStream
 import java.io.IOException
 import java.net.ServerSocket
@@ -57,6 +58,7 @@ class CastBridge @Inject constructor(
 	private val httpClient: OkHttpClient,
 	private val audioCache: AudioCache,
 	private val scope: CoroutineScope,
+	private val sentFormats: SentFormats,
 ) {
 
 	/**
@@ -65,9 +67,14 @@ class CastBridge @Inject constructor(
 	 * finished. [CastUrls] warms that before the receiver ever asks, so this is
 	 * the backstop for a warm that did not happen or did not work; 30 s - the
 	 * shared client's figure, sized for audio - would turn it into a failure.
+	 * It records what the server sent, as the media client does: on this route
+	 * the relayed stream is the receiver's.
 	 */
 	private val upstreamClient by lazy {
-		httpClient.newBuilder().readTimeout(UPSTREAM_TIMEOUT_MINUTES, TimeUnit.MINUTES).build()
+		httpClient.newBuilder()
+			.readTimeout(UPSTREAM_TIMEOUT_MINUTES, TimeUnit.MINUTES)
+			.addInterceptor(sentFormats.interceptor)
+			.build()
 	}
 
 	private var server: ServerSocket? = null
