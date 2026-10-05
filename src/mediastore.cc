@@ -3256,11 +3256,12 @@ static void upsert_song_with_data(SQLite::Database& db, const SongReadData& sdat
 			a.exec();
 			}
 
-		// The same back-fill for songs.audio_codec, which every audio row has
-		// held NULL since the column arrived with video.  Unguarded for the
-		// same reason: a container whose codec could not be made out stores ''
-		// and is done with, where a guard would put it back in the pass for
-		// ever.
+		// The same back-fill for songs.audio_container and audio_codec, which
+		// Phase 2 selects by a NULL container: the codec column arrived with
+		// video and was bound '' for every audio row, so it cannot say whether
+		// a form was ever read.  Unguarded for the same reason: a container
+		// whose codec could not be made out stores '' and is done with, where
+		// a guard would put it back in the pass for ever.
 		if (sdat.audio_form_read) {
 			SQLite::Statement a(db,
 				"UPDATE songs SET audio_container = ?, audio_codec = ?"
@@ -3724,14 +3725,16 @@ void MediaStore::scan_artist_dir(const fs::path& artist_path)
 	// never opened with TagLib, so its artist column stays NULL for ever, and
 	// without this it would be offered to the back-fill on every scan, skipped,
 	// and leave nothing in the log to say why the pass never ends.
-	// audio_codec rides along for the second back-fill: an audio row whose form
-	// -- container and codec -- has never been read.  Every audio row qualifies,
-	// not only the ambiguous containers: most are answered from the extension
-	// with no file opened, and leaving them NULL would put them in front of the
-	// pass on every scan for ever.  The is_video test is doing the same job it
-	// does for `artist`.
+	// audio_container rides along for the second back-fill: an audio row whose
+	// form -- container and codec -- has never been read.  The container and
+	// not the codec, because only the container is NULL on such a row: every
+	// audio row written before forms existed bound audio_codec as '', so a
+	// NULL test on it found none of them and the pass never ran.  Every audio
+	// row qualifies, not only the ambiguous containers: most are answered from
+	// the extension with no file opened.  The is_video test is doing the same
+	// job it does for `artist`.
 	SQLite::Statement q(db_music_,
-		"SELECT path, file_modified, artist, is_video, audio_codec"
+		"SELECT path, file_modified, artist, is_video, audio_container"
 		" FROM songs WHERE path LIKE ?");
 	q.bind(1, prefix);
 	while (q.executeStep())
@@ -4255,14 +4258,16 @@ void MediaStore::scan_root_files(const RootRec& root)
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// See scan_artist_dir(): is_video is filtered here so a video, which has
 	// no readable tag and never will, cannot sit in the back-fill set for ever.
-	// audio_codec rides along for the second back-fill: an audio row whose form
-	// -- container and codec -- has never been read.  Every audio row qualifies,
-	// not only the ambiguous containers: most are answered from the extension
-	// with no file opened, and leaving them NULL would put them in front of the
-	// pass on every scan for ever.  The is_video test is doing the same job it
-	// does for `artist`.
+	// audio_container rides along for the second back-fill: an audio row whose
+	// form -- container and codec -- has never been read.  The container and
+	// not the codec, because only the container is NULL on such a row: every
+	// audio row written before forms existed bound audio_codec as '', so a
+	// NULL test on it found none of them and the pass never ran.  Every audio
+	// row qualifies, not only the ambiguous containers: most are answered from
+	// the extension with no file opened.  The is_video test is doing the same
+	// job it does for `artist`.
 	SQLite::Statement q(db_music_,
-		"SELECT s.path, s.file_modified, s.artist, s.is_video, s.audio_codec"
+		"SELECT s.path, s.file_modified, s.artist, s.is_video, s.audio_container"
 		" FROM songs s WHERE s.path LIKE ? AND s.path NOT LIKE ?");
 	q.bind(1, root.cfg.name + "/%");
 	q.bind(2, root.cfg.name + "/%/%");
@@ -4563,7 +4568,7 @@ void MediaStore::refresh_album(const std::string& rel)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement q(db_music_,
-		"SELECT path, file_modified, artist, is_video, audio_codec"
+		"SELECT path, file_modified, artist, is_video, audio_container"
 		" FROM songs WHERE path = ?1 OR path LIKE ?1 || '/%'");
 	q.bind(1, rel);
 	while (q.executeStep())

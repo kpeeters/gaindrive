@@ -219,8 +219,17 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 		// encode cannot be avoided, and `maxBitRate` 0 means "the original,
 		// unless I cannot play it" - see audio_declared() in codecs.hh for what
 		// a declaration promises.
-		bool declared = audio_declared({ song.audio_container, song.audio_codec },
-		                               playable);
+		//
+		// The stored form first; where a row has none yet, the form its
+		// extension settles, which is exact for every extension that has one.
+		// Only an unread .ogg or .m4a is then left unknown - and unknown is
+		// not unplayable, so with no ceiling it goes as stored, as it did
+		// before declarations existed, rather than converted on a guess.
+		AudioForm form{ song.audio_container, song.audio_codec };
+		if (form.container.empty() || form.codec.empty())
+			form = implied_audio_form(song.codec);
+		const bool known    = !form.container.empty() && !form.codec.empty();
+		const bool declared = audio_declared(form, playable);
 		if (declared && !over) {
 			// Untouched, lossless included: a FLAC under the ceiling is
 			// smaller than what was allowed, so there is nothing to save.
@@ -228,6 +237,9 @@ Streamer::TranscodePlan Streamer::plan_transcode(const SongInfo& song,
 		else if (max_bitrate > 0) {
 			to      = fallback;
 			to_rate = lossy_rate;
+			}
+		else if (!known) {
+			// As stored; see above.
 			}
 		else if (playable.count("flac/flac")) {
 			// The original was asked for and cannot be played.  FLAC rather
