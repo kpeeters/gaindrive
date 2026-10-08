@@ -61,32 +61,39 @@ struct SearchView: View {
 	/// toolbar, above every pane, so there the field is this pane's whole
 	/// header, drawn here rather than declared with `.paneHeader`.
 	///
-	/// The content is stretched first: a `ContentUnavailableView` is only as
-	/// tall as its text, and the inset sat on top of it halfway down the pane.
+	/// A sibling above the content, not an inset or overlay on it: attached
+	/// to the content, the field was re-created each time the content
+	/// switched (searching, results) and on every focus change, so it lost
+	/// focus at once. The content is stretched because a
+	/// `ContentUnavailableView` is only as tall as its text.
 	private var searchRoot: some View {
 		#if os(macOS)
-			content
-				.frame(maxWidth: .infinity, maxHeight: .infinity)
-				.safeAreaInset(edge: .top, spacing: 0) {
-					TextField("Artists, albums and tracks", text: $model.query)
-						.textFieldStyle(.roundedBorder)
-						.focused($fieldFocused)
-						// TEMPORARY: re-creation shows as a disappear/appear
-						// pair; a theft as focus false with someone else's
-						// responder.
-						.onAppear { Self.log.notice("field appeared") }
-						.onDisappear { Self.log.notice("field disappeared") }
-						.onChange(of: fieldFocused) { _, focused in
-							Self.log.notice("field focused: \(focused)")
-							guard !focused else { return }
-							DispatchQueue.main.async {
-								let responder = NSApp.keyWindow?.firstResponder
-								Self.log.notice(
-									"first responder now: \(String(describing: responder), privacy: .public)")
-							}
+			VStack(spacing: 0) {
+				TextField("Artists, albums and tracks", text: $model.query)
+					.textFieldStyle(.roundedBorder)
+					.focused($fieldFocused)
+					// TEMPORARY: re-creation shows as an appear/disappear
+					// pair; a theft as focus false with someone else's
+					// responder.
+					.onAppear { Self.log.notice("field appeared") }
+					.onDisappear { Self.log.notice("field disappeared") }
+					.onChange(of: fieldFocused) { _, focused in
+						Self.log.notice("field focused: \(focused)")
+						guard !focused else { return }
+						DispatchQueue.main.async {
+							let responder = NSApp.keyWindow?.firstResponder
+							Self.log.notice(
+								"first responder now: \(String(describing: responder), privacy: .public)")
 						}
-						.paneHeaderChrome(leadingInset: leadingInset)
-				}
+					}
+					.paneHeaderChrome(leadingInset: leadingInset)
+				content
+					.frame(maxWidth: .infinity, maxHeight: .infinity)
+					// TEMPORARY: if this pairs up too, the whole pane is
+					// being rebuilt from above.
+					.onAppear { Self.log.notice("content appeared") }
+					.onDisappear { Self.log.notice("content disappeared") }
+			}
 		#else
 			content
 				.paneHeader("Search") {
