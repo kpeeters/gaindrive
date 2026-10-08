@@ -7,6 +7,10 @@
 //	full text of the GPL.
 
 import SwiftUI
+#if os(macOS)
+	import AppKit
+	import os
+#endif
 
 struct SearchView: View {
 	@Bindable var model: SearchViewModel
@@ -18,9 +22,15 @@ struct SearchView: View {
 	@State private var chosenAlbum: Album?
 	#if os(macOS)
 		@Environment(\.paneHeaderLeadingInset) private var leadingInset
+		// TEMPORARY: diagnosing the field losing focus once results are listed.
+		@FocusState private var fieldFocused: Bool
+		private static let log = Logger(subsystem: "org.gaindrive.ios-player", category: "search")
 	#endif
 
 	var body: some View {
+		#if os(macOS)
+			let _ = Self._printChanges()
+		#endif
 		// Results stay in the first pane whatever is opened beside them, which
 		// is what a search wants: the next hit is one tap away. Three levels:
 		// results, an artist, one of their albums.
@@ -49,15 +59,32 @@ struct SearchView: View {
 	/// The results pane. On iOS the field is `.searchable`, in the results
 	/// pane's bar. On the Mac `.searchable` would put it in the window's
 	/// toolbar, above every pane, so there the field is this pane's whole
-	/// header. Drawn here rather than declared with `.paneHeader`: carried
-	/// up as a preference, the field was re-created once results were
-	/// listed and lost focus on every click.
+	/// header, drawn here rather than declared with `.paneHeader`.
+	///
+	/// The content is stretched first: a `ContentUnavailableView` is only as
+	/// tall as its text, and the inset sat on top of it halfway down the pane.
 	private var searchRoot: some View {
 		#if os(macOS)
 			content
+				.frame(maxWidth: .infinity, maxHeight: .infinity)
 				.safeAreaInset(edge: .top, spacing: 0) {
 					TextField("Artists, albums and tracks", text: $model.query)
 						.textFieldStyle(.roundedBorder)
+						.focused($fieldFocused)
+						// TEMPORARY: re-creation shows as a disappear/appear
+						// pair; a theft as focus false with someone else's
+						// responder.
+						.onAppear { Self.log.notice("field appeared") }
+						.onDisappear { Self.log.notice("field disappeared") }
+						.onChange(of: fieldFocused) { _, focused in
+							Self.log.notice("field focused: \(focused)")
+							guard !focused else { return }
+							DispatchQueue.main.async {
+								let responder = NSApp.keyWindow?.firstResponder
+								Self.log.notice(
+									"first responder now: \(String(describing: responder), privacy: .public)")
+							}
+						}
 						.paneHeaderChrome(leadingInset: leadingInset)
 				}
 		#else
