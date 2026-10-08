@@ -65,6 +65,9 @@ struct SearchView: View {
 				content
 					.frame(maxWidth: .infinity, maxHeight: .infinity)
 			}
+			// What a plain list draws behind itself; a bare stack would show
+			// the window's grey.
+			.background(Color.platformBackground)
 		#else
 			content
 				.paneHeader("Search") {
