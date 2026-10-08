@@ -20,12 +20,11 @@ import SwiftUI
 /// On a narrow window, one pane shows the deepest level, and its header gets a
 /// back arrow; with two or three the level above is on screen and an arrow
 /// would be noise.
-struct MacPaneRow<R: Hashable, Root: View, Destination: View, Placeholder: View>: View {
+struct MacPaneRow<R: Hashable, Root: View, Destination: View>: View {
 	@Binding var path: [R]
 	let maxLevels: Int
 	let root: () -> Root
 	let destination: (R) -> Destination
-	let placeholder: (Int) -> Placeholder
 	/// The root draws its own header row instead of declaring one with
 	/// `.paneHeader`; see `SearchView` for why.
 	var rootDrawsHeader = false
@@ -77,7 +76,8 @@ struct MacPaneRow<R: Hashable, Root: View, Destination: View, Placeholder: View>
 		} else if level <= path.count {
 			destination(path[level - 1])
 		} else {
-			placeholder(level)
+			// An empty pane is left blank.
+			Color.clear
 		}
 	}
 

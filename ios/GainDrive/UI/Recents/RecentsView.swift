@@ -25,10 +25,7 @@ struct RecentsView: View {
 		PaneNavigator(
 			path: $path, maxLevels: 3,
 			root: { list },
-			destination: { destination($0) },
-			placeholder: { _ in
-				ContentUnavailableView("Choose an album or a track", systemImage: "clock.arrow.circlepath")
-			}
+			destination: { destination($0) }
 		)
 		.task(id: selection.scope) { model.appear() }
 		.onChange(of: settings.offlineMode) { model.retry() }

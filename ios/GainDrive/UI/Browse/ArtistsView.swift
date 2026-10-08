@@ -52,12 +52,7 @@ struct ArtistsView: View {
 		PaneNavigator(
 			path: path, maxLevels: 3,
 			root: { root },
-			destination: { destination($0) },
-			placeholder: { level in
-				ContentUnavailableView(
-					level == 1 ? "Choose an artist" : "Choose an album",
-					systemImage: level == 1 ? "music.mic" : "music.note.list")
-			})
+			destination: { destination($0) })
 			// A different scope is a different library, so what was chosen in
 			// the old one is not a screen the user can act on.
 			.onChange(of: servers.scope) { clearSelection() }

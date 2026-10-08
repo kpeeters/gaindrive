@@ -30,9 +30,6 @@ struct SearchView: View {
 				searchRoot
 			},
 			destination: { destination($0) },
-			placeholder: { _ in
-				ContentUnavailableView("Choose a result", systemImage: "magnifyingglass")
-			},
 			rootDrawsHeader: true
 		)
 		.task(id: selection.scope) { model.scopeChanged() }

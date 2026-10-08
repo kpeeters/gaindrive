@@ -8,6 +8,7 @@
 
 #if os(macOS)
 
+import AppKit
 import SwiftUI
 
 /// The menu bar: a Playback menu, the sections and Now Playing in View, and
@@ -29,6 +30,10 @@ struct MacCommands: Commands {
 		// One window: a second would be a second shell raising the same
 		// alerts and asking for the same video window.
 		CommandGroup(replacing: .newItem) {}
+
+		CommandGroup(replacing: .appInfo) {
+			Button("About GainDrive") { Self.showAbout() }
+		}
 
 		CommandGroup(replacing: .appSettings) {
 			Button("Settings...") { section?.wrappedValue = .settings }
@@ -58,6 +63,27 @@ struct MacCommands: Commands {
 				.keyboardShortcut(.leftArrow)
 				.disabled(player.current == nil)
 		}
+	}
+}
+
+extension MacCommands {
+	/// The standard panel, given the logo explicitly rather than whatever
+	/// icon the bundle resolves to, and the web site as its credits. The
+	/// copyright line is `NSHumanReadableCopyright` in Info.plist.
+	@MainActor static func showAbout() {
+		let centred = NSMutableParagraphStyle()
+		centred.alignment = .center
+		let credits = NSAttributedString(
+			string: "www.gaindrive.org",
+			attributes: [
+				.link: URL(string: "https://www.gaindrive.org/")!,
+				.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+				.paragraphStyle: centred,
+			])
+		NSApp.orderFrontStandardAboutPanel(options: [
+			.applicationIcon: NSImage(named: "Logo") ?? NSApp.applicationIconImage as Any,
+			.credits: credits,
+		])
 	}
 }
 

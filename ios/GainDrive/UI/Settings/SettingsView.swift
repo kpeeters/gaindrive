@@ -41,10 +41,7 @@ struct SettingsView: View {
 		PaneNavigator(
 			path: $path, maxLevels: 2,
 			root: { categories },
-			destination: { destination($0) },
-			placeholder: { _ in
-				ContentUnavailableView("Choose a category", systemImage: "gearshape")
-			}
+			destination: { destination($0) }
 		)
 	}
 

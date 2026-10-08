@@ -25,8 +25,8 @@ enum PaneMath {
 
 	/// The first level shown when `levels` are open (the root included) in
 	/// `panes` panes: the deepest ones, as Android's `leadingWindow` does. A
-	/// path shallower than the panes starts at the root and leaves the rest as
-	/// placeholders.
+	/// path shallower than the panes starts at the root and leaves the rest
+	/// empty.
 	static func firstLevel(levels: Int, panes: Int) -> Int {
 		max(0, levels - panes)
 	}
@@ -53,14 +53,11 @@ enum PaneMath {
 ///
 /// `maxLevels` caps the panes at what the tab can ever show - Playlists never
 /// has a third level, so it never draws a third pane.
-struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: View>: View {
+struct PaneNavigator<R: Hashable, Root: View, Destination: View>: View {
 	@Binding var path: [R]
 	let maxLevels: Int
 	@ViewBuilder let root: () -> Root
 	@ViewBuilder let destination: (R) -> Destination
-	/// What an empty pane says, by level: "Choose an artist" rather than a
-	/// blank rectangle, which on a tablet reads as a rendering fault.
-	@ViewBuilder let placeholder: (Int) -> Placeholder
 	/// Mac only: the root draws its own header row; see `MacPaneRow`.
 	var rootDrawsHeader = false
 
@@ -70,7 +67,7 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 			// `MacPaneRow`.
 			MacPaneRow(
 				path: $path, maxLevels: maxLevels, root: root, destination: destination,
-				placeholder: placeholder, rootDrawsHeader: rootDrawsHeader)
+				rootDrawsHeader: rootDrawsHeader)
 		#else
 			stackOrPanes
 		#endif
@@ -138,9 +135,10 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 		} else if level <= path.count {
 			destination(path[level - 1])
 		} else {
-			// The empty title keeps an inline bar over the placeholder, so the
-			// bars stay one height before anything is chosen.
-			placeholder(level).navigationTitle("")
+			// An empty pane is left blank. The empty title keeps an inline
+			// bar over it, so the bars stay one height before anything is
+			// chosen.
+			Color.clear.navigationTitle("")
 		}
 	}
 

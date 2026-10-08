@@ -27,9 +27,6 @@ struct PlaylistsView: View {
 				if case .playlist(let ref, let name) = route {
 					PlaylistDetailView(ref: ref, playlistName: name)
 				}
-			},
-			placeholder: { _ in
-				ContentUnavailableView("Choose a playlist", systemImage: "music.note.list")
 			}
 		)
 		.task(id: selection.scope) { model.appear() }

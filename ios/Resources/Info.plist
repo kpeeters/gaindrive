@@ -25,6 +25,9 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Shown by the Mac's About panel. -->
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Kasper Peeters</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 
