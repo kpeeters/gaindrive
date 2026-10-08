@@ -86,7 +86,14 @@ struct SearchView: View {
 								"first responder now: \(String(describing: responder), privacy: .public)")
 						}
 					}
-					.paneHeaderChrome(leadingInset: leadingInset)
+					// TEMPORARY experiment: plain header without the `.bar`
+					// material and window drag of `paneHeaderChrome`.
+					.padding(.horizontal, 12)
+					.padding(.leading, leadingInset)
+					.frame(height: PaneHeaderBar.height)
+					.frame(maxWidth: .infinity)
+					.background(Color(nsColor: .windowBackgroundColor))
+				Divider()
 				content
 					.frame(maxWidth: .infinity, maxHeight: .infinity)
 					// TEMPORARY: if this pairs up too, the whole pane is
