@@ -61,6 +61,8 @@ final class ArtistsViewModel {
 	struct Reveal: Equatable {
 		let choice: ArtistChoice
 		let album: Album
+		/// The track to scroll the tracks pane to.
+		let track: ItemRef?
 	}
 
 	private static let log = Logger(subsystem: "org.gaindrive.ios-player", category: "browse")
@@ -131,7 +133,7 @@ final class ArtistsViewModel {
 	/// The artist and album are then taken from the listing and the artist's
 	/// album list where they appear there: the rows are tagged with those
 	/// values, and a value built from `getAlbum` alone would highlight none.
-	func reveal(album ref: ItemRef) {
+	func reveal(album ref: ItemRef, track: ItemRef?) {
 		revealTask?.cancel()
 		revealTask = Task { [library] in
 			let detail: AlbumDetail?
@@ -149,7 +151,7 @@ final class ArtistsViewModel {
 			let albums = await library.albumsOfArtist(choice.artist.refs).items
 			guard !Task.isCancelled else { return }
 			let album = albums.first { $0.refs.contains(ref) } ?? fetched
-			self.pendingReveal = Reveal(choice: choice, album: album)
+			self.pendingReveal = Reveal(choice: choice, album: album, track: track)
 		}
 	}
 

@@ -93,13 +93,13 @@ struct RootView: View {
 		// The shell's alerts and track links, shared with the Mac's root. A
 		// link opens in Search, which owns a path to push onto; the wide
 		// player bar's cover opens its album in the Library.
-		.environment(\.revealAlbum) { reveal($0) }
+		.environment(\.revealAlbum) { reveal($0, track: $1) }
 		.modifier(ShellMessages { open($0) })
 	}
 
-	private func reveal(_ album: ItemRef) {
+	private func reveal(_ album: ItemRef, track: ItemRef?) {
 		tab = .artists
-		artists.reveal(album: album)
+		artists.reveal(album: album, track: track)
 	}
 
 	private func open(_ route: Route) {

@@ -16,6 +16,9 @@ struct AlbumDetailView: View {
 	/// Where in that track to start, in seconds. Non-zero for a chapter hit,
 	/// which names a marker inside a recording rather than the recording.
 	var autoPlayAt: Double = 0
+	/// A track to scroll to once the listing has loaded: the playing one,
+	/// when the player bar's cover revealed this album.
+	var scrollTo: ItemRef?
 	/// Reached through the uploads listing, which is what offers moving the
 	/// album into the library or deleting it. Only the Library tab's uploads
 	/// cover sets it; no other route leads into uploads.
@@ -89,44 +92,50 @@ struct AlbumDetailView: View {
 		let playingMarker: PlayingMarker? =
 			model.chapters.isEmpty ? nil : currentMarker(model.chapters)
 
-		return List {
-			Section {
-				header(detail, model: model)
-			}
-			.listRowSeparator(.hidden)
+		return ScrollViewReader { proxy in
+			List {
+				Section {
+					header(detail, model: model)
+				}
+				.listRowSeparator(.hidden)
 
-			// Disc headings **only when there is more than one disc**. A single
-			// heading over every track on a single-disc album says nothing and
-			// costs a row.
-			if detail.isMultiDisc {
-				ForEach(discs(rows), id: \.number) { disc in
+				// Disc headings **only when there is more than one disc**. A single
+				// heading over every track on a single-disc album says nothing and
+				// costs a row.
+				if detail.isMultiDisc {
+					ForEach(discs(rows), id: \.number) { disc in
+						Section {
+							ForEach(disc.rows) { row in
+								listRow(row, in: detail, playing: playingMarker)
+							}
+						} header: {
+							SectionHeading(text: "Disc \(disc.number)").pinnedHeaderBackground()
+						}
+						.listRowSeparator(.hidden)
+					}
+				} else {
 					Section {
-						ForEach(disc.rows) { row in
+						ForEach(rows) { row in
 							listRow(row, in: detail, playing: playingMarker)
 						}
-					} header: {
-						SectionHeading(text: "Disc \(disc.number)").pinnedHeaderBackground()
 					}
+					// On the section, as the header's is: a button's label does not
+					// pass row settings up to the list, and set on each button the
+					// Mac's album list looped on its layout until it crashed.
 					.listRowSeparator(.hidden)
 				}
-			} else {
-				Section {
-					ForEach(rows) { row in
-						listRow(row, in: detail, playing: playingMarker)
-					}
-				}
-				// On the section, as the header's is: a button's label does not
-				// pass row settings up to the list, and set on each button the
-				// Mac's album list looped on its layout until it crashed.
-				.listRowSeparator(.hidden)
 			}
+			.listStyle(.plain)
+			#if os(macOS)
+				.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
+			#endif
+			.refreshable { await model.refresh() }
+			.task(id: detail) { startAutoPlay(detail) }
+			// Keyed on the target, not the listing: a refresh must not pull
+			// the list back after the user has scrolled away, while a reveal
+			// of the album already showing should still move it.
+			.task(id: scrollTo) { scrollToTarget(rows, proxy: proxy) }
 		}
-		.listStyle(.plain)
-		#if os(macOS)
-			.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { paneWidth = $0 }
-		#endif
-		.refreshable { await model.refresh() }
-		.task(id: detail) { startAutoPlay(detail) }
 	}
 
 	/// The recording being played and which of its markers, as a pair, so one
@@ -184,6 +193,14 @@ struct AlbumDetailView: View {
 		// The recording's own row is gone, so this is the only way left to
 		// reach its actions - starring the concert, queueing it, downloading it.
 		.trackActions(for: row.song)
+	}
+
+	/// Centred rather than minimal, so the tracks around it show too.
+	private func scrollToTarget(_ rows: [AlbumListRow], proxy: ScrollViewProxy) {
+		guard let scrollTo,
+			let row = rows.first(where: { $0.song.ref == scrollTo })
+		else { return }
+		proxy.scrollTo(row.id, anchor: .center)
 	}
 
 	/// A ref naming a track this album no longer holds does nothing, silently.

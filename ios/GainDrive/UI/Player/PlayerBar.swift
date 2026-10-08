@@ -69,7 +69,7 @@ struct PlayerBar: View {
 			.contentShape(.rect)
 			.onTapGesture {
 				guard let album = song.albumRef else { return }
-				revealAlbum(album)
+				revealAlbum(album, song.ref)
 			}
 			.accessibilityAddTraits(.isButton)
 			.accessibilityHint("Opens the album")

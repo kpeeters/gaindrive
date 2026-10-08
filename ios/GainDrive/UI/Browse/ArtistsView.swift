@@ -35,6 +35,9 @@ struct ArtistsView: View {
 	/// returns. Tagging the value means neither has to look anything up.
 	@State private var selectedChoice: ArtistChoice?
 	@State private var selectedAlbum: Album?
+	/// The playing track of a reveal, for the tracks pane to scroll to. Only
+	/// a reveal sets it: an album opened by hand starts at its top.
+	@State private var revealedTrack: ItemRef?
 
 	/// The uploads listing's model while Uploads is showing, nil otherwise.
 	/// Built when the icon is tapped and dropped on leaving - Android's
@@ -63,6 +66,7 @@ struct ArtistsView: View {
 				if uploadsModel != nil { uploadsModel = nil }
 				selectedChoice = reveal.choice
 				selectedAlbum = reveal.album
+				revealedTrack = reveal.track
 				model.consumeReveal()
 			}
 			// Moved or deleted on the server: the album showing may no longer
@@ -89,6 +93,7 @@ struct ArtistsView: View {
 					}
 				}
 				if choice != selectedChoice { selectedChoice = choice }
+				if album != selectedAlbum { revealedTrack = nil }
 				selectedAlbum = album
 			})
 	}
@@ -100,7 +105,10 @@ struct ArtistsView: View {
 		Binding(
 			get: { selectedChoice },
 			set: { choice in
-				if choice != selectedChoice { selectedAlbum = nil }
+				if choice != selectedChoice {
+					selectedAlbum = nil
+					revealedTrack = nil
+				}
 				selectedChoice = choice
 			})
 	}
@@ -129,7 +137,8 @@ struct ArtistsView: View {
 				selection: $selectedAlbum)
 		case .album(let album):
 			AlbumDetailView(
-				ref: album.ref, albumTitle: album.title, fromUploads: uploadsModel != nil)
+				ref: album.ref, albumTitle: album.title, scrollTo: revealedTrack,
+				fromUploads: uploadsModel != nil)
 		}
 	}
 
@@ -155,6 +164,7 @@ struct ArtistsView: View {
 	private func clearSelection() {
 		selectedChoice = nil
 		selectedAlbum = nil
+		revealedTrack = nil
 	}
 }
 
@@ -312,6 +322,13 @@ private struct ArtistsList: View {
 				}
 				.listStyle(.plain)
 				.refreshable { await model.refresh() }
+				// For a reveal, which selects an artist that may be far off
+				// screen. Without an anchor this does nothing to a row that is
+				// already visible, such as one just clicked.
+				.onChange(of: selection, initial: true) {
+					guard let selection else { return }
+					proxy.scrollTo(selection.artist.id)
+				}
 				// Long names would otherwise slide underneath the rail rather
 				// than being clipped short of it.
 				.safeAreaPadding(.trailing, showsRail(listing.artists) ? 20 : 0)

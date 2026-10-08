@@ -26,6 +26,6 @@ extension EnvironmentValues {
 
 	/// Opens an album from outside any pane, under its artist in the
 	/// Library, as the web's player cover does. Set by both roots; the player
-	/// bar's cover uses it.
-	@Entry var revealAlbum: @MainActor (ItemRef) -> Void = { _ in }
+	/// bar's cover uses it, passing the playing track to scroll to.
+	@Entry var revealAlbum: @MainActor (ItemRef, ItemRef?) -> Void = { _, _ in }
 }

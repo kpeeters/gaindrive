@@ -90,26 +90,34 @@ struct AlbumsView: View {
 		if albums.isEmpty {
 			EmptyMessage(text: settings.offlineMode ? "Nothing downloaded yet" : "No albums")
 		} else {
-			List(selection: selection) {
-				// The header and the note are untagged, and so not selectable.
-				if model.info != nil || model.portrait != nil {
-					header(model)
+			ScrollViewReader { proxy in
+				List(selection: selection) {
+					// The header and the note are untagged, and so not selectable.
+					if model.info != nil || model.portrait != nil {
+						header(model)
+							.listRowSeparator(.hidden)
+					}
+					if !model.failures.isEmpty, !notesDismissed {
+						PartialFailureNote(
+							failures: model.failures,
+							onRetry: { Task { await model.refresh() } },
+							onDismiss: { notesDismissed = true }
+						)
 						.listRowSeparator(.hidden)
+					}
+					ForEach(albums) { item in
+						row(item)
+					}
 				}
-				if !model.failures.isEmpty, !notesDismissed {
-					PartialFailureNote(
-						failures: model.failures,
-						onRetry: { Task { await model.refresh() } },
-						onDismiss: { notesDismissed = true }
-					)
-					.listRowSeparator(.hidden)
-				}
-				ForEach(albums) { item in
-					row(item)
+				.listStyle(.plain)
+				.refreshable { await model.refresh() }
+				// For a reveal, which selects an album that may be far down a
+				// long discography; see `ArtistsList` for why it needs no flag.
+				.onChange(of: selection?.wrappedValue, initial: true) {
+					guard let album = selection?.wrappedValue else { return }
+					proxy.scrollTo(album.ref)
 				}
 			}
-			.listStyle(.plain)
-			.refreshable { await model.refresh() }
 		}
 	}
 

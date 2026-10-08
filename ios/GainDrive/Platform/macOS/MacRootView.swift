@@ -88,7 +88,7 @@ struct MacRootView: View {
 			PlayerBar()
 		}
 		.frame(minWidth: 720, minHeight: 480)
-		.environment(\.revealAlbum) { reveal($0) }
+		.environment(\.revealAlbum) { reveal($0, track: $1) }
 		// For the menu bar; see `MacCommands`.
 		.focusedSceneValue(\.shellSection, $section)
 		// Space plays and pauses, as in every Mac player. Here rather than as
@@ -109,9 +109,9 @@ struct MacRootView: View {
 		search.open(route)
 	}
 
-	private func reveal(_ album: ItemRef) {
+	private func reveal(_ album: ItemRef, track: ItemRef?) {
 		section = .library
-		artists.reveal(album: album)
+		artists.reveal(album: album, track: track)
 	}
 
 	/// Above the player bar, so the bar spans the whole window, as a
