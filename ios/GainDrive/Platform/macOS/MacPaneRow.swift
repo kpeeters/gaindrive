@@ -9,6 +9,7 @@
 #if os(macOS)
 
 import SwiftUI
+import os
 
 /// `PaneNavigator` on the Mac: the same path, the same 900/650-point pane
 /// count and the same selection-driven levels, but no navigation stacks and no
@@ -32,8 +33,13 @@ struct MacPaneRow<R: Hashable, Root: View, Destination: View, Placeholder: View>
 
 	@Environment(\.paneHeaderLeadingInset) private var leadingInset
 
+	// TEMPORARY: diagnosing the search field being re-created.
+	private static var log: Logger { Logger(subsystem: "org.gaindrive.ios-player", category: "search") }
+
 	var body: some View {
+		let _ = Self._printChanges()
 		GeometryReader { geometry in
+			let _ = Self.log.notice("MacPaneRow width \(geometry.size.width) panes \(PaneMath.count(width: geometry.size.width))")
 			row(min(PaneMath.count(width: geometry.size.width), maxLevels))
 		}
 	}
@@ -49,6 +55,8 @@ struct MacPaneRow<R: Hashable, Root: View, Destination: View, Placeholder: View>
 				column(pane.level, leading: pane.level == first)
 					.environment(\.paneCount, panes)
 					.transition(.move(edge: .trailing).combined(with: .opacity))
+					.onAppear { Self.log.notice("pane \(pane.level) appeared") }
+					.onDisappear { Self.log.notice("pane \(pane.level) disappeared") }
 			}
 		}
 		// Opening a level slides the panes along and closing one slides them
