@@ -7,10 +7,6 @@
 //	full text of the GPL.
 
 import SwiftUI
-#if os(macOS)
-	import AppKit
-	import os
-#endif
 
 struct SearchView: View {
 	@Bindable var model: SearchViewModel
@@ -22,15 +18,9 @@ struct SearchView: View {
 	@State private var chosenAlbum: Album?
 	#if os(macOS)
 		@Environment(\.paneHeaderLeadingInset) private var leadingInset
-		// TEMPORARY: diagnosing the field losing focus once results are listed.
-		@FocusState private var fieldFocused: Bool
-		private static let log = Logger(subsystem: "org.gaindrive.ios-player", category: "search")
 	#endif
 
 	var body: some View {
-		#if os(macOS)
-			let _ = Self._printChanges()
-		#endif
 		// Results stay in the first pane whatever is opened beside them, which
 		// is what a search wants: the next hit is one tap away. Three levels:
 		// results, an artist, one of their albums.
@@ -58,48 +48,22 @@ struct SearchView: View {
 
 	/// The results pane. On iOS the field is `.searchable`, in the results
 	/// pane's bar. On the Mac `.searchable` would put it in the window's
-	/// toolbar, above every pane, so there the field is this pane's whole
-	/// header, drawn here rather than declared with `.paneHeader`.
-	///
-	/// A sibling above the content, not an inset or overlay on it: attached
-	/// to the content, the field was re-created each time the content
-	/// switched (searching, results) and on every focus change, so it lost
-	/// focus at once. The content is stretched because a
-	/// `ContentUnavailableView` is only as tall as its text.
+	/// toolbar, above every pane, so there the pane is a plain stack: the
+	/// field as its header, the results below. The content is stretched
+	/// because a `ContentUnavailableView` is only as tall as its text.
 	private var searchRoot: some View {
 		#if os(macOS)
 			VStack(spacing: 0) {
-				TextField("Artists, albums and tracks", text: $model.query)
-					.textFieldStyle(.roundedBorder)
-					.focused($fieldFocused)
-					// TEMPORARY: re-creation shows as an appear/disappear
-					// pair; a theft as focus false with someone else's
-					// responder.
-					.onAppear { Self.log.notice("field appeared") }
-					.onDisappear { Self.log.notice("field disappeared") }
-					.onChange(of: fieldFocused) { _, focused in
-						Self.log.notice("field focused: \(focused)")
-						guard !focused else { return }
-						DispatchQueue.main.async {
-							let responder = NSApp.keyWindow?.firstResponder
-							Self.log.notice(
-								"first responder now: \(String(describing: responder), privacy: .public)")
-						}
-					}
-					// TEMPORARY experiment: plain header without the `.bar`
-					// material and window drag of `paneHeaderChrome`.
-					.padding(.horizontal, 12)
-					.padding(.leading, leadingInset)
-					.frame(height: PaneHeaderBar.height)
-					.frame(maxWidth: .infinity)
-					.background(Color(nsColor: .windowBackgroundColor))
+				HStack {
+					TextField("Artists, albums and tracks", text: $model.query)
+						.textFieldStyle(.roundedBorder)
+				}
+				.padding(.horizontal, 12)
+				.padding(.leading, leadingInset)
+				.frame(height: PaneHeaderBar.height)
 				Divider()
 				content
 					.frame(maxWidth: .infinity, maxHeight: .infinity)
-					// TEMPORARY: if this pairs up too, the whole pane is
-					// being rebuilt from above.
-					.onAppear { Self.log.notice("content appeared") }
-					.onDisappear { Self.log.notice("content disappeared") }
 			}
 		#else
 			content
@@ -131,7 +95,11 @@ struct SearchView: View {
 			if results.isEmpty, !results.outstanding {
 				ContentUnavailableView.search(text: model.query)
 			} else {
-				list(results)
+				#if os(macOS)
+					macResults(results)
+				#else
+					list(results)
+				#endif
 			}
 		}
 	}
@@ -205,6 +173,121 @@ struct SearchView: View {
 			}
 		}
 	}
+
+	#if os(macOS)
+		/// The Mac's results: a scrolling stack rather than `List`. Above an
+		/// AppKit table the search field went blank and lost its cursor the
+		/// moment results came on screen. A row opens the next pane by
+		/// setting the path, which is what the list's selection does on iOS.
+		private func macResults(_ results: SearchResults) -> some View {
+			ScrollView {
+				LazyVStack(alignment: .leading, spacing: 0, pinnedViews: .sectionHeaders) {
+					filterChips
+						.padding(.horizontal, CGFloat.listLeading)
+						.padding(.vertical, 8)
+
+					if !results.failures.isEmpty, !notesDismissed {
+						PartialFailureNote(
+							failures: results.failures,
+							onRetry: { model.retry() },
+							onDismiss: { notesDismissed = true }
+						)
+						.padding(.horizontal, CGFloat.listLeading)
+					}
+
+					if !results.artists.isEmpty {
+						Section {
+							ForEach(results.artists) { item in
+								macRow(Route.albums(artists: item.artist.refs, name: item.artist.name)) {
+									ArtistRow(item: item)
+								}
+							}
+						} header: {
+							SectionHeading(text: "Artists").pinnedHeaderBackground()
+						}
+					}
+
+					if !results.albums.isEmpty {
+						Section {
+							ForEach(results.albums) { item in
+								macRow(Route.album(item.album.ref, title: item.album.title)) {
+									AlbumRow(item: item)
+								}
+							}
+						} header: {
+							SectionHeading(text: "Albums").pinnedHeaderBackground()
+						}
+					}
+
+					if !results.songs.isEmpty {
+						Section {
+							ForEach(results.songs) { item in
+								macRow(
+									item.song.albumRef.map {
+										Route.album($0, title: item.song.albumTitle, autoPlay: item.song.ref)
+									}
+								) {
+									SongRow(item: item)
+								}
+								.trackActions(for: item.song)
+							}
+						} header: {
+							SectionHeading(text: "Tracks").pinnedHeaderBackground()
+						}
+					}
+
+					// Last, for the reason `list` gives.
+					if !results.chapters.isEmpty {
+						Section {
+							ForEach(results.chapters) { hit in
+								macRow(
+									hit.albumRef.map {
+										Route.album(
+											$0, title: hit.albumTitle, autoPlay: hit.songRef,
+											autoPlayAt: hit.start)
+									}
+								) {
+									ChapterHitRow(hit: hit)
+								}
+							}
+						} header: {
+							SectionHeading(text: "Chapters").pinnedHeaderBackground()
+						}
+					}
+				}
+			}
+			.overlay(alignment: .top) {
+				if results.outstanding {
+					ProgressView().progressViewStyle(.linear)
+				}
+			}
+		}
+
+		/// One result: opens `route` in the next pane and stays highlighted
+		/// while that pane shows it. Without a route the row is drawn and
+		/// inert, as on iOS.
+		@ViewBuilder
+		private func macRow<Row: View>(_ route: Route?, @ViewBuilder row: () -> Row) -> some View {
+			let label = row()
+				.frame(maxWidth: .infinity, alignment: .leading)
+				.padding(.horizontal, CGFloat.listLeading)
+				.padding(.vertical, 4)
+				.contentShape(.rect)
+			if let route {
+				Button {
+					path = [route]
+				} label: {
+					label
+				}
+				.buttonStyle(.plain)
+				.background(
+					path.first == route
+						? Color(nsColor: .unemphasizedSelectedContentBackgroundColor) : .clear)
+			} else {
+				label
+			}
+		}
+	#endif
 
 	/// As in Recents: a hit opens its album and starts there rather than
 	/// playing in place. `Route.album` records why, and it is not cosmetic -
