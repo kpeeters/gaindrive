@@ -73,7 +73,10 @@ struct PlaylistsView: View {
 			content(sections)
 		}
 		.paneHeader("Playlists") {
-			LibrarySelector()
+			// On the Mac it sits at the foot of the sections column.
+			#if !os(macOS)
+				LibrarySelector()
+			#endif
 		} actions: {
 			Button {
 				Task { await model.refresh() }

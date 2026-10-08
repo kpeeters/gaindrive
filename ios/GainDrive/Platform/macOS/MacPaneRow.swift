@@ -26,6 +26,9 @@ struct MacPaneRow<R: Hashable, Root: View, Destination: View, Placeholder: View>
 	let root: () -> Root
 	let destination: (R) -> Destination
 	let placeholder: (Int) -> Placeholder
+	/// The root draws its own header row instead of declaring one with
+	/// `.paneHeader`; see `SearchView` for why.
+	var rootDrawsHeader = false
 
 	@Environment(\.paneHeaderLeadingInset) private var leadingInset
 
@@ -53,13 +56,18 @@ struct MacPaneRow<R: Hashable, Root: View, Destination: View, Placeholder: View>
 		.animation(.default, value: path)
 	}
 
+	@ViewBuilder
 	private func column(_ level: Int, leading: Bool) -> some View {
-		content(level)
-			.frame(maxWidth: .infinity, maxHeight: .infinity)
-			.paneHeaderHost(
-				onBack: leading && level > 0 ? { path.removeLast() } : nil,
-				leadingInset: leading ? leadingInset : 0)
-			.clipped()
+		let pane = content(level).frame(maxWidth: .infinity, maxHeight: .infinity)
+		if level == 0, rootDrawsHeader {
+			pane.clipped()
+		} else {
+			pane
+				.paneHeaderHost(
+					onBack: leading && level > 0 ? { path.removeLast() } : nil,
+					leadingInset: leading ? leadingInset : 0)
+				.clipped()
+		}
 	}
 
 	@ViewBuilder
@@ -136,20 +144,29 @@ struct PaneHeaderBar: View {
 					.tint(Color.accentColor)
 			}
 		}
-		.padding(.horizontal, 12)
-		.padding(.leading, leadingInset)
-		.frame(height: Self.height)
-		.frame(maxWidth: .infinity)
-		.background(.bar)
-		// The headers are where the title bar was, so they are what the window
-		// is moved by; the buttons in them still take their own clicks.
-		.contentShape(.rect)
-		.gesture(WindowDragGesture())
-		.allowsWindowActivationEvents(true)
-		// In a VStack of its own: a Divider takes its direction from the
-		// nearest stack, which is otherwise the row of panes, and it drew as a
-		// vertical line through the middle of the header.
-		.overlay(alignment: .bottom) { VStack(spacing: 0) { Divider() } }
+		.paneHeaderChrome(leadingInset: leadingInset)
+	}
+}
+
+extension View {
+	/// The look of a pane header around whatever row it holds: for
+	/// `PaneHeaderBar`, and for a root that draws its own header.
+	func paneHeaderChrome(leadingInset: CGFloat) -> some View {
+		self
+			.padding(.horizontal, 12)
+			.padding(.leading, leadingInset)
+			.frame(height: PaneHeaderBar.height)
+			.frame(maxWidth: .infinity)
+			.background(.bar)
+			// The headers are where the title bar was, so they are what the window
+			// is moved by; the buttons in them still take their own clicks.
+			.contentShape(.rect)
+			.gesture(WindowDragGesture())
+			.allowsWindowActivationEvents(true)
+			// In a VStack of its own: a Divider takes its direction from the
+			// nearest stack, which is otherwise the row of panes, and it drew as a
+			// vertical line through the middle of the header.
+			.overlay(alignment: .bottom) { VStack(spacing: 0) { Divider() } }
 	}
 }
 

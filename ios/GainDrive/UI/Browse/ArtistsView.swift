@@ -215,7 +215,10 @@ private struct ArtistsList: View {
 					Label("Library", systemImage: "chevron.backward")
 				}
 			}
-			LibrarySelector()
+			// On the Mac it sits at the foot of the sections column.
+			#if !os(macOS)
+				LibrarySelector()
+			#endif
 		} actions: {
 			if uploads {
 				// Where Android and the web put the fetch panel: in the

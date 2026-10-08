@@ -18,9 +18,10 @@ import SwiftUI
 /// `MacPaneRow` draws at the top of each pane, as Finder's columns and Xcode's
 /// editors label themselves.
 ///
-/// Everything a pane's bar holds goes here, the library selector and refresh
-/// included: the Mac window's own toolbar stays empty, because no other
-/// platform has a bar spanning all the panes.
+/// Everything a pane's bar holds goes here, refresh included: the Mac
+/// window's own toolbar stays empty, because no other platform has a bar
+/// spanning all the panes. The library selector is the exception on the Mac,
+/// where it sits at the foot of the sections column.
 extension View {
 	func paneHeader(_ title: String) -> some View {
 		paneHeader(title) { EmptyView() }

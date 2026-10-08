@@ -16,6 +16,9 @@ struct SearchView: View {
 	@State private var notesDismissed = false
 	/// The album picked in an artist's pane; see `Route.albumSelection`.
 	@State private var chosenAlbum: Album?
+	#if os(macOS)
+		@Environment(\.paneHeaderLeadingInset) private var leadingInset
+	#endif
 
 	var body: some View {
 		// Results stay in the first pane whatever is opened beside them, which
@@ -29,7 +32,8 @@ struct SearchView: View {
 			destination: { destination($0) },
 			placeholder: { _ in
 				ContentUnavailableView("Choose a result", systemImage: "magnifyingglass")
-			}
+			},
+			rootDrawsHeader: true
 		)
 		.task(id: selection.scope) { model.scopeChanged() }
 		.onChange(of: selection.scope) { path.removeAll() }
@@ -44,17 +48,17 @@ struct SearchView: View {
 
 	/// The results pane. On iOS the field is `.searchable`, in the results
 	/// pane's bar. On the Mac `.searchable` would put it in the window's
-	/// toolbar, above every pane, so there it is a field in this pane's
-	/// header instead.
+	/// toolbar, above every pane, so there the field is this pane's whole
+	/// header. Drawn here rather than declared with `.paneHeader`: carried
+	/// up as a preference, the field was re-created once results were
+	/// listed and lost focus on every click.
 	private var searchRoot: some View {
 		#if os(macOS)
 			content
-				.paneHeader("Search") {
-					LibrarySelector()
-				} actions: {
+				.safeAreaInset(edge: .top, spacing: 0) {
 					TextField("Artists, albums and tracks", text: $model.query)
 						.textFieldStyle(.roundedBorder)
-						.frame(maxWidth: 240)
+						.paneHeaderChrome(leadingInset: leadingInset)
 				}
 		#else
 			content

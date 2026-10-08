@@ -61,6 +61,8 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 	/// What an empty pane says, by level: "Choose an artist" rather than a
 	/// blank rectangle, which on a tablet reads as a rendering fault.
 	@ViewBuilder let placeholder: (Int) -> Placeholder
+	/// Mac only: the root draws its own header row; see `MacPaneRow`.
+	var rootDrawsHeader = false
 
 	var body: some View {
 		#if os(macOS)
@@ -68,7 +70,7 @@ struct PaneNavigator<R: Hashable, Root: View, Destination: View, Placeholder: Vi
 			// `MacPaneRow`.
 			MacPaneRow(
 				path: $path, maxLevels: maxLevels, root: root, destination: destination,
-				placeholder: placeholder)
+				placeholder: placeholder, rootDrawsHeader: rootDrawsHeader)
 		#else
 			stackOrPanes
 		#endif

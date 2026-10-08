@@ -121,6 +121,13 @@ struct MacRootView: View {
 			List(SidebarItem.allCases, selection: $section) { section in
 				Label(section.title, systemImage: section.symbol)
 			}
+			// One selector for every section, rather than one in each root
+			// pane's header: the scope is the window's, not a pane's.
+			.safeAreaInset(edge: .bottom, spacing: 0) {
+				LibrarySelector()
+					.padding(12)
+					.frame(maxWidth: .infinity, alignment: .leading)
+			}
 			.navigationSplitViewColumnWidth(min: 140, ideal: 170, max: 240)
 		} detail: {
 			detail
