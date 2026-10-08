@@ -35,20 +35,6 @@ struct ShellMessages: ViewModifier {
 
 	func body(content: Content) -> some View {
 		content
-			// **Playback errors belong to the shell, not to a screen.** They
-			// arrive from the audio session, from an item that failed to load
-			// and from the watchdog - and a track that could not be played
-			// leaves no player bar to hang an alert on.
-			.alert(
-				"Playback problem",
-				isPresented: Binding(
-					get: { player.errorMessage != nil },
-					set: { if !$0 { player.clearError() } })
-			) {
-				Button("OK") { player.clearError() }
-			} message: {
-				Text(player.errorMessage ?? "")
-			}
 			// Asked from the shell because the row that started the play may
 			// be gone by the time the bookmark lookup answers.
 			.alert(
@@ -67,6 +53,23 @@ struct ShellMessages: ViewModifier {
 				Button("Cancel", role: .cancel) { player.answerResume(fromStart: nil) }
 			} message: {
 				Text("Continue \"\(player.resumeOffer?.title ?? "")\" where you left off?")
+			}
+			// Straight after the alert it is meant for, so the shell's other
+			// alerts keep the app icon. Only the Mac draws an icon at all.
+			.dialogIcon(player.resumeOffer?.cover.map { Image(platformImage: $0) })
+			// **Playback errors belong to the shell, not to a screen.** They
+			// arrive from the audio session, from an item that failed to load
+			// and from the watchdog - and a track that could not be played
+			// leaves no player bar to hang an alert on.
+			.alert(
+				"Playback problem",
+				isPresented: Binding(
+					get: { player.errorMessage != nil },
+					set: { if !$0 { player.clearError() } })
+			) {
+				Button("OK") { player.clearError() }
+			} message: {
+				Text(player.errorMessage ?? "")
 			}
 			// Pinning is reached from several listings, so a refusal belongs
 			// to the shell for the same reason a playback error does.

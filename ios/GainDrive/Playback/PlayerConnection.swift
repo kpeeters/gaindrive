@@ -42,6 +42,8 @@ struct ResumeOffer {
 	let startIndex: Int
 	/// Seconds.
 	let position: Double
+	/// The macOS alert's icon, in place of the app's own.
+	let cover: PlatformImage?
 	var title: String { songs[startIndex].title }
 }
 
@@ -254,10 +256,15 @@ final class PlayerConnection {
 			playNow(songs, startIndex: startIndex, startPosition: startPosition)
 			return
 		}
+		let source = coverSource(for: song, size: CoverSize.thumb)
 		Task {
+			// Fetched alongside the bookmark, because the alert's icon cannot
+			// change once it is up.
+			async let cover = source == nil ? nil : ImageStore.shared.image(for: source!)
 			let at = await library.resumePosition(song)
 			if at > 0 {
-				resumeOffer = ResumeOffer(songs: songs, startIndex: startIndex, position: at)
+				resumeOffer = ResumeOffer(
+					songs: songs, startIndex: startIndex, position: at, cover: await cover)
 			} else {
 				playNow(songs, startIndex: startIndex, startPosition: 0)
 			}
