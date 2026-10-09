@@ -46,6 +46,14 @@ struct SettingsView: View {
 	}
 
 	private var categories: some View {
+		VStack(spacing: 0) {
+			list
+			about
+		}
+		.paneHeader("Settings")
+	}
+
+	private var list: some View {
 		List(selection: PaneSelection.selection($path, level: 0)) {
 			Section {
 				LabeledContent("Servers", value: serversSummary)
@@ -67,35 +75,33 @@ struct SettingsView: View {
 					.paneDisclosure()
 					.tag(Route.appearance)
 			}
-
-			// Inline rather than a category of its own: a screen holding
-			// one sentence is a tap for nothing. The GPL asks that an
-			// interactive program say it is free software and where the
-			// terms are, and this is the only place the app has to say so.
-			// The text is Android's; only the website is a control, so it
-			// is the only part in link colour.
-			Section("About") {
-				HStack(alignment: .top, spacing: 12) {
-					Image("Logo")
-						.resizable()
-						.scaledToFit()
-						.frame(width: 40, height: 40)
-						.clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-					VStack(alignment: .leading, spacing: 4) {
-						// A Mac sidebar row holds one line of text unless told
-						// otherwise, which kept only the first of these.
-						Text(Self.aboutText)
-							.foregroundStyle(.secondary)
-							.lineLimit(nil)
-							.fixedSize(horizontal: false, vertical: true)
-						Link(Self.website, destination: URL(string: Self.website)!)
-					}
-					.font(.footnote)
-				}
-			}
 		}
 		.sidebarRows()
-		.paneHeader("Settings")
+	}
+
+	/// Below the list rather than a row in it: a Mac sidebar-style row has
+	/// a fixed height and clipped all but the first line. Not a category of
+	/// its own either, since a screen holding a few lines is a tap for
+	/// nothing. The GPL asks that an interactive program say it is free
+	/// software and where the terms are, and this is the only place the app
+	/// has to say so. Only the website is a control, so it is the only part
+	/// in link colour.
+	private var about: some View {
+		HStack(alignment: .top, spacing: 12) {
+			Image("Logo")
+				.resizable()
+				.scaledToFit()
+				.frame(width: 40, height: 40)
+				.clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+			VStack(alignment: .leading, spacing: 4) {
+				Text(Self.aboutText)
+					.foregroundStyle(.secondary)
+				Link(Self.website, destination: URL(string: Self.website)!)
+			}
+			.font(.footnote)
+		}
+		.padding(16)
+		.frame(maxWidth: .infinity, alignment: .leading)
 	}
 
 	@ViewBuilder
