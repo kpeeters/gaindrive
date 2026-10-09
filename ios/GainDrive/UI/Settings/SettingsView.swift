@@ -69,26 +69,28 @@ struct SettingsView: View {
 			}
 
 			// Inline rather than a category of its own: a screen holding
-			// one sentence is a tap for nothing.
+			// one sentence is a tap for nothing. The GPL asks that an
+			// interactive program say it is free software and where the
+			// terms are, and this is the only place the app has to say so.
+			// The text is Android's; only the website is a control, so it
+			// is the only part in link colour.
 			Section("About") {
-				HStack(spacing: 12) {
+				HStack(alignment: .top, spacing: 12) {
 					Image("Logo")
 						.resizable()
 						.scaledToFit()
 						.frame(width: 40, height: 40)
 						.clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-					VStack(alignment: .leading) {
-						Text("GainDrive")
-						Text(Self.versionText)
-							.font(.footnote)
+					VStack(alignment: .leading, spacing: 4) {
+						Text(Self.aboutText)
 							.foregroundStyle(.secondary)
+						Link(Self.website, destination: URL(string: Self.website)!)
 					}
-				}
-				Text("A client for your own GainDrive music server.")
 					.font(.footnote)
-					.foregroundStyle(.secondary)
+				}
 			}
 		}
+		.sidebarRows()
 		.paneHeader("Settings")
 	}
 
@@ -128,10 +130,16 @@ struct SettingsView: View {
 		settings.mergeDuplicateAlbums ? "Merging duplicates" : "Showing duplicates"
 	}
 
-	private static var versionText: String {
-		let info = Bundle.main.infoDictionary
-		let version = info?["CFBundleShortVersionString"] as? String ?? "?"
-		let build = info?["CFBundleVersion"] as? String ?? "?"
-		return "Version \(version) (\(build))"
+	private static let website = "https://www.gaindrive.org"
+
+	private static var aboutText: String {
+		let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"]
+			as? String ?? "?"
+		return """
+			GainDrive \(version)
+			A self-hosted, OpenSubsonic-compatible music client.
+			Copyright (C) 2026  Kasper Peeters
+			Licensed under the GNU General Public License, version 3 or later.
+			"""
 	}
 }

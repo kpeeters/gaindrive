@@ -70,6 +70,21 @@ extension View {
 		#endif
 	}
 
+	/// Rows like the sections column's on the Mac: no separators, the
+	/// rounded selection highlight and its roomier spacing. On the pane's own
+	/// background, though, not the sidebar's, so it still reads as a pane.
+	/// iOS keeps its default list.
+	@ViewBuilder
+	func sidebarRows() -> some View {
+		#if os(macOS)
+			listStyle(.sidebar)
+				.scrollContentBackground(.hidden)
+				.background(Color.platformBackground)
+		#else
+			self
+		#endif
+	}
+
 	/// Capitalised words, for a display name.
 	@ViewBuilder
 	func wordsAutocapitalization() -> some View {
@@ -105,8 +120,7 @@ extension Color {
 
 /// The settings screens' form. The Mac's default columns style clips the
 /// labels and runs footers into the next section, and on the grey window the
-/// groups' own fill barely shows. So: grouped, on the text background, with
-/// the groups in the sidebar's colour to tie them to the navigation pane.
+/// groups' own fill barely shows. So: grouped, on the text background.
 struct SettingsForm<Content: View>: View {
 	private let content: Content
 
@@ -116,10 +130,9 @@ struct SettingsForm<Content: View>: View {
 
 	var body: some View {
 		#if os(macOS)
-			Form {
-				Group { content }
-					.listRowBackground(Color.sidebarBackground)
-			}
+			// No row background: a Mac grouped form ignores
+			// `listRowBackground`, even set on the row itself.
+			Form { content }
 			.formStyle(.grouped)
 			.scrollContentBackground(.hidden)
 			.background(Color(nsColor: .textBackgroundColor))
