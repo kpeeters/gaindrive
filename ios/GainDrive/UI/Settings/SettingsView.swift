@@ -82,8 +82,12 @@ struct SettingsView: View {
 						.frame(width: 40, height: 40)
 						.clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
 					VStack(alignment: .leading, spacing: 4) {
+						// A Mac sidebar row holds one line of text unless told
+						// otherwise, which kept only the first of these.
 						Text(Self.aboutText)
 							.foregroundStyle(.secondary)
+							.lineLimit(nil)
+							.fixedSize(horizontal: false, vertical: true)
 						Link(Self.website, destination: URL(string: Self.website)!)
 					}
 					.font(.footnote)
