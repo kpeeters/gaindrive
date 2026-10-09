@@ -51,14 +51,18 @@ struct StorageSettingsView: View {
 					// Mac only, on request: the sandbox container is hidden and
 					// protected, so Finder and Terminal cannot easily get there
 					// on their own. A film's package lives where the system's
-					// downloader put it, outside `Films`, so it is selected too.
+					// downloader put it, in a `com.apple.UserManagedAssets.*`
+					// folder beside Application Support. Finder opens a single
+					// window for a selection and drops whatever is outside its
+					// folder, so the selection is those siblings in `Library`.
 					Button("Show in Finder") {
 						Task {
 							let base = FileManager.default.urls(
 								for: .applicationSupportDirectory, in: .userDomainMask)[0]
-							let folders = ["Media", "Films"].map { base.appending(path: $0) }
+							let assets = (await FilmStore.shared.packages())
+								.map { $0.deletingLastPathComponent() }
 							NSWorkspace.shared.activateFileViewerSelecting(
-								folders + (await FilmStore.shared.packages()))
+								[base] + Set(assets).sorted { $0.path() < $1.path() })
 						}
 					}
 				#endif
