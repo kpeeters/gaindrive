@@ -36,6 +36,9 @@ struct StorageSettingsView: View {
 				LabeledContent("Used") {
 					Text(PinRepository.readable(pins.usageBytes))
 				}
+				// TEMPORARY experiment: does a Mac grouped form honour a row
+				// background set on the row itself?
+				.listRowBackground(Color.red)
 				Picker("Limit", selection: $settings.cacheCapBytes) {
 					ForEach(SettingsStore.cacheCapChoices, id: \.self) { choice in
 						Text(PinRepository.readable(choice)).tag(choice)
