@@ -189,21 +189,27 @@ actor FilmStore {
 
 	private static var home: URL { URL(filePath: NSHomeDirectory(), directoryHint: .isDirectory) }
 
-	/// Compared by components with symlinks resolved: on iOS the container
-	/// is reached as both `/var/...` and `/private/var/...`.
+	/// The session hands over its location as a URL **relative to the home
+	/// directory**, which is why `.absoluteURL` comes first: the components
+	/// of a relative URL never start with the home directory's, and the
+	/// relative path would be stored as if it were absolute. Compared with
+	/// symlinks resolved: on iOS the container is reached as both
+	/// `/var/...` and `/private/var/...`.
 	private static func relative(_ url: URL) -> String {
-		let full = url.resolvingSymlinksInPath().pathComponents
+		let absolute = url.absoluteURL
+		let full = absolute.resolvingSymlinksInPath().pathComponents
 		let base = home.resolvingSymlinksInPath().pathComponents
-		guard full.starts(with: base) else { return url.path(percentEncoded: false) }
+		guard full.starts(with: base) else { return absolute.path(percentEncoded: false) }
 		return "~/" + full.dropFirst(base.count).joined(separator: "/")
 	}
 
-	/// `.absoluteURL` because `appending(path:)` may keep `home` as a base
-	/// and return a relative URL. File access resolves that, but the
-	/// pasteboard, and so Finder, refuses it.
+	/// A path with neither `~/` nor `/` is one written before `relative`
+	/// made the location absolute, and is relative to the home directory
+	/// too. `URL(filePath:)` would resolve it against the working directory.
 	private static func absolute(_ path: String) -> URL {
-		guard path.hasPrefix("~/") else { return URL(filePath: path) }
-		return home.appending(path: String(path.dropFirst(2))).absoluteURL
+		if path.hasPrefix("/") { return URL(filePath: path) }
+		let rest = path.hasPrefix("~/") ? String(path.dropFirst(2)) : path
+		return home.appending(path: rest).absoluteURL
 	}
 
 	/// A package is a directory, so its size is a walk.
