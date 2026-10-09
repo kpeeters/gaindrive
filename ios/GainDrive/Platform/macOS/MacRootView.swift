@@ -128,6 +128,9 @@ struct MacRootView: View {
 					.padding(12)
 					.frame(maxWidth: .infinity, alignment: .leading)
 			}
+			// After the inset, so the library selector sits on it too.
+			.scrollContentBackground(.hidden)
+			.background(Color.sidebarBackground)
 			.navigationSplitViewColumnWidth(min: 140, ideal: 170, max: 240)
 		} detail: {
 			detail

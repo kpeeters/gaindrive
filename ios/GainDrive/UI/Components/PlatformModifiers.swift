@@ -92,12 +92,21 @@ extension Color {
 			Color(.systemBackground)
 		#endif
 	}
+
+	#if os(macOS)
+		/// The sidebar's background, and the settings groups' with it. Opaque
+		/// rather than the system's sidebar material, which takes its tint
+		/// from behind the window and so cannot be matched by anything else.
+		static var sidebarBackground: Color {
+			Color(nsColor: .windowBackgroundColor)
+		}
+	#endif
 }
 
 /// The settings screens' form. The Mac's default columns style clips the
 /// labels and runs footers into the next section, and on the grey window the
 /// groups' own fill barely shows. So: grouped, on the text background, with
-/// the groups in the sidebar's material to tie them to the navigation pane.
+/// the groups in the sidebar's colour to tie them to the navigation pane.
 struct SettingsForm<Content: View>: View {
 	private let content: Content
 
@@ -109,7 +118,7 @@ struct SettingsForm<Content: View>: View {
 		#if os(macOS)
 			Form {
 				Group { content }
-					.listRowBackground(SidebarMaterial())
+					.listRowBackground(Color.sidebarBackground)
 			}
 			.formStyle(.grouped)
 			.scrollContentBackground(.hidden)
@@ -119,21 +128,6 @@ struct SettingsForm<Content: View>: View {
 		#endif
 	}
 }
-
-#if os(macOS)
-	/// The sidebar is not a colour but a material, tinted by what is behind
-	/// the window, so matching it means using the same material.
-	private struct SidebarMaterial: NSViewRepresentable {
-		func makeNSView(context: Context) -> NSVisualEffectView {
-			let view = NSVisualEffectView()
-			view.material = .sidebar
-			view.blendingMode = .behindWindow
-			return view
-		}
-
-		func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-	}
-#endif
 
 /// The list edit button, iOS only: a Mac list reorders and deletes without an
 /// edit mode.
