@@ -98,7 +98,7 @@ struct StorageSettingsView: View {
 			Section {
 				// No confirmation for either: what goes is re-fetched on the next
 				// play or the next scroll, unlike a download.
-				Button("Free \(PinRepository.readable(pins.evictableBytes))") {
+				Button(freeLabel) {
 					Task { await pins.freeEvictable() }
 				}
 				.disabled(pins.evictableBytes == 0)
@@ -135,6 +135,10 @@ struct StorageSettingsView: View {
 				.disabled(pins.pins.isEmpty)
 			}
 		}
+		// The Mac's default form style is columns, which clips the labels,
+		// centres the lot vertically and runs footers into the next section.
+		// Grouped is what iOS already uses.
+		.formStyle(.grouped)
 		.paneHeader("Storage")
 		.inlineTitle()
 		// Re-reads what each pin covers, which is what makes a pinned playlist
@@ -169,6 +173,13 @@ struct StorageSettingsView: View {
 		}
 	}
 
+	/// The formatter spells an empty cache "Zero KB", which reads oddly
+	/// after "Free".
+	private var freeLabel: String {
+		pins.evictableBytes == 0
+			? "Nothing to free" : "Free \(PinRepository.readable(pins.evictableBytes))"
+	}
+
 	private var coverLabel: String {
 		guard let coverBytes else { return "Clear cover art" }
 		return "Clear cover art (\(PinRepository.readable(Int64(coverBytes))))"
@@ -186,11 +197,20 @@ struct StorageSettingsView: View {
 			Spacer(minLength: 0)
 		}
 		.swipeActions(edge: .trailing) {
-			Button(role: .destructive) {
-				removing = pin
-			} label: {
-				Label("Remove", systemImage: "trash")
-			}
+			removeButton(pin)
+		}
+		// A Mac form row cannot be swiped, so the context menu is its way to
+		// remove a single download.
+		.contextMenu {
+			removeButton(pin)
+		}
+	}
+
+	private func removeButton(_ pin: Pin) -> some View {
+		Button(role: .destructive) {
+			removing = pin
+		} label: {
+			Label("Remove", systemImage: "trash")
 		}
 	}
 }
