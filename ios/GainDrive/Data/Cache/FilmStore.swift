@@ -100,6 +100,11 @@ actor FilmStore {
 		return FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) ? url : nil
 	}
 
+	/// Every package's location, finished or not, for showing in Finder.
+	func packages() -> [URL] {
+		entries.values.map { Self.absolute($0.path) }
+	}
+
 	func heldRefs() -> Set<ItemRef> {
 		Set(entries.values.filter(\.complete).map(\.ref))
 	}

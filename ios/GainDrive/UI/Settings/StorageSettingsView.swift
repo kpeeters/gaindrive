@@ -50,13 +50,16 @@ struct StorageSettingsView: View {
 				#if os(macOS)
 					// Mac only, on request: the sandbox container is hidden and
 					// protected, so Finder and Terminal cannot easily get there
-					// on their own. Films themselves live where the system's
-					// downloader put them; `Films` holds their index.
+					// on their own. A film's package lives where the system's
+					// downloader put it, outside `Films`, so it is selected too.
 					Button("Show in Finder") {
-						let base = FileManager.default.urls(
-							for: .applicationSupportDirectory, in: .userDomainMask)[0]
-						NSWorkspace.shared.activateFileViewerSelecting(
-							["Media", "Films"].map { base.appending(path: $0) })
+						Task {
+							let base = FileManager.default.urls(
+								for: .applicationSupportDirectory, in: .userDomainMask)[0]
+							let folders = ["Media", "Films"].map { base.appending(path: $0) }
+							NSWorkspace.shared.activateFileViewerSelecting(
+								folders + (await FilmStore.shared.packages()))
+						}
 					}
 				#endif
 			} footer: {
