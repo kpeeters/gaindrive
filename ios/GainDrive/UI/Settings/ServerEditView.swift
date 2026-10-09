@@ -57,7 +57,7 @@ struct ServerEditView: View {
 
 	var body: some View {
 		NavigationStack {
-			Form {
+			SettingsForm {
 				Section {
 					TextField("Server address", text: $urlText)
 						.urlEntry()

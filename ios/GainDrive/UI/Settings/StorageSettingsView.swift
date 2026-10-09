@@ -31,7 +31,7 @@ struct StorageSettingsView: View {
 
 	var body: some View {
 		@Bindable var settings = settings
-		Form {
+		SettingsForm {
 			Section {
 				LabeledContent("Used") {
 					Text(PinRepository.readable(pins.usageBytes))
@@ -135,17 +135,6 @@ struct StorageSettingsView: View {
 				.disabled(pins.pins.isEmpty)
 			}
 		}
-		// The Mac's default form style is columns, which clips the labels,
-		// centres the lot vertically and runs footers into the next section.
-		// Grouped is what iOS already uses.
-		.formStyle(.grouped)
-		#if os(macOS)
-			// On the Mac's grey window background the groups' own fill barely
-			// shows; the text background (white, or dark in dark mode) gives
-			// them an edge.
-			.scrollContentBackground(.hidden)
-			.background(Color(nsColor: .textBackgroundColor))
-		#endif
 		.paneHeader("Storage")
 		.inlineTitle()
 		// Re-reads what each pin covers, which is what makes a pinned playlist
@@ -210,7 +199,7 @@ struct StorageSettingsView: View {
 				Image(systemName: "trash")
 			}
 			.buttonStyle(.borderless)
-			.foregroundStyle(.red)
+			.foregroundStyle(Color.accentColor)
 			.accessibilityLabel("Remove")
 		}
 	}

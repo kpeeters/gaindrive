@@ -14,7 +14,7 @@ struct CastSettingsView: View {
 	@Environment(SettingsStore.self) private var settings
 
 	var body: some View {
-		Form {
+		SettingsForm {
 			Section {
 				@Bindable var settings = settings
 				Toggle("Cast at original quality", isOn: $settings.castOriginal)

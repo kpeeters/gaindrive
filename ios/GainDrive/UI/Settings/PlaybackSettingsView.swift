@@ -18,7 +18,7 @@ struct PlaybackSettingsView: View {
 	@Environment(SettingsStore.self) private var settings
 
 	var body: some View {
-		Form {
+		SettingsForm {
 			Section {
 				Picker("Quality", selection: limit) {
 					Text("Original").tag(0)

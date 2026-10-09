@@ -13,7 +13,7 @@ struct AppearanceSettingsView: View {
 
 	var body: some View {
 		@Bindable var settings = settings
-		Form {
+		SettingsForm {
 			Picker("Theme", selection: $settings.themeMode) {
 				ForEach(ThemeMode.allCases) { mode in
 					Text(mode.label).tag(mode)

@@ -14,7 +14,7 @@ struct LibrarySettingsView: View {
 
 	var body: some View {
 		@Bindable var settings = settings
-		Form {
+		SettingsForm {
 			Section {
 				Toggle("Merge duplicate albums", isOn: $settings.mergeDuplicateAlbums)
 			} footer: {
