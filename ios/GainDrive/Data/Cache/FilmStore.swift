@@ -198,9 +198,12 @@ actor FilmStore {
 		return "~/" + full.dropFirst(base.count).joined(separator: "/")
 	}
 
+	/// `.absoluteURL` because `appending(path:)` may keep `home` as a base
+	/// and return a relative URL. File access resolves that, but the
+	/// pasteboard, and so Finder, refuses it.
 	private static func absolute(_ path: String) -> URL {
 		guard path.hasPrefix("~/") else { return URL(filePath: path) }
-		return home.appending(path: String(path.dropFirst(2)))
+		return home.appending(path: String(path.dropFirst(2))).absoluteURL
 	}
 
 	/// A package is a directory, so its size is a walk.
