@@ -139,6 +139,13 @@ struct StorageSettingsView: View {
 		// centres the lot vertically and runs footers into the next section.
 		// Grouped is what iOS already uses.
 		.formStyle(.grouped)
+		#if os(macOS)
+			// On the Mac's grey window background the groups' own fill barely
+			// shows; the text background (white, or dark in dark mode) gives
+			// them an edge.
+			.scrollContentBackground(.hidden)
+			.background(Color(nsColor: .textBackgroundColor))
+		#endif
 		.paneHeader("Storage")
 		.inlineTitle()
 		// Re-reads what each pin covers, which is what makes a pinned playlist
@@ -195,22 +202,16 @@ struct StorageSettingsView: View {
 					.foregroundStyle(.secondary)
 			}
 			Spacer(minLength: 0)
-		}
-		.swipeActions(edge: .trailing) {
-			removeButton(pin)
-		}
-		// A Mac form row cannot be swiped, so the context menu is its way to
-		// remove a single download.
-		.contextMenu {
-			removeButton(pin)
-		}
-	}
-
-	private func removeButton(_ pin: Pin) -> some View {
-		Button(role: .destructive) {
-			removing = pin
-		} label: {
-			Label("Remove", systemImage: "trash")
+			// Visible rather than only a swipe, which a Mac form row lacks
+			// and which nothing on iOS hints at.
+			Button(role: .destructive) {
+				removing = pin
+			} label: {
+				Image(systemName: "trash")
+			}
+			.buttonStyle(.borderless)
+			.foregroundStyle(.red)
+			.accessibilityLabel("Remove")
 		}
 	}
 }
