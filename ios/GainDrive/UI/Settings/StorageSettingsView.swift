@@ -7,6 +7,9 @@
 //	full text of the GPL.
 
 import SwiftUI
+#if os(macOS)
+	import AppKit
+#endif
 
 /// What is stored on the device, and how much of it there may be.
 ///
@@ -44,6 +47,18 @@ struct StorageSettingsView: View {
 				.onChange(of: settings.cacheCapBytes) {
 					Task { await pins.capChanged() }
 				}
+				#if os(macOS)
+					// Mac only, on request: the sandbox container is hidden and
+					// protected, so Finder and Terminal cannot easily get there
+					// on their own. Films themselves live where the system's
+					// downloader put them; `Films` holds their index.
+					Button("Show in Finder") {
+						let base = FileManager.default.urls(
+							for: .applicationSupportDirectory, in: .userDomainMask)[0]
+						NSWorkspace.shared.activateFileViewerSelecting(
+							["Media", "Films"].map { base.appending(path: $0) })
+					}
+				#endif
 			} footer: {
 				// Both halves said, so the cap reads neither as a promise to keep
 				// everything nor as a threat to the downloads.
