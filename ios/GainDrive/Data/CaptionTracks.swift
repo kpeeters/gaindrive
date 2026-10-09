@@ -29,8 +29,11 @@ struct CaptionTracks: Sendable {
 	/// is chosen.** The same bargain the web client strikes by leaving a
 	/// `<track>` in its default `disabled` mode and Android by
 	/// `setSelectionFlags(0)`: an unselected caption is never fetched.
+	///
+	/// A downloaded film answers from its stored captions, online or not.
 	@MainActor
 	func list(for song: ItemRef) async -> [CaptionTrack] {
+		if let stored = await FilmStore.shared.captions(for: song) { return stored }
 		guard let client = registry.client(for: song.server) else { return [] }
 		guard let info = try? await client.videoInfo(id: song.id) else { return [] }
 		return info.captions.compactMap { dto in
@@ -44,10 +47,32 @@ struct CaptionTracks: Sendable {
 
 	@MainActor
 	func cues(for song: ItemRef, track: CaptionTrack) async -> [Cue] {
+		if let text = await FilmStore.shared.captionText(for: song, id: track.id) {
+			return WebVTT.parse(text)
+		}
 		guard let client = registry.client(for: song.server) else { return [] }
 		guard let vtt = try? await client.captions(id: song.id, captionId: track.id) else {
 			return []
 		}
 		return WebVTT.parse(vtt)
+	}
+
+	/// Every track with its WebVTT text, for a film being downloaded. Nil
+	/// when the server could not be asked, so a later refresh tries again; a
+	/// track that fails on its own is left out rather than failing the rest.
+	@MainActor
+	func download(for song: ItemRef) async -> [(CaptionTrack, String)]? {
+		guard let client = registry.client(for: song.server),
+			let info = try? await client.videoInfo(id: song.id)
+		else { return nil }
+		var found: [(CaptionTrack, String)] = []
+		for dto in info.captions {
+			guard let id = dto.id, !id.isEmpty,
+				let text = try? await client.captions(id: song.id, captionId: id)
+			else { continue }
+			let name = dto.name.flatMap { $0.isEmpty ? nil : $0 } ?? "Subtitles"
+			found.append((CaptionTrack(id: id, name: name), text))
+		}
+		return found
 	}
 }

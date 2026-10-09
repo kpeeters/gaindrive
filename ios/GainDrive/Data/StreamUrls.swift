@@ -147,6 +147,16 @@ enum StreamUrls {
 	/// file takes the playlist.
 	static let serverFileContainers: Set<String> = ["mp4", "m4v", "webm"]
 
+	/// A film's HLS playlist: the transport for everything not sent as a
+	/// file, and for every film download.
+	///
+	/// `.m3u8` rather than `.view`: the server answers both, and the
+	/// extension is how AVFoundation knows it is a playlist. That is what
+	/// `SubsonicClient.url`'s `suffix` has been there for since phase 1.
+	static func hls(id: String, client: SubsonicClient) -> URL {
+		client.url("hls", suffix: ".m3u8", parameters: ["id": id])
+	}
+
 	/// A film, which is a different question from a track.
 	///
 	/// **Neither `format` nor `maxBitRate` goes on a video URL**, and that is
@@ -197,15 +207,11 @@ enum StreamUrls {
 			asFile
 			? client.url("stream", parameters: videoParameters(
 				id: song.ref.id, containers: files.subtracting(serverFileContainers)))
-			// `.m3u8` rather than `.view`: the server answers both, and the
-			// extension is how AVFoundation knows it is a playlist. That is
-			// what `SubsonicClient.url`'s `suffix` has been there for since
-			// phase 1.
-			: client.url("hls", suffix: ".m3u8", parameters: ["id": song.ref.id])
+			: hls(id: song.ref.id, client: client)
 		return StreamTarget(
 			url: url,
-			// Nothing was asked for and nothing is stored: video is never
-			// cached, so the key names a file that will not exist.
+			// Nothing was asked for. A downloaded film is found by
+			// `FilmStore`, not by this key.
 			quality: .original,
 			cacheKey: CacheKeys.of(song.ref, quality: .original),
 			contentType: nil)

@@ -27,7 +27,6 @@ struct TrackActions: ViewModifier {
 	@Environment(PlayerConnection.self) private var player
 	@Environment(PinRepository.self) private var pins
 	@Environment(StarStore.self) private var stars
-	@Environment(SettingsStore.self) private var settings
 	@State private var addingTo: Song?
 
 	func body(content: Content) -> some View {
@@ -57,18 +56,12 @@ struct TrackActions: ViewModifier {
 				} label: {
 					Label("Add to playlist…", systemImage: "music.note.list")
 				}
-				// No download for a film: one evicts the whole stored library,
-				// and a re-encoded one never has a length to call it complete
-				// by. A video played for its soundtrack is an ordinary track.
-				// Android's sheet draws the same line.
-				if !settings.showsPicture(song) || isPinned {
-					Button {
-						Task { await pins.toggle(pin, isVideo: song.isVideo, cover: song.coverArt) }
-					} label: {
-						Label(
-							isPinned ? "Remove download" : "Download",
-							systemImage: isPinned ? "arrow.down.circle.fill" : "arrow.down.circle")
-					}
+				Button {
+					Task { await pins.toggle(pin, song: song) }
+				} label: {
+					Label(
+						isPinned ? "Remove download" : "Download",
+						systemImage: isPinned ? "arrow.down.circle.fill" : "arrow.down.circle")
 				}
 			}
 			.sheet(item: $addingTo) { song in

@@ -67,14 +67,17 @@ struct GainDriveApp: App {
 		// them under a key nothing looks for.
 		let targets = StreamTargets(registry: registry, settings: settings)
 		let queue = DownloadQueue(store: store)
+		let filmQueue = FilmQueue(store: FilmStore.shared)
 		let pins = PinRepository(
-			library: library, store: store, queue: queue, targets: targets, settings: settings,
-			network: NetworkPath())
+			library: library, store: store, queue: queue, filmQueue: filmQueue,
+			filmStore: FilmStore.shared, captions: CaptionTracks(registry: registry),
+			targets: targets, settings: settings, network: NetworkPath())
 		_pins = State(initialValue: pins)
-		AppDelegate.adopt(queue)
+		AppDelegate.adopt(queue, films: filmQueue)
 		// The store is the authority on what is held; this is how a track that
 		// arrived or was evicted reaches the marks on screen.
 		Task { await store.setChangeHandler { Task { @MainActor in pins.storeChanged() } } }
+		Task { await FilmStore.shared.setChangeHandler { Task { @MainActor in pins.storeChanged() } } }
 		// URL fetches: what may be offered, what is running, and telling the
 		// library when one lands. Polled while the app is in the foreground.
 		let fetches = Fetches(

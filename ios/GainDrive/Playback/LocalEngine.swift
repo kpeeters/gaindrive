@@ -191,9 +191,10 @@ final class LocalEngine: PlaybackEngine {
 		//
 		// **Unreachable now**, and kept anyway: `build` sends every film to
 		// `videoItem`, which has a decodability question to settle before it can
-		// name a URL, and `target(for:)` never substitutes a stored file for a
-		// video. The guard stays because the rule it states is about the film
-		// rather than about who happens to call this.
+		// name a URL. A downloaded film is a pinned HLS package from
+		// `FilmStore`, never something this loader keeps. The guard stays
+		// because the rule it states is about the film rather than about who
+		// happens to call this.
 		//
 		// A video played for its soundtrack is not a film here: what arrives
 		// is an ordinary audio transcode with a real length, which is why
@@ -244,7 +245,10 @@ final class LocalEngine: PlaybackEngine {
 		-> (ref: ItemRef, item: AVPlayerItem, loader: CachingResourceLoader?)
 	{
 		let asset = AVURLAsset(url: target.url)
-		guard !CastUrls.isPlaylist(target.url), await Self.cannotDecode(asset),
+		// A downloaded film holds what the HLS playlist made, which decodes
+		// everywhere, and falling back to the network would defeat offline.
+		guard !target.url.isFileURL, !CastUrls.isPlaylist(target.url),
+			await Self.cannotDecode(asset),
 			let fallback = targets.video(for: song, transcoded: true)
 		else {
 			return (song.ref, AVPlayerItem(asset: asset), nil)
@@ -300,7 +304,12 @@ final class LocalEngine: PlaybackEngine {
 		// bytes: `CastUrls.video(for:)` calls the same builder and must keep
 		// the server's own set.
 		if settings.showsPicture(song) {
-			// A film is never stored, so offline there is nothing to play.
+			// A downloaded film plays from its package, online or not.
+			if let local = await FilmStore.shared.location(for: song.ref) {
+				return StreamTarget(
+					url: local, quality: .original,
+					cacheKey: CacheKeys.of(song.ref, quality: .original), contentType: nil)
+			}
 			guard !settings.offlineMode else { return nil }
 			return targets.video(for: song, files: avfoundationFileContainers)
 		}

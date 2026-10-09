@@ -39,6 +39,12 @@ struct StreamTargets {
 			for: song, client: client, transcoded: transcoded, files: files)
 	}
 
+	/// A film's playlist, which is what a film download fetches.
+	func hls(for ref: ItemRef) -> URL? {
+		guard let client = registry.clientsSnapshot().client(for: ref.server) else { return nil }
+		return StreamUrls.hls(id: ref.id, client: client)
+	}
+
 	/// `playable` defaults to declaring nothing, and the default is the
 	/// safety. **The cast route reaches this same resolver** -
 	/// `CastUrls.audio(for:)` calls it - and a receiver declares none of this,

@@ -71,7 +71,7 @@ final class DownloadQueue: NSObject, @unchecked Sendable {
 	/// arrive off the main actor is a race waiting to be written.
 	private var session: URLSession!
 
-	private static let identifier = "org.gaindrive.ios-player.downloads"
+	static let identifier = "org.gaindrive.ios-player.downloads"
 
 	init(store: AudioStore) {
 		self.store = store

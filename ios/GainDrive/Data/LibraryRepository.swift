@@ -71,7 +71,8 @@ final class LibraryRepository: Sendable {
 		let clients = await registry.clientsSnapshot()
 		let servers = clients.servers(in: scope).map(\.id)
 		let index = await mirror.availability(for: servers)
-		return index.reachable(from: await store.heldRefs())
+		let held = (await store.heldRefs()).union(await FilmStore.shared.heldRefs())
+		return index.reachable(from: held)
 	}
 
 	private var offline: Bool {

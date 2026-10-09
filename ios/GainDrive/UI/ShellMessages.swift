@@ -82,6 +82,24 @@ struct ShellMessages: ViewModifier {
 			} message: {
 				Text(pins.message ?? "")
 			}
+			// A download that would pass the limit, typically a film: asked
+			// rather than refused, as raising the limit is the usual answer.
+			.alert(
+				"Not enough room",
+				isPresented: Binding(get: { pins.roomOffer != nil }, set: { _ in })
+			) {
+				Button("Raise limit to \(PinRepository.readable(pins.roomOffer?.newCap ?? 0))") {
+					pins.acceptRoomOffer()
+				}
+				Button("Cancel", role: .cancel) { pins.declineRoomOffer() }
+			} message: {
+				Text(
+					"""
+					That needs about \(PinRepository.readable(pins.roomOffer?.needed ?? 0)) \
+					and \(PinRepository.readable(pins.roomOffer?.left ?? 0)) is left \
+					within the storage limit.
+					""")
+			}
 			// A shared track link, arriving as `gaindrive://` from the server's
 			// chooser page. The album starts at the track, and at the time the
 			// link carried.

@@ -29,18 +29,25 @@ final class AppDelegate: NSObject {
 	/// the system woke us for a session we have not built yet, in which case
 	/// the handler is held until it is.
 	@MainActor static var queue: DownloadQueue?
-	@MainActor private static var pending: (() -> Void)?
+	@MainActor static var films: FilmQueue?
+	/// Per session identifier: music and films are two sessions, and either
+	/// can wake the app first.
+	@MainActor private static var pending: [String: () -> Void] = [:]
 
-	/// Called by `GainDriveApp` as soon as the queue is built, so a handler
+	/// Called by `GainDriveApp` as soon as the queues are built, so a handler
 	/// that arrived first is not dropped.
 	@MainActor
-	static func adopt(_ queue: DownloadQueue) {
+	static func adopt(_ queue: DownloadQueue, films: FilmQueue) {
 		self.queue = queue
-		if let pending {
-			queue.backgroundCompletion = { pending() }
-			self.pending = nil
+		self.films = films
+		if let handler = pending.removeValue(forKey: DownloadQueue.identifier) {
+			queue.backgroundCompletion = { handler() }
+		}
+		if let handler = pending.removeValue(forKey: FilmQueue.identifier) {
+			films.backgroundCompletion = { handler() }
 		}
 		queue.resume()
+		films.resume()
 	}
 }
 
@@ -54,11 +61,13 @@ final class AppDelegate: NSObject {
 			completionHandler: @escaping () -> Void
 		) {
 			MainActor.assumeIsolated {
-				guard let queue = Self.queue else {
-					Self.pending = completionHandler
-					return
+				if identifier == FilmQueue.identifier, let films = Self.films {
+					films.backgroundCompletion = { completionHandler() }
+				} else if identifier == DownloadQueue.identifier, let queue = Self.queue {
+					queue.backgroundCompletion = { completionHandler() }
+				} else {
+					Self.pending[identifier] = completionHandler
 				}
-				queue.backgroundCompletion = { completionHandler() }
 			}
 		}
 

@@ -172,6 +172,10 @@ final class SettingsStore {
 		4 * 1024 * 1024 * 1024,
 		8 * 1024 * 1024 * 1024,
 		16 * 1024 * 1024 * 1024,
+		// For films, which are a few gigabytes each.
+		32 * 1024 * 1024 * 1024,
+		64 * 1024 * 1024 * 1024,
+		128 * 1024 * 1024 * 1024,
 	]
 
 	@ObservationIgnored private let defaults: UserDefaults

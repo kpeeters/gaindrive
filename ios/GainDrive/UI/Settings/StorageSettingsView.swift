@@ -51,7 +51,7 @@ struct StorageSettingsView: View {
 					"""
 					Music kept from playing is removed oldest first to make room. \
 					Downloads are never removed, so a download that would not fit \
-					is refused instead.
+					asks to raise the limit instead.
 					"""
 				)
 			}
