@@ -77,6 +77,8 @@ final class LocalEngine: PlaybackEngine {
 	/// item was still loading would otherwise drop the second track a quarter of
 	/// an hour in.
 	private var pendingSeek: Double?
+	/// The target of the seek AVPlayer has not yet completed. See `seek`.
+	private var seekingTo: Double?
 
 	/// Built once and never released - which is why there is no `deinit`
 	/// removing the periodic time observer. That token must be removed before
@@ -385,12 +387,20 @@ final class LocalEngine: PlaybackEngine {
 
 	func seek(to seconds: Double) {
 		logState("seek to \(seconds) from")
+		// **A repeat of the seek in flight is dropped.** The Mac's `Slider`
+		// ends an edit twice per drag, and AVPlayer answers a second seek to
+		// the same target by cancelling the first and completing with its clock
+		// back where it started: the audio sits at the target, silent, until
+		// the clock catches up with it.
+		guard seconds != seekingTo else { return }
+		seekingTo = seconds
 		// The completion is delivered on an unspecified queue - unlike the
 		// periodic time observer, which documents `queue: .main` - so this hops
 		// rather than assuming.
 		player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] finished in
 			Task { @MainActor in
 				guard let self else { return }
+				if self.seekingTo == seconds { self.seekingTo = nil }
 				self.logState("seek finished=\(finished)")
 				Task { @MainActor [weak self] in
 					try? await Task.sleep(for: .seconds(2))
