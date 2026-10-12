@@ -2,6 +2,7 @@ package org.gaindrive.android.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import androidx.core.app.NotificationManagerCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -9,6 +10,7 @@ import androidx.media3.common.Player
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CacheBitmapLoader
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
@@ -470,10 +472,11 @@ class PlaybackService : MediaLibraryService() {
 	 * nobody left to release it once the task is gone (the process survives
 	 * the swipe; the foreground service is what keeps it alive). Waiting for
 	 * onDestroy left the session alive and the notification pinned to the
-	 * lock screen, observed on Android 13. Releasing the session is what
-	 * removes the notification and disconnects the bound controllers, after
-	 * which the stopSelf() already issued can complete. The pause still goes
-	 * first, so a cast receiver hears it before the bridge is torn down.
+	 * lock screen, observed on Android 13. Releasing the session disconnects
+	 * the bound controllers, after which the stopSelf() already issued can
+	 * complete; the notification is cancelled separately, see
+	 * [releaseEverything]. The pause still goes first, so a cast receiver
+	 * hears it before the bridge is torn down.
 	 */
 	override fun onTaskRemoved(rootIntent: android.content.Intent?) {
 		reportStoppedOnExit()
@@ -487,6 +490,12 @@ class PlaybackService : MediaLibraryService() {
 		reportStoppedOnExit()
 		session?.release()
 		session = null
+		// Media3 only cancels its notification from a later update that finds
+		// the session gone. While paused the notification is no longer the
+		// foreground service's, so if no such update happens to be queued it
+		// outlives the release, showing a player that no longer exists.
+		NotificationManagerCompat.from(this)
+			.cancel(DefaultMediaNotificationProvider.DEFAULT_NOTIFICATION_ID)
 		libraryCallback = null
 		// Both, and by name: the session only holds whichever one was active,
 		// and the other would leak its listener and its coroutine.
