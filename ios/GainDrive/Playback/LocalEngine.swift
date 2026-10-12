@@ -8,6 +8,7 @@
 
 import AVFoundation
 import Foundation
+import os
 
 /// Playing through this device's own speakers.
 ///
@@ -42,6 +43,9 @@ final class LocalEngine: PlaybackEngine {
 	// MARK: - Machinery
 
 	private let player = AVQueuePlayer()
+	// TEMPORARY: diagnosing the Mac's failing seek in streamed FLAC.
+	private static let log = Logger(subsystem: "org.gaindrive.ios-player", category: "playback")
+	private var loggedReady: ObjectIdentifier?
 	/// Mirrors `player.items()`. `AVPlayerItem` carries no user data, so the
 	/// mapping back to a ref has to be kept alongside.
 	///
@@ -380,12 +384,18 @@ final class LocalEngine: PlaybackEngine {
 	}
 
 	func seek(to seconds: Double) {
+		logState("seek to \(seconds) from")
 		// The completion is delivered on an unspecified queue - unlike the
 		// periodic time observer, which documents `queue: .main` - so this hops
 		// rather than assuming.
-		player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] _ in
+		player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) { [weak self] finished in
 			Task { @MainActor in
 				guard let self else { return }
+				self.logState("seek finished=\(finished)")
+				Task { @MainActor [weak self] in
+					try? await Task.sleep(for: .seconds(2))
+					self?.logState("seek +2s")
+				}
 				self.position = seconds
 				self.onStateChange?()
 			}
@@ -401,6 +411,31 @@ final class LocalEngine: PlaybackEngine {
 		}
 		failure = nil
 		session.deactivate()
+	}
+
+	// TEMPORARY: diagnosing the Mac's failing seek in streamed FLAC.
+	private func logState(_ what: String) {
+		guard let item = player.currentItem else {
+			Self.log.info("\(what, privacy: .public): no item")
+			return
+		}
+		func ranges(_ values: [NSValue]) -> String {
+			values.map {
+				let r = $0.timeRangeValue
+				return "\(r.start.seconds)..\(r.end.seconds)"
+			}.joined(separator: ",")
+		}
+		let scheme = (item.asset as? AVURLAsset)?.url.scheme ?? "?"
+		let seekable = ranges(item.seekableTimeRanges)
+		let loaded = ranges(item.loadedTimeRanges)
+		let waiting = player.reasonForWaitingToPlay?.rawValue ?? "-"
+		let error = item.error.map { String(describing: $0) } ?? "-"
+		let event = item.errorLog()?.events.last.map {
+			"\($0.errorDomain) \($0.errorStatusCode) \($0.errorComment ?? "")"
+		} ?? "-"
+		Self.log.info(
+			"\(what, privacy: .public): scheme=\(scheme, privacy: .public) time=\(self.player.currentTime().seconds) status=\(item.status.rawValue) duration=\(item.duration.seconds) seekable=[\(seekable, privacy: .public)] loaded=[\(loaded, privacy: .public)] control=\(self.player.timeControlStatus.rawValue) waiting=\(waiting, privacy: .public) error=\(error, privacy: .public) errorLog=\(event, privacy: .public)"
+		)
 	}
 
 	/// Applied on the item's own `readyToPlay`, which is the first moment a seek
@@ -516,6 +551,12 @@ final class LocalEngine: PlaybackEngine {
 		// actually offers.
 		canSeek = !(player.currentItem?.seekableTimeRanges.isEmpty ?? true)
 
+		if let item = player.currentItem, item.status == .readyToPlay,
+			loggedReady != ObjectIdentifier(item)
+		{
+			loggedReady = ObjectIdentifier(item)
+			logState("ready")
+		}
 		applyPendingSeek()
 		if let item = player.currentItem, item.status == .failed {
 			failure = item.error?.userMessage ?? "That track could not be played."
