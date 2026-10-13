@@ -299,6 +299,7 @@ private fun Results(
 					coverUrl = row.coverUrl,
 					onClick = { onOpenAlbum(row.album.ref, row.album.title) },
 					badges = row.album.sources.mapNotNull { badgeNames[it] },
+					showArtist = true,
 				)
 			}
 		}

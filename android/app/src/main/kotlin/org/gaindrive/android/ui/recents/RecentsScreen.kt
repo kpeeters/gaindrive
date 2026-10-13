@@ -113,6 +113,7 @@ fun RecentsScreen(
 								album = row.album,
 								coverUrl = row.coverUrl,
 								onClick = { onOpenAlbum(row.album.ref, row.album.title) },
+								showArtist = true,
 							)
 						}
 					}

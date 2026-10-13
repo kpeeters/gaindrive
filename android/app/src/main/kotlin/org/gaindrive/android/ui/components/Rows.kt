@@ -107,6 +107,9 @@ fun AlbumRow(
 	coverUrl: String?,
 	onClick: () -> Unit,
 	badges: List<String> = emptyList(),
+	// Off in an artist's own album list, where the name is the heading; on
+	// where albums of many artists are mixed, as search and Recents are.
+	showArtist: Boolean = false,
 	modifier: Modifier = Modifier,
 ) {
 	Row(
@@ -126,7 +129,7 @@ fun AlbumRow(
 				overflow = TextOverflow.Ellipsis,
 			)
 			Text(
-				text = albumSubtitle(album),
+				text = albumSubtitle(album, showArtist),
 				style = MaterialTheme.typography.bodySmall,
 				color = MaterialTheme.colorScheme.onSurfaceVariant,
 				maxLines = 1,
@@ -160,8 +163,9 @@ private fun AlbumVideoMark(album: Album) {
 	)
 }
 
-private fun albumSubtitle(album: Album): String {
+private fun albumSubtitle(album: Album, showArtist: Boolean): String {
 	val parts = buildList {
+		if (showArtist && album.artistName.isNotBlank()) add(album.artistName)
 		album.year?.let { add(it.toString()) }
 		if (album.songCount > 0) {
 			add(if (album.songCount == 1) "1 track" else "${album.songCount} tracks")
