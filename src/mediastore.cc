@@ -275,7 +275,7 @@ static const std::string ALBUM_ARTIST_ID_SQL =
 	"            THEN f.id ELSE f.parent_id END,";
 
 // How many of an album's songs are video, appended as the trailing column of
-// the three AlbumEntry queries.
+// the three AlbumEntry queries and of search()'s album hits.
 //
 // A count rather than a flag because it costs the same and says more: a folder
 // holding one bonus documentary beside its songs is not a folder of films, and
@@ -8212,6 +8212,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		"       COALESCE(a.name,''),"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN f.id ELSE -1 END AS cover_art_id"
+		+ ALBUM_VIDEO_COUNT_SQL +
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -8234,6 +8235,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		e.album        = e.title;
 		e.artist       = alq.getColumn(3).getString();
 		e.cover_art_id = alq.getColumn(4).getInt();
+		e.video_count  = alq.getColumn(5).getInt();
 		result.albums.push_back(std::move(e));
 		}
 

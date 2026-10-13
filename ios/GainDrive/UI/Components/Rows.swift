@@ -263,9 +263,18 @@ struct SongRow: View {
 			CoverThumb(source: item.cover)
 				.overlay { indicator }
 			VStack(alignment: .leading, spacing: 2) {
-				Text(item.song.title)
-					.lineLimit(1)
-					.foregroundStyle(state == .idle ? Color.primary : Color.accentColor)
+				HStack(spacing: 6) {
+					// As in `TrackRow`: tapping a video takes over the screen.
+					if item.song.isVideo {
+						Image(systemName: "film")
+							.font(.caption)
+							.foregroundStyle(.secondary)
+							.accessibilityLabel("Video")
+					}
+					Text(item.song.title)
+						.lineLimit(1)
+						.foregroundStyle(state == .idle ? Color.primary : Color.accentColor)
+				}
 				HStack(spacing: 6) {
 					Text(subtitle)
 						.font(.footnote)

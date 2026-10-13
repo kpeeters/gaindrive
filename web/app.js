@@ -3029,6 +3029,7 @@ async function viewRecents() {
          const titleEl = document.createElement('span');
          titleEl.className = 'search-song-title';
          titleEl.textContent = song.title;
+         if (song.isVideo) titleEl.prepend(songVideoMark());
 
          const sub = document.createElement('span');
          sub.className = 'search-song-sub';
@@ -9666,6 +9667,16 @@ async function runSearch() {
 // An album row outside its artist's listing, as search and Recents show it:
 // the artist is named on the row, and a click opens the album with the
 // artist pane filled in behind it.
+// Tapping a video takes over the screen rather than starting audio, so a song
+// row that leads there says so up front.
+function songVideoMark() {
+   const mark = document.createElement('span');
+   mark.className = 'mi search-song-video';
+   mark.textContent = 'movie';
+   mark.title = 'Video';
+   return mark;
+   }
+
 function makeAlbumHitRow(album) {
    const row = document.createElement('div');
    row.className = 'album-row';
@@ -9685,6 +9696,15 @@ function makeAlbumHitRow(album) {
    if (album.artist) parts.push(album.artist);
    if (album.year)   parts.push(album.year);
    meta.textContent = parts.join(' · ');
+   // A film is found as an album, so this is where search has to say so.
+   if (album.videoCount > 0) {
+      const mark = document.createElement('span');
+      mark.className = 'mi album-video';
+      mark.textContent = 'movie';
+      mark.title = album.videoCount === 1
+         ? '1 video' : `${album.videoCount} videos`;
+      meta.prepend(mark);
+      }
 
    info.appendChild(title);
    info.appendChild(meta);
@@ -9779,6 +9799,7 @@ function renderSearchResults(res, gen) {
          const titleEl = document.createElement('span');
          titleEl.className = 'search-song-title';
          titleEl.textContent = song.title;
+         if (song.isVideo) titleEl.prepend(songVideoMark());
 
          const sub = document.createElement('span');
          sub.className = 'search-song-sub';

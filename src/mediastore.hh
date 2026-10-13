@@ -559,6 +559,9 @@ class MediaStore {
 			// "Disc 2" in a listing. Selected by the same fragment as the two
 			// codecs above, and for the same reason.
 			int         season = 0;
+			// Album hits from search() only: a film turns up there as an
+			// album, and this is what lets a client mark it as one.
+			int         video_count = 0;
 			};
 
 		struct RecentSongEntry {

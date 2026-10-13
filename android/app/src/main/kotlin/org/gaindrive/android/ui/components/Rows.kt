@@ -145,7 +145,7 @@ fun AlbumRow(
  * two icons for it would read as two different things.
  *
  * Absent rather than zero on the listings the server does not carry the count
- * in - folder browsing, starred, search - so a missing mark is not a promise
+ * in - folder browsing, starred - so a missing mark is not a promise
  * that an album has no video. See `API-CLIENT.md`.
  */
 @Composable

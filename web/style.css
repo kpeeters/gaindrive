@@ -3275,6 +3275,11 @@ input.chapter-time.bad { border-color: #e06c6c; }
    overflow: hidden;
    text-overflow: ellipsis;
 }
+.search-song-title .search-song-video {
+   font-size: 1rem;
+   vertical-align: -0.2em;
+   margin-right: 0.25rem;
+}
 .search-song-sub {
    font-size: 0.75rem;
    color: var(--text-dim);
