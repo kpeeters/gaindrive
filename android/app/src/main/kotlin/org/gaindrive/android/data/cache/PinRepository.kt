@@ -1,5 +1,6 @@
 package org.gaindrive.android.data.cache
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -65,6 +66,8 @@ class PinRepository @Inject constructor(
 	private val _coverage = MutableStateFlow(PinCoverage(emptyMap()))
 
 	private val _protectedKeys = MutableStateFlow<Set<String>>(emptySet())
+
+	private val firstProtection = CompletableDeferred<Unit>()
 
 	/** The songs those pins expand to, for the "downloaded" markers. */
 	val protectedKeys: StateFlow<Set<String>> = _protectedKeys.asStateFlow()
@@ -147,6 +150,12 @@ class PinRepository @Inject constructor(
 	}
 
 	fun isPinned(ref: ItemRef): Boolean = _pins.value.any { it.ref == ref }
+
+	/**
+	 * Returns once [PinnedKeys] holds the stored pins. Until then it is empty,
+	 * and anything that removes "unpinned" audio would take the downloads too.
+	 */
+	suspend fun awaitProtection() = firstProtection.await()
 
 	/**
 	 * Pins [ref] and starts downloading what it covers.
@@ -250,6 +259,7 @@ class PinRepository @Inject constructor(
 		pinnedKeys.keys = keys.mapTo(mutableSetOf()) {
 			CacheKeys.of(it, if (it in videos) quality.forVideoAudio() else quality)
 		}
+		firstProtection.complete(Unit)
 		_pins.value = pins
 		_coverage.value = coverage
 		_protectedKeys.value = keys
