@@ -674,8 +674,33 @@ function artistPortrait(id, size, className, alt = '') {
 // happens to arrive rather than asked for: every one carries the field, and
 // this client is served by the binary it is reporting on, so the server's
 // version is its own. Nothing else here needs a version, which is why there is
-// no build-time substitution for one.
+// no build-time substitution for one. Only the first value is kept: a later,
+// different one means the server was updated under this page, which still
+// runs the old code, so the About box should keep naming that.
 let serverVersion = null;
+
+// Last time any tab offered a reload, kept in localStorage so that several
+// open tabs share one nag instead of each raising their own. The in-memory
+// copy covers a browser that refuses storage.
+const RELOAD_OFFER_INTERVAL_MS = 12 * 3600 * 1000;
+let _reloadOfferedAt = 0;
+
+function maybeOfferReload(newVersion) {
+   let last = _reloadOfferedAt;
+   try { last = Math.max(last, Number(localStorage.getItem('gd_reload_offered')) || 0); }
+   catch (e) { console.warn('reload offer: localStorage read failed', e); }
+   if (Date.now() - last < RELOAD_OFFER_INTERVAL_MS) return;
+   // Never take over a confirm the user is in the middle of; the next API
+   // call, seconds away, tries again.
+   if (!document.getElementById('confirm-modal').classList.contains('hidden')) return;
+   _reloadOfferedAt = Date.now();
+   try { localStorage.setItem('gd_reload_offered', String(_reloadOfferedAt)); }
+   catch (e) { console.warn('reload offer: localStorage write failed', e); }
+   showConfirm(`GainDrive has been updated to ${newVersion}. Reload to get the `
+               + 'latest features and fixes? Playback will stop.',
+               () => location.reload(),
+               {title: 'New version', yes: 'Reload', no: 'Later'});
+   }
 
 // Call a subsonic endpoint and return the parsed subsonic-response object.
 // Throws on network error or non-ok subsonic status.
@@ -685,7 +710,10 @@ async function apiCall(endpoint, extra = {}) {
       throw new Error(`HTTP ${resp.status}`);
    const data = await resp.json();
    const sr = data['subsonic-response'];
-   if (sr.serverVersion) serverVersion = sr.serverVersion;
+   if (sr.serverVersion) {
+      if (serverVersion === null) serverVersion = sr.serverVersion;
+      else if (sr.serverVersion !== serverVersion) maybeOfferReload(sr.serverVersion);
+      }
    if (sr.status !== 'ok')
       throw new Error(sr.error?.message ?? 'Unknown error');
    return sr;
