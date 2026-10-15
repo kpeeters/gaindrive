@@ -187,3 +187,52 @@ jobs:
         with: {merge-multiple: true, path: dist}
       - run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --repo "$GITHUB_REPOSITORY"
         env: {GH_TOKEN: '${{ github.token }}'}
+
+  # The formula's source of truth is the tap, not this repo, so that a packaging
+  # typo can be fixed there by hand without cutting a new tag; only the
+  # release-specific url and sha256 are written from here. Not a separate
+  # workflow on `release: released` (as cadabra2 does): this release is created
+  # with GITHUB_TOKEN above, and events caused by that token never start other
+  # workflows. Waiting for `macos` keeps a tag that no longer compiles there
+  # out of the tap.
+  homebrew:
+    needs: [release, macos]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: kpeeters/homebrew-repo
+          path: homebrew-repo
+          token: ${{ secrets.ACTIONS_HOMEBREW_REPO_TOKEN }}
+
+      # No version line to update: brew derives it from the url.
+      - run: |
+          url="https://github.com/kpeeters/gaindrive/archive/refs/tags/$GITHUB_REF_NAME.tar.gz"
+          sha=$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1)
+          cd homebrew-repo
+          sed -i -e "s|^  url .*|  url \"$url\"|" \
+                 -e "s|^  sha256 .*|  sha256 \"$sha\"|" gaindrive-server.rb
+          git diff
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git diff --quiet || {
+            git commit -am "gaindrive-server ${GITHUB_REF_NAME#v}"
+            git push; }
+
+  # Installs from the tap exactly as a user would, so this runs after the push
+  # rather than before it; a failure here means fixing the formula in the tap.
+  homebrew-test:
+    needs: homebrew
+    runs-on: macos-15
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+    steps:
+      - run: |
+          brew update
+          brew tap kpeeters/repo
+          brew install gaindrive-server
+          brew test gaindrive-server
+          gaindrive --version | grep -F "${GITHUB_REF_NAME#v}"
