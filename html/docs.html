@@ -219,7 +219,7 @@
         <p>The unit runs as the user who invoked <code>sudo</code>. That matters: GainDrive writes tags and cover art back into your library, so a service under its own system account would need write access to the whole music tree. Running as the person who already owns the files needs none of that.</p>
         <p><code>--service-dry-run</code> prints both documents and writes nothing. <code>--service-user &lt;name&gt;</code> names the account explicitly, which is needed under <code>sudo -i</code> and <code>su</code>. <code>sudo gaindrive --uninstall-service</code> removes the unit and leaves your config and database alone.</p>
         <p>Change the unit with <code>systemctl edit gaindrive</code> rather than by editing the file: a drop-in survives the next <code>--install-service</code>, an edit to the unit itself does not.</p>
-        <p>macOS has no systemd. Use the Homebrew formula, whose launchd job is started with <code>brew services start gaindrive</code>.</p>
+        <p>macOS has no systemd. Use the Homebrew formula, whose launchd job is started with <code>brew services start gaindrive-server</code>.</p>
       </div>
 
       <div class="doc-sec" id="proxy">

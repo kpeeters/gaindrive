@@ -380,7 +380,7 @@ int install(const InstallRequest& req)
 		             "/run/systemd/system does not exist.\n"
 		             "       On macOS, install through Homebrew instead -- its "
 		             "formula registers a launchd job\n"
-		             "       (brew services start gaindrive).\n";
+		             "       (brew services start gaindrive-server).\n";
 		return 1;
 		}
 	if (!on_path("systemctl")) {
