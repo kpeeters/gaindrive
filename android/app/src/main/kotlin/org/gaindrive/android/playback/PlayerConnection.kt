@@ -414,7 +414,18 @@ class PlayerConnection @Inject constructor(
 
 	fun togglePlayPause() {
 		val controller = controller ?: return
-		if (controller.isPlaying) controller.pause() else controller.play()
+		if (controller.isPlaying) {
+			controller.pause()
+			return
+		}
+		// A watchdog stop or a load error leaves the player idle with its
+		// queue intact, and play() alone does not leave idle. Without this
+		// the button does nothing on the track that failed.
+		if (controller.playbackState == Player.STATE_IDLE) {
+			watchdog.clear()
+			controller.prepare()
+		}
+		controller.play()
 	}
 
 	fun pause() = controller?.pause()
