@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=GainDrive
+Comment=Play music and films from a GainDrive or Subsonic server
+Exec=gaindrive-player
+Icon=@GD_APP_ID@
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;subsonic;player;
+StartupNotify=true
