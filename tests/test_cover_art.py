@@ -19,16 +19,13 @@ art, an artist with a portrait - skip rather than fail. Everything else runs
 against any collection.
 """
 
-import http.client
 import json
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from server_url import BASE, PREFIX, connection
 
-BASE   = "http://localhost:4040/rest"
-HOST   = "localhost"
-PORT   = 4040
 USER   = "admin"
 PASS   = "secret"
 VER    = "1.16.1"
@@ -356,10 +353,10 @@ def test_pipelined_requests_are_not_off_by_one():
     if len(wanted) < 4:
         raise Skip("not enough covers in the library to pipeline")
 
-    conn = http.client.HTTPConnection(HOST, PORT, timeout=30)
+    conn = connection(30)
     try:
         for cid, size in wanted:
-            conn.request("GET", f"/rest/getCoverArt.view?"
+            conn.request("GET", f"{PREFIX}/rest/getCoverArt.view?"
                                 f"{_query({'id': cid, 'size': size})}")
             r = conn.getresponse()
             body = r.read()
@@ -396,8 +393,8 @@ def _post_multipart(endpoint, extra, fields):
 
     extra = dict(extra)
     extra["f"] = "json"
-    c = http.client.HTTPConnection(HOST, PORT, timeout=10)
-    c.request("POST", f"/rest/{endpoint}?{_query(extra)}", body,
+    c = connection(10)
+    c.request("POST", f"{PREFIX}/rest/{endpoint}?{_query(extra)}", body,
               {"Content-Type": f"multipart/form-data; boundary={boundary}",
                "Content-Length": str(len(body))})
     r = c.getresponse()

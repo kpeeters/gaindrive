@@ -16,8 +16,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from server_url import BASE, PREFIX, connection
 
-BASE   = "http://localhost:4040/rest"
 USER   = "admin"
 PASS   = "secret"
 VER    = "1.16.1"
@@ -256,12 +256,10 @@ def test_large_body_refused_before_read():
     /upload (streamed to disk) and setCoverArt (its own image cap) may carry
     more than a megabyte.
     """
-    import http.client
-    host = urllib.parse.urlparse(BASE)
-    conn = http.client.HTTPConnection(host.hostname, host.port, timeout=10)
+    conn = connection(10)
     params = urllib.parse.urlencode(
         {"u": USER, "p": PASS, "v": VER, "c": CLIENT})
-    conn.putrequest("POST", f"/rest/saveChapters.view?{params}&id=1")
+    conn.putrequest("POST", f"{PREFIX}/rest/saveChapters.view?{params}&id=1")
     conn.putheader("Content-Type", "text/plain")
     conn.putheader("Content-Length", str(64 * 1024 * 1024))
     conn.endheaders()
@@ -278,12 +276,10 @@ def test_chunked_body_refused():
     Length-less bodies would otherwise be read-and-measured up to the global
     payload cap, which is sized for an /upload archive.
     """
-    import http.client
-    host = urllib.parse.urlparse(BASE)
-    conn = http.client.HTTPConnection(host.hostname, host.port, timeout=10)
+    conn = connection(10)
     params = urllib.parse.urlencode(
         {"u": USER, "p": PASS, "v": VER, "c": CLIENT})
-    conn.putrequest("POST", f"/rest/saveChapters.view?{params}&id=1")
+    conn.putrequest("POST", f"{PREFIX}/rest/saveChapters.view?{params}&id=1")
     conn.putheader("Content-Type", "text/plain")
     conn.putheader("Transfer-Encoding", "chunked")
     conn.endheaders()
@@ -292,6 +288,58 @@ def test_chunked_body_refused():
     assert resp.status == 411, f"expected 411, got {resp.status}"
     conn.close()
     print("PASS  chunked request body answered 411")
+
+
+def test_get_body_refused():
+    """A GET that carries a body is refused with 413 before it is read.
+
+    No GET route takes a body, and httplib reads one before the handler has
+    authenticated anybody, so accepting it let a caller with no account hold
+    a worker for as long as it cared to trickle the bytes.
+    """
+    conn = connection(3)
+    params = urllib.parse.urlencode(
+        {"u": USER, "p": PASS, "v": VER, "c": CLIENT})
+    conn.putrequest("GET", f"{PREFIX}/rest/ping.view?{params}")
+    conn.putheader("Content-Length", "1000")
+    conn.endheaders()
+    # Send nothing further: the refusal must arrive without the body.
+    resp = conn.getresponse()
+    assert resp.status == 413, f"expected 413, got {resp.status}"
+    conn.close()
+    print("PASS  a GET with a body is answered 413 before the body")
+
+
+def test_unauthenticated_post_not_read():
+    """A POST with bad credentials is refused before its body is read.
+
+    The refusal must also close the connection: after an ordinary 200
+    envelope httplib drains whatever body is left, for as long as the sender
+    likes. setCoverArt used to read up to 16 MiB before its handler checked
+    anything; /upload checked first and was then drained.
+    """
+    params = urllib.parse.urlencode(
+        {"u": USER, "p": "definitely-wrong", "v": VER, "c": CLIENT})
+    for path in (f"{PREFIX}/rest/setCoverArt.view?{params}&id=1",
+                 f"{PREFIX}/upload?{params}"):
+        conn = connection(3)
+        conn.putrequest("POST", path)
+        conn.putheader("Content-Type", "application/octet-stream")
+        conn.putheader("Content-Length", str(1024 * 1024))
+        conn.endheaders()
+        # Send nothing further: the answer must come without the body.
+        resp = conn.getresponse()
+        root = ET.fromstring(resp.read())
+        closing = (resp.getheader("Connection") or "").lower()
+        conn.close()
+        where = path.split("?")[0]
+        _check(root, status="failed")
+        err = root.find(f"{{{NS}}}error")
+        assert err is not None and err.get("code") == "40", \
+            f"{where}: expected error 40, got {ET.tostring(root).decode()}"
+        assert closing == "close", \
+            f"{where}: connection left open for the body ({closing!r})"
+    print("PASS  unauthenticated POSTs are refused unread, connection closed")
 
 
 def test_album_text_nul_name_rejected():
@@ -427,6 +475,8 @@ TESTS = [
     test_xff_does_not_move_the_throttle_bucket,
     test_large_body_refused_before_read,
     test_chunked_body_refused,
+    test_get_body_refused,
+    test_unauthenticated_post_not_read,
     test_album_text_nul_name_rejected,
     test_security_headers_present,
     test_web_assets_revalidate,

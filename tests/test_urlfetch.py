@@ -30,8 +30,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+from server_url import BASE
 
-BASE   = "http://localhost:4040/rest"
 USER   = "admin"
 PASS   = "secret"
 VER    = "1.16.1"

@@ -24,8 +24,8 @@ import sys
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from server_url import BASE
 
-BASE   = "http://localhost:4040/rest"
 USER   = "admin"
 PASS   = "secret"
 VER    = "1.16.1"

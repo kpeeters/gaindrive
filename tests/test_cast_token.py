@@ -29,8 +29,8 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from server_url import BASE
 
-BASE   = "http://localhost:4040/rest"
 ADMIN  = "admin"
 APASS  = "secret"
 VER    = "1.16.1"

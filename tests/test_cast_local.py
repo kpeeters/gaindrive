@@ -9,7 +9,8 @@ speakers just as well.
 **No Chromecast and no second network are needed.** `trusted_proxies` defaults
 to loopback, so a request from localhost carrying `X-Forwarded-For` has that
 header believed, and `client_addr()` returns whatever address it names. That
-is the whole test rig: one header stands in for standing somewhere else.
+is the whole test rig: one header stands in for standing somewhere else. So
+this one runs on the server's own machine; a `--url` must stay on loopback.
 
 `public_url` must stay unset, which is the default -- with it set, loopback
 stops counting as local and the baseline calls below would be refused too.
@@ -35,8 +36,8 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from server_url import BASE
 
-BASE   = "http://localhost:4040/rest"
 USER   = "admin"
 PASS   = "secret"
 VER    = "1.16.1"

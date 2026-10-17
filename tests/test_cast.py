@@ -21,8 +21,8 @@ import sys
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from server_url import BASE
 
-BASE   = "http://localhost:4040/rest"
 USER   = "admin"
 PASS   = "secret"
 VER    = "1.16.1"
@@ -68,7 +68,7 @@ for d in devices:
 
 if len(sys.argv) < 3:
     print("To check what a LOAD reports, pass a device id and a song id:")
-    print(f"    python3 {sys.argv[0]} <deviceId> <songId>")
+    print(f"    python3 {sys.argv[0]} [--url <server>] <deviceId> <songId>")
     sys.exit(0)
 
 DEVICE, SONG = sys.argv[1], sys.argv[2]
