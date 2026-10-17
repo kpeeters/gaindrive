@@ -52,16 +52,21 @@ constexpr int    THROTTLE_FREE_TRIES  = 10;     // before any delay
 constexpr int    THROTTLE_BLOCK_AFTER = 50;     // failures before a hard block
 constexpr auto   THROTTLE_BLOCK_FOR   = std::chrono::minutes(10);
 constexpr auto   THROTTLE_FORGET      = std::chrono::minutes(30);
-constexpr size_t THROTTLE_MAX_KEYS    = 4096;
+// The number of distinct callers it takes to flush the map, so it is sized
+// against an attacker rather than against memory: one with more addresses
+// than this gets fresh buckets whatever the map does when full. An entry is
+// about 130 bytes, so the worst case is roughly 8 MB.
+constexpr size_t THROTTLE_MAX_KEYS    = 65536;
 
-// The bucket an address's failures count against. IPv6 keys on the /64
-// prefix rather than the full address: a routed allocation hands a caller
-// that entire prefix, so exact keys would give a rotating attacker its free
-// tries back on every guess, plus an endless supply of fresh keys with which
-// to fill the capped map and sweep everyone else's counters. IPv4 stays
-// exact, since one NAT'd household sharing a bucket is the throttle working
-// as sized. Only the key is truncated; log lines keep the address as it
-// arrived.
+// The bucket an address's failures count against. IPv6 keys on the /48
+// prefix rather than the full address. Exact keys would give a rotating
+// attacker its free tries back on every guess, and the /64 this used to key
+// on was not much better: tunnel brokers route a /48 to anyone for free,
+// which is 65,536 /64s, each with free tries of its own and together enough
+// to flush the map. A /48 is what one site is normally given, so a household
+// or an office still counts as one caller. IPv4 stays exact, since one NAT'd
+// household sharing a bucket is the throttle working as sized. Only the key
+// is truncated; log lines keep the address as it arrived.
 std::string throttle_bucket(const std::string& addr)
 	{
 	// No colon is IPv4. A dot alongside colons is a v4-mapped IPv6 address,
@@ -71,10 +76,10 @@ std::string throttle_bucket(const std::string& addr)
 	struct in6_addr v6;
 	const std::string bare = addr.substr(0, addr.find('%'));
 	if (inet_pton(AF_INET6, bare.c_str(), &v6) != 1) return addr;
-	std::memset(v6.s6_addr + 8, 0, 8);
+	std::memset(v6.s6_addr + 6, 0, 10);
 	char buf[INET6_ADDRSTRLEN];
 	if (!inet_ntop(AF_INET6, &v6, buf, sizeof buf)) return addr;
-	return std::string(buf) + "/64";
+	return std::string(buf) + "/48";
 	}
 
 struct AuthFailures {
@@ -92,9 +97,11 @@ void throttle_sweep(std::chrono::steady_clock::time_point now)
 	for (auto it = throttle.begin(); it != throttle.end(); )
 		if (now - it->second.last > THROTTLE_FORGET) it = throttle.erase(it);
 		else                                          ++it;
-	// Still full after the sweep: this is an active spray from many addresses
-	// rather than a stale map, so drop it wholesale rather than grow without
-	// bound. Everyone gets their free tries back, which is the safe direction.
+	// Still full after the sweep: this is an active spray from more addresses
+	// than the map holds rather than a stale map, so drop it wholesale rather
+	// than grow without bound. Evicting instead would not slow such a caller,
+	// whose evicted addresses come back fresh either way, and everyone else
+	// getting their free tries back is the safe direction.
 	if (throttle.size() >= THROTTLE_MAX_KEYS) throttle.clear();
 	}
 

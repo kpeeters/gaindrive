@@ -100,7 +100,9 @@ int exif_orientation(std::string_view b)
 			else return 1;
 			if (rd16(t + 2, le) != 42) return 1;
 			uint32_t ifd = rd32(t + 4, le);
-			if (ifd + 2 > tn) return 1;
+			// Widened first: the offset is the file's, and in 32 bits an
+			// offset near 4 GiB wraps the sum to a small value that passes.
+			if (static_cast<uint64_t>(ifd) + 2 > tn) return 1;
 			uint16_t count = rd16(t + ifd, le);
 			// 12 bytes per entry; the count itself is bounded by the segment.
 			if (static_cast<uint64_t>(ifd) + 2 + 12ull * count > tn) return 1;

@@ -51,40 +51,63 @@ void GainDrive::routes_web()
 	// receiver.
 	server_.set_payload_max_length(MAX_REQUEST_BYTES);
 
-	// The per-route body bound, enforced before a byte of body is read.
-	// Every request that carries content must name its length, and every
-	// route but /upload gets a small one: the largest legitimate small body
-	// is a saveChapters file, which MAX_CHAPTERS bounds far below a megabyte.
-	// /upload is exempt because its handler streams the body through a
-	// content reader to disk under its own cap - it never buffers it - and
-	// authenticates from the query string before reading at all.
+	// Everything that decides whether a request body is read at all, run
+	// before a byte of it is. Only the POST routes take one.
 	//
-	// Chunked (or otherwise length-less) bodies are refused outside /upload
-	// rather than read-and-measured: read_content would buffer up to the
-	// global cap before anyone could object, which is the allocation this
-	// handler exists to prevent. No Subsonic client sends one.
-	server_.set_pre_request_handler([](const httplib::Request& req,
-	                                   httplib::Response& res) {
-		if (req.matched_route == "/upload")
-			return httplib::Server::HandlerResponse::Unhandled;
-		const bool has_body = req.method == "POST" || req.method == "PUT"
-		                   || req.method == "PATCH"
-		                   || req.has_header("Content-Length")
-		                   || req.has_header("Transfer-Encoding");
-		if (!has_body)
-			return httplib::Server::HandlerResponse::Unhandled;
-		if (req.has_header("Transfer-Encoding")) {
-			res.status = 411;   // Length Required
+	// Every POST outside /upload must name its length, and gets a small one:
+	// the largest legitimate small body is a saveChapters file, which
+	// MAX_CHAPTERS bounds far below a megabyte. /upload is exempt because its
+	// handler streams the body through a content reader to disk under its own
+	// cap - it never buffers it. Chunked (or otherwise length-less) bodies are
+	// refused outside /upload rather than read-and-measured: read_content would
+	// buffer up to the global cap before anyone could object, which is the
+	// allocation this handler exists to prevent. No Subsonic client sends one.
+	//
+	// **A POST is authenticated here, not only in its handler.** httplib reads
+	// a routed body between this handler and the route's, so a check left to
+	// the handler let a caller with no account make the server read up to
+	// MAX_COVER_BYTES at a pace of its choosing; thirty-two of those, trickled
+	// through a reverse proxy that forwards bodies as they arrive, are every
+	// worker. /upload checked before reading, but its refusal is an ordinary
+	// 200 envelope, and after a 200 httplib drains whatever body is left so
+	// the connection can be reused - the same hold by another route. Closing
+	// the connection is what stops both: then httplib neither reads nor drains.
+	// The price is that a proxy still sending the body answers that caller 502
+	// instead of relaying the envelope, which only a wrong password ever sees.
+	// Every client that posts carries its credentials in the query string, the
+	// one place they can be read from before the body; the handlers keep their
+	// own checks.
+	//
+	// A GET or HEAD with a body is refused outright, for the same reason: no
+	// such route reads one, and httplib would otherwise read it before the
+	// handler had authenticated anybody. A 4xx closes the connection by itself.
+	server_.set_pre_request_handler([this](const httplib::Request& req,
+	                                       httplib::Response& res) {
+		const auto len = req.get_header_value_u64("Content-Length", 0);
+		const bool chunked = req.has_header("Transfer-Encoding");
+		if (req.method != "POST") {
+			if (len == 0 && !chunked)
+				return httplib::Server::HandlerResponse::Unhandled;
+			res.status = 413;
 			return httplib::Server::HandlerResponse::Handled;
 			}
-		// setCoverArt takes an uploaded image, bounded where it is read by
-		// MAX_COVER_BYTES; the slack on top is multipart framing.
-		const size_t cap = req.matched_route == "/rest/setCoverArt.view"
-		    ? MAX_COVER_BYTES + 64 * 1024
-		    : MAX_SMALL_BODY_BYTES;
-		const auto len = req.get_header_value_u64("Content-Length", 0);
-		if (len > cap) {
-			res.status = 413;
+		if (req.matched_route != "/upload") {
+			if (chunked) {
+				res.status = 411;   // Length Required
+				return httplib::Server::HandlerResponse::Handled;
+				}
+			// setCoverArt takes an uploaded image, bounded where it is read by
+			// MAX_COVER_BYTES; the slack on top is multipart framing.
+			const size_t cap = req.matched_route == "/rest/setCoverArt.view"
+			    ? MAX_COVER_BYTES + 64 * 1024
+			    : MAX_SMALL_BODY_BYTES;
+			if (len > cap) {
+				res.status = 413;
+				return httplib::Server::HandlerResponse::Handled;
+				}
+			}
+		if (!check_auth(req, res, store_)) {
+			res.set_header("Connection", "close");
 			return httplib::Server::HandlerResponse::Handled;
 			}
 		return httplib::Server::HandlerResponse::Unhandled;

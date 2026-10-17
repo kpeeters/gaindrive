@@ -345,11 +345,13 @@ void GainDrive::routes_edit()
 	// The content-reader form, and that is the security boundary as much as a
 	// convenience: httplib hands the handler control *before* reading a byte
 	// of body, so auth and the upload permission are checked against the
-	// query-string credentials first, and an unauthenticated multi-gigabyte
-	// POST costs the server nothing. The archive then streams to a file on
-	// disk rather than through req.body - the old form buffered the whole
-	// body in memory (and the multipart copy doubled it), which made /upload
-	// the cheapest OOM in the server.
+	// query-string credentials first. What makes an unauthenticated
+	// multi-gigabyte POST cost the server nothing is the pre-request handler
+	// in apiweb.cc, which refuses it with the connection closed; a refusal from
+	// here would leave httplib draining the body. The archive then streams to
+	// a file on disk rather than through req.body - the old form buffered the
+	// whole body in memory (and the multipart copy doubled it), which made
+	// /upload the cheapest OOM in the server.
 	server_.Post("/upload", [this](const httplib::Request& req, httplib::Response& res,
 	                               const httplib::ContentReader& content_reader) {
 		if (!check_auth(req, res, store_)) return;
