@@ -233,6 +233,7 @@ jobs:
       - run: |
           brew update
           brew tap kpeeters/repo
+          brew trust kpeeters/repo
           brew install gaindrive-server
           brew test gaindrive-server
           gaindrive --version | grep -F "${GITHUB_REF_NAME#v}"
