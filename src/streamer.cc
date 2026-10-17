@@ -712,12 +712,10 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 						// starts playing" or "seek → playback stops altogether".
 						if (pos >= 0.0f && bytes_sent > prebuf_bytes) {
 							// Throttle in **absolute** audio time so that Range requests
-							// (MP3 native seek issues these against the same URL) compare
+							// (a native SEEK issues these against the same URL) compare
 							// correctly: bytes_sent is local to this request, but pos is the
-							// receiver's absolute position in the track.  Non-MP3 codecs go
-							// through serve_transcoded for any seek, so this path only sees
-							// MP3 native seek among the cast cases.
-							// No "receiver moved on" early-exit: when MP3 native seek opens
+							// receiver's absolute position in the track.
+							// No "receiver moved on" early-exit: when a native seek opens
 							// a new Range at the seek byte it abandons this connection
 							// without a reliable signal here, and pos jumps ahead of what
 							// we've sent.  Trust TCP backpressure plus the receiver's own

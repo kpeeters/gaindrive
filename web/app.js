@@ -6833,11 +6833,13 @@ function playerPosition() {
 // skip buttons, the arrow keys and the system's media controls.  The three
 // branches are not interchangeable:
 //
-//  * Casting, re-LOAD with a server-side timeOffset rather than sending a
-//    Chromecast SEEK.  SEEK relies on the device seeking within its buffered
-//    byte stream, which fails silently for formats without clean seek points
-//    (FLAC without a seektable, etc.).  playerPlay resets cast state and
-//    triggers a fresh stream from the right position.
+//  * Casting, a Chromecast SEEK, as the Android app does: the receiver has the
+//    whole file (or an HLS playlist) and seeks it by Range itself.  A re-LOAD
+//    with currentTime into an unindexed FLAC makes the receiver scan from the
+//    first frame, and it gives up with a decode error or plays from 0.  The
+//    exceptions are a soundtrack, which is a pipe that starts at its offset
+//    and so has to be asked for again, and a receiver that is IDLE, which has
+//    no media session left to seek.
 //  * A chunked audio transcode has no Range, so the server has to start ffmpeg
 //    at the seek point instead.  The paused state is preserved, or seeking
 //    while paused would unexpectedly resume playback.
@@ -6849,7 +6851,17 @@ function playerPosition() {
 // playerPlay computes `chunked` instead of reading it.
 function playerSeekTo(target) {
    if (castDeviceId !== null) {
-      playerPlay(target);
+      if (castStream && !castAudioOnly && castPlayerState !== 'IDLE') {
+         // Held at the target until the receiver reports near it; see the
+         // castExpectedPosition gate in onCastStatus.
+         castExpectedPosition = target;
+         castBaseTime         = target - castStartOffset;
+         castBaseAt           = Date.now();
+         apiCall('castControl', {action: 'seek', time: target - castStartOffset})
+            .catch(err => console.warn('[cast] seek failed', err));
+         } else {
+         playerPlay(target);
+         }
       } else if (player.streamIsTranscoded) {
       const wasPaused = player.media.paused;
       // The same request as before but from `target`: still the MP3
