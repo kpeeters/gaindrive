@@ -343,6 +343,7 @@ section.dark .sec-head p { color: rgba(246,239,224,0.7); }
    DOWNLOAD / INSTALL
    ============================================================ */
 .dl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
+.dl-copy:only-child { grid-column: 1 / -1; }
 .dl-copy h2 { font-size: clamp(34px, 4.6vw, 58px); color: var(--gold); }
 .dl-copy p { font-size: 18px; color: rgba(244,213,141,0.82); margin: 20px 0 0; max-width: 42ch; }
 .dl-cta { display:flex; gap: 14px; margin-top: 34px; flex-wrap: wrap; }
