@@ -1,27 +1,9 @@
 #include "panes.hh"
 #include "apiclient.hh"
 #include "coverstore.hh"
-#include "jsonread.hh"
 
 #include <gtkmm/listitem.h>
 #include <gtkmm/signallistitemfactory.h>
-
-#include <algorithm>
-#include <set>
-
-namespace {
-	int compare_names(const std::string& a, const std::string& b)
-		{
-		auto fa = Glib::ustring(a).casefold();
-		auto fb = Glib::ustring(b).casefold();
-		return fa<fb ? -1 : (fb<fa ? 1 : 0);
-		}
-
-	std::string plural(int n, const char *one, const char *many)
-		{
-		return std::to_string(n) + " " + (n==1 ? one : many);
-		}
-}
 
 // ---- RowWidget ----------------------------------------------------------
 
@@ -46,6 +28,7 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 
 	title_.set_xalign(0);
 	title_.set_ellipsize(Pango::EllipsizeMode::END);
+	title_.add_css_class("row-title");
 	subtitle_.set_xalign(0);
 	subtitle_.set_ellipsize(Pango::EllipsizeMode::END);
 	subtitle_.add_css_class("dim-label");
@@ -58,11 +41,26 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 	trail_.add_css_class("dim-label");
 	trail_.add_css_class("numeric");
 	item_.append(trail_);
+	for(auto b: {&star, &list, &queue}) {
+		b->add_css_class("flat");
+		b->add_css_class("row-action");
+		b->set_valign(Gtk::Align::CENTER);
+		b->set_visible(false);
+		item_.append(*b);
+		}
+	queue.set_icon_name("gd-add-symbolic");
+	queue.set_tooltip_text("Add to queue");
 	append(item_);
+	}
+
+RowWidget::~RowWidget()
+	{
+	if(registry) registry->erase(this);
 	}
 
 void RowWidget::show_heading(const std::string& text)
 	{
+	set_playing(false);
 	heading_.set_text(text);
 	heading_.set_visible(true);
 	item_.set_visible(false);
@@ -74,6 +72,7 @@ void RowWidget::show_item(const std::string& cover_id, const std::string& lead,
 	{
 	heading_.set_visible(false);
 	item_.set_visible(true);
+	show_actions(false, false, ListButton::none, false);
 	if(cover_) cover_->show_cover(cover_id);
 	lead_.set_text(lead);
 	lead_.set_visible(!lead.empty());
@@ -83,12 +82,40 @@ void RowWidget::show_item(const std::string& cover_id, const std::string& lead,
 	trail_.set_text(trail);
 	}
 
+void RowWidget::show_actions(bool show_star, bool starred, ListButton mode, bool show_queue)
+	{
+	star.set_visible(show_star);
+	star.set_icon_name(starred ? "gd-star-filled-symbolic" : "gd-star-symbolic");
+	star.set_tooltip_text(starred ? "Unstar" : "Star");
+	if(starred) star.add_css_class("starred");
+	else        star.remove_css_class("starred");
+	list_mode = mode;
+	list.set_visible(mode!=ListButton::none);
+	if(mode==ListButton::add) {
+		list.set_icon_name("gd-playlist-add-symbolic");
+		list.set_tooltip_text("Add to playlist");
+		}
+	else if(mode==ListButton::remove) {
+		list.set_icon_name("gd-close-symbolic");
+		list.set_tooltip_text("Remove from playlist");
+		}
+	queue.set_visible(show_queue);
+	}
+
+void RowWidget::set_playing(bool on)
+	{
+	if(on) add_css_class("playing");
+	else   remove_css_class("playing");
+	}
+
 // ---- Pane ---------------------------------------------------------------
 
-Pane::Pane(CoverStore& covers, int cover_px, bool hero)
+Pane::Pane(CoverStore& covers, int cover_px, bool boxed)
 	: Gtk::Box(Gtk::Orientation::VERTICAL),
 	  covers_(covers),
 	  header_(Gtk::Orientation::HORIZONTAL, 6),
+	  top_(Gtk::Orientation::VERTICAL),
+	  bottom_(Gtk::Orientation::VERTICAL),
 	  scroll_box_(Gtk::Orientation::VERTICAL)
 	{
 	add_css_class("pane");
@@ -100,6 +127,14 @@ Pane::Pane(CoverStore& covers, int cover_px, bool hero)
 	header_.append(title_);
 	append(header_);
 
+	empty_.set_wrap(true);
+	empty_.set_xalign(0);
+	empty_.add_css_class("dim-label");
+	empty_.add_css_class("pane-empty");
+	empty_.set_visible(false);
+	append(empty_);
+
+	widgets_   = std::make_shared<std::set<RowWidget*>>();
 	store_     = Gio::ListStore<ListRow>::create();
 	selection_ = Gtk::SingleSelection::create(store_);
 	selection_->set_autoselect(false);
@@ -108,7 +143,28 @@ Pane::Pane(CoverStore& covers, int cover_px, bool hero)
 
 	auto factory = Gtk::SignalListItemFactory::create();
 	factory->signal_setup().connect([this, cover_px](const Glib::RefPtr<Gtk::ListItem>& li) {
-		li->set_child(*Gtk::make_managed<RowWidget>(&covers_, cover_px));
+		auto w = Gtk::make_managed<RowWidget>(&covers_, cover_px);
+		w->star.signal_clicked().connect([this, w]() {
+			if(!w->row) return;
+			const auto& r = *w->row;
+			if(r.kind==ListRow::Kind::song)
+				signal_star.emit(r.kind, r.song.ref, !r.song.starred);
+			else if(r.kind==ListRow::Kind::album)
+				signal_star.emit(r.kind, r.album.ref, !r.album.starred);
+			});
+		w->list.signal_clicked().connect([this, w]() {
+			if(!w->row) return;
+			if(w->list_mode==RowWidget::ListButton::remove)
+				remove_from_list(*w->row);
+			else
+				signal_pick_playlist.emit(w->row->song, w->list);
+			});
+		w->queue.signal_clicked().connect([this, w]() {
+			if(w->row) signal_enqueue.emit(w->row->song);
+			});
+		w->registry = widgets_;
+		widgets_->insert(w);
+		li->set_child(*w);
 		});
 	factory->signal_bind().connect([this](const Glib::RefPtr<Gtk::ListItem>& li) {
 		auto row = std::dynamic_pointer_cast<ListRow>(li->get_item());
@@ -117,7 +173,14 @@ Pane::Pane(CoverStore& covers, int cover_px, bool hero)
 		bool item = row->kind!=ListRow::Kind::heading;
 		li->set_activatable(item);
 		li->set_selectable(item);
+		w->row = row;
 		bind(*w, *row);
+		w->set_playing(row->kind==ListRow::Kind::song && !playing_.id.empty()
+		               && row->song.ref.id==playing_.id && row->song.ref.server==playing_.server);
+		});
+	factory->signal_unbind().connect([](const Glib::RefPtr<Gtk::ListItem>& li) {
+		if(auto w = dynamic_cast<RowWidget*>(li->get_child()))
+			w->row.reset();
 		});
 	list_.set_model(selection_);
 	list_.set_factory(factory);
@@ -134,12 +197,10 @@ Pane::Pane(CoverStore& covers, int cover_px, bool hero)
 
 	scroll_.set_vexpand(true);
 	scroll_.set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
-	if(hero) {
-		hero_ = std::make_unique<CoverImage>(covers_, 320);
-		hero_->set_halign(Gtk::Align::CENTER);
-		hero_->add_css_class("hero");
-		scroll_box_.append(*hero_);
+	if(boxed) {
+		scroll_box_.append(top_);
 		scroll_box_.append(list_);
+		scroll_box_.append(bottom_);
 		scroll_.set_child(scroll_box_);
 		}
 	else
@@ -151,16 +212,62 @@ void Pane::clear()
 	{
 	++gen_;
 	set_title("");
+	set_empty("");
 	set_rows({});
-	if(hero_) {
-		hero_->show_cover("");
-		hero_->set_visible(false);
+	}
+
+void Pane::star_changed(ListRow::Kind kind, const ItemRef& ref, bool on)
+	{
+	for(guint i=0; i<store_->get_n_items(); ++i) {
+		auto r = store_->get_item(i);
+		if(kind==ListRow::Kind::song && r->kind==kind && r->song.ref.id==ref.id
+		   && r->song.ref.server==ref.server)
+			r->song.starred = on;
+		if(kind==ListRow::Kind::album && r->kind==kind && r->album.ref.id==ref.id
+		   && r->album.ref.server==ref.server)
+			r->album.starred = on;
 		}
+	rebind_all();
+	}
+
+void Pane::set_playing(const ItemRef& song)
+	{
+	playing_ = song;
+	rebind_all();
+	}
+
+void Pane::rebind_all()
+	{
+	// A copy: binding may lead GTK to create or destroy row widgets.
+	auto widgets = *widgets_;
+	for(auto w: widgets)
+		if(w->row && widgets_->count(w)) {
+			auto row = w->row;
+			bind(*w, *row);
+			w->set_playing(row->kind==ListRow::Kind::song && !playing_.id.empty()
+			               && row->song.ref.id==playing_.id && row->song.ref.server==playing_.server);
+			}
+	}
+
+void Pane::unselect()
+	{
+	selection_->unselect_all();
+	}
+
+void Pane::report(const ApiResult& r)
+	{
+	signal_failed.emit(r);
 	}
 
 void Pane::set_title(const std::string& t)
 	{
 	title_.set_text(t);
+	}
+
+void Pane::set_empty(const std::string& text)
+	{
+	empty_.set_text(text);
+	empty_.set_visible(!text.empty());
 	}
 
 void Pane::set_rows(const std::vector<Glib::RefPtr<ListRow>>& rows)
@@ -170,237 +277,18 @@ void Pane::set_rows(const std::vector<Glib::RefPtr<ListRow>>& rows)
 	scroll_.get_vadjustment()->set_value(0);
 	}
 
-// ---- ArtistPane ---------------------------------------------------------
-
-ArtistPane::ArtistPane(CoverStore& covers)
-	: Pane(covers, 0, false)
+void Pane::bind_song_hit(RowWidget& w, const Song& s, const std::string& trail)
 	{
+	std::string sub = s.artist;
+	if(!s.album.empty()) sub += (sub.empty() ? "" : " · ") + s.album;
+	w.show_item(s.cover_art, "", s.title, sub, trail);
+	w.show_actions(true, s.starred, RowWidget::ListButton::add, true);
 	}
 
-void ArtistPane::load(std::shared_ptr<ApiClient> api)
+void Pane::bind_album_hit(RowWidget& w, const Album& a)
 	{
-	clear();
-	unsigned gen = gen_;
-	set_title("Library");
-	// Roots of each kind are listed apart, categories first, as on the web
-	// client. contentType is a gaindrive extension: another Subsonic server
-	// sends none, and gets one plain listing.
-	api->call("getMusicFolders", {}, [this, api, gen](const ApiResult& r) {
-		if(gen!=gen_) return;
-		if(!r.ok) {
-			signal_failed.emit(r);
-			return;
-			}
-		std::set<std::string> types;
-		const auto& folders = jsub(jsub(r.body, "musicFolders"), "musicFolder");
-		for(size_t i=0; i<folders.size(); ++i)
-			types.insert(jstr(jidx(folders, i), "contentType"));
-		typed_ = types.count("categories") || types.count("artists");
-		load_artists(api, gen, types.count("categories")>0,
-		             !typed_ || types.count("artists")>0, {});
-		});
-	}
-
-void ArtistPane::load_artists(std::shared_ptr<ApiClient> api, unsigned gen, bool categories,
-                              bool artists, std::vector<Glib::RefPtr<ListRow>> rows)
-	{
-	if(!categories && !artists) {
-		set_rows(rows);
-		return;
-		}
-	Params p;
-	if(categories)  p.push_back({"contentType", "categories"});
-	else if(typed_) p.push_back({"contentType", "artists"});
-
-	api->call("getArtists", p, [this, api, gen, categories, artists, rows](const ApiResult& r) mutable {
-		if(gen!=gen_) return;
-		if(!r.ok) {
-			signal_failed.emit(r);
-			return;
-			}
-		const auto& server = api->session().server_key;
-		const auto& index  = jsub(jsub(r.body, "artists"), "index");
-		if(categories) {
-			// A handful of sections, so one heading over an alphabetical list
-			// rather than the server's letter buckets.
-			std::vector<Artist> list;
-			for(size_t i=0; i<index.size(); ++i) {
-				const auto& arr = jsub(jidx(index, i), "artist");
-				for(size_t k=0; k<arr.size(); ++k)
-					list.push_back(parse_artist(server, jidx(arr, k), true));
-				}
-			std::sort(list.begin(), list.end(), [](const Artist& a, const Artist& b) {
-				return compare_names(a.name, b.name)<0;
-				});
-			if(!list.empty())
-				rows.push_back(ListRow::heading("Categories"));
-			for(const auto& a: list)
-				rows.push_back(ListRow::of(a));
-			load_artists(api, gen, false, artists, std::move(rows));
-			return;
-			}
-		for(size_t i=0; i<index.size(); ++i) {
-			const auto& bucket = jidx(index, i);
-			const auto& arr    = jsub(bucket, "artist");
-			if(arr.empty()) continue;
-			rows.push_back(ListRow::heading(jstr(bucket, "name")));
-			for(size_t k=0; k<arr.size(); ++k)
-				rows.push_back(ListRow::of(parse_artist(server, jidx(arr, k), false)));
-			}
-		set_rows(rows);
-		});
-	}
-
-void ArtistPane::bind(RowWidget& w, const ListRow& row)
-	{
-	if(row.kind==ListRow::Kind::heading)
-		w.show_heading(row.text);
-	else
-		w.show_item("", "", row.artist.name, "", plural(row.artist.album_count, "album", "albums"));
-	}
-
-void ArtistPane::activated(const ListRow& row)
-	{
-	signal_artist.emit(row.artist);
-	}
-
-// ---- AlbumPane ----------------------------------------------------------
-
-AlbumPane::AlbumPane(CoverStore& covers)
-	: Pane(covers, 80, false)
-	{
-	sort_.set_visible(false);
-	sort_.add_css_class("flat");
-	sort_.signal_clicked().connect([this]() {
-		by_name_[category_] = !by_name_[category_];
-		label_sort();
-		render();
-		});
-	header_.append(sort_);
-	}
-
-void AlbumPane::label_sort()
-	{
-	// The label says the state, the tooltip what pressing it does.
-	bool by_name = by_name_[category_];
-	sort_.set_label(by_name ? "Name" : "Year");
-	sort_.set_tooltip_text(by_name ? "Sort by year" : "Sort by name");
-	}
-
-void AlbumPane::show_artist(std::shared_ptr<ApiClient> api, const Artist& artist)
-	{
-	clear();
-	unsigned gen = gen_;
-	albums_.clear();
-	category_ = artist.category;
-	set_title(artist.name);
-	label_sort();
-	sort_.set_visible(true);
-	api->call("getArtist", {{"id", artist.ref.id}}, [this, api, gen](const ApiResult& r) {
-		if(gen!=gen_) return;
-		if(!r.ok) {
-			signal_failed.emit(r);
-			return;
-			}
-		const auto& arr = jsub(jsub(r.body, "artist"), "album");
-		for(size_t i=0; i<arr.size(); ++i)
-			albums_.push_back(parse_album(api->session().server_key, jidx(arr, i)));
-		render();
-		});
-	}
-
-void AlbumPane::render()
-	{
-	// Year then title is the server's own order, so switching back to Year
-	// restores exactly the list it sent.
-	auto sorted = albums_;
-	bool by_name = by_name_[category_];
-	std::stable_sort(sorted.begin(), sorted.end(), [by_name](const Album& a, const Album& b) {
-		int n = compare_names(a.title, b.title);
-		if(by_name) return n!=0 ? n<0 : a.year<b.year;
-		return a.year!=b.year ? a.year<b.year : n<0;
-		});
-	std::vector<Glib::RefPtr<ListRow>> rows;
-	for(const auto& a: sorted)
-		rows.push_back(ListRow::of(a));
-	set_rows(rows);
-	}
-
-void AlbumPane::bind(RowWidget& w, const ListRow& row)
-	{
-	const auto& a = row.album;
-	std::string meta;
-	if(a.year)       meta = std::to_string(a.year);
-	if(a.song_count) meta += (meta.empty() ? "" : " · ") + plural(a.song_count, "track", "tracks");
-	w.show_item(a.cover_art, "", a.title, meta, "");
-	}
-
-void AlbumPane::activated(const ListRow& row)
-	{
-	signal_album.emit(row.album);
-	}
-
-// ---- TrackPane ----------------------------------------------------------
-
-TrackPane::TrackPane(CoverStore& covers)
-	: Pane(covers, 0, true)
-	{
-	hero_->set_visible(false);
-	}
-
-void TrackPane::show_album(std::shared_ptr<ApiClient> api, const Album& album)
-	{
-	clear();
-	unsigned gen = gen_;
-	set_title(album.title);
-	hero_->set_visible(!album.cover_art.empty());
-	hero_->show_cover(album.cover_art);
-	api->call("getAlbum", {{"id", album.ref.id}}, [this, api, gen](const ApiResult& r) {
-		if(gen!=gen_) return;
-		if(!r.ok) {
-			signal_failed.emit(r);
-			return;
-			}
-		std::vector<Song> songs;
-		const auto& arr = jsub(jsub(r.body, "album"), "song");
-		for(size_t i=0; i<arr.size(); ++i)
-			songs.push_back(parse_song(api->session().server_key, jidx(arr, i)));
-
-		std::set<int> discs;
-		for(const auto& s: songs) discs.insert(s.disc);
-		bool multi_disc = discs.size()>1;
-		// Untagged files all say track 0 or 1; counting is more use then.
-		bool sequential = std::all_of(songs.begin(), songs.end(),
-		                              [](const Song& s) { return s.track<=1; });
-
-		std::vector<Glib::RefPtr<ListRow>> rows;
-		int disc = 0;
-		for(size_t i=0; i<songs.size(); ++i) {
-			const auto& s = songs[i];
-			if(multi_disc && s.disc!=disc) {
-				disc = s.disc;
-				// A season of a series arrives as a disc.
-				rows.push_back(ListRow::heading((s.season>0 ? "Series " : "Disc ") + std::to_string(disc)));
-				}
-			auto row = ListRow::of(s);
-			int n = sequential ? int(i)+1 : s.track;
-			row->text = n>0 ? std::to_string(n) : "";
-			rows.push_back(row);
-			}
-		set_rows(rows);
-		});
-	}
-
-void TrackPane::bind(RowWidget& w, const ListRow& row)
-	{
-	if(row.kind==ListRow::Kind::heading) {
-		w.show_heading(row.text);
-		return;
-		}
-	const auto& s = row.song;
-	// The server sends the folder's spelling in `artist` when the tag merely
-	// writes the same name differently, so an exact comparison is enough.
-	std::string artist = (!s.display_album_artist.empty() && s.artist!=s.display_album_artist)
-		? s.artist : "";
-	w.show_item("", row.text, s.title, artist, format_duration(s.duration));
+	std::string sub = a.artist;
+	if(a.year) sub += (sub.empty() ? "" : " · ") + std::to_string(a.year);
+	w.show_item(a.cover_art, "", a.title, sub, "");
+	w.show_actions(true, a.starred, RowWidget::ListButton::none, false);
 	}

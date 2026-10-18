@@ -88,13 +88,15 @@ void CoverStore::set_api(std::shared_ptr<ApiClient> api)
 	++epoch_;
 	}
 
-Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, std::string& key)
+Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, std::string& key,
+                                           int index)
 	{
 	key.clear();
 	if(!api_ || cover_id.empty()) return {};
 
 	const auto& s = api_->session();
 	key = s.server_key + "|" + cover_id + "|" + std::to_string(px);
+	if(index>0) key += "|" + std::to_string(index);
 
 	auto it = memory_.find(key);
 	if(it!=memory_.end()) {
@@ -105,7 +107,9 @@ Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, 
 	pending_.insert(key);
 
 	auto file = cache_dir() / (md5_hex(key) + ".img");
-	auto url  = api_->url("getCoverArt", {{"id", cover_id}, {"size", std::to_string(px)}});
+	Params p = {{"id", cover_id}, {"size", std::to_string(px)}};
+	if(index>0) p.push_back({"index", std::to_string(index)});
+	auto url  = api_->url("getCoverArt", p);
 	pool_.submit([this, key, file, url, epoch=epoch_]() {
 		std::string data, error;
 		if(!read_file(file, data)) {
@@ -174,13 +178,13 @@ void CoverImage::ready(const std::string& key, const Glib::RefPtr<Gdk::Texture>&
 		set(tex);
 	}
 
-void CoverImage::show_cover(const std::string& cover_id)
+void CoverImage::show_cover(const std::string& cover_id, int index)
 	{
 	// Device pixels, at 1x or 2x only: each distinct size is another thumbnail
 	// the server keeps, so fractional scales are rounded up rather than
 	// followed. The same rule as the web client's coverPx().
 	int px = css_px_ * (get_scale_factor()>1 ? 2 : 1);
-	auto tex = store_.get(cover_id, px, wanted_);
+	auto tex = store_.get(cover_id, px, wanted_, index);
 	if(tex) set(tex);
 	else    clear();
 	}

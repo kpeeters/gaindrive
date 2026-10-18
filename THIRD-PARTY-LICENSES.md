@@ -64,6 +64,10 @@ rather than `third_party/` because it is embedded into the binary by
   Google's mark. `ios/Resources/Assets.xcassets/README.md` says how to
   regenerate them; fontTools is needed then and not at build time.
 
+  **The Linux client's icons come from it too**, as
+  `linux/data/icons/scalable/actions/gd-*-symbolic.svg`, written by
+  `linux/data/icons/extract-icons.py` (fontTools, not needed at build time).
+
 
 ## Server - system packages
 

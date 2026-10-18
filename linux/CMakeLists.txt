@@ -13,7 +13,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${GD_ROOT}/VERSIO
 if(NOT _gd_version MATCHES "^[0-9]+(\\.[0-9]+)*$")
 	message(FATAL_ERROR "VERSION: no usable `version=' line (got '${_gd_version}')")
 endif()
-project(gaindrive-player VERSION ${_gd_version} LANGUAGES CXX)
+project(gaindrive-player VERSION ${_gd_version} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,6 +31,7 @@ find_package(PkgConfig REQUIRED)
 # 4.10 is what Ubuntu 24.04 ships, the oldest distribution we aim at.
 pkg_check_modules(GTKMM REQUIRED IMPORTED_TARGET gtkmm-4.0>=4.10)
 pkg_check_modules(SECRET REQUIRED IMPORTED_TARGET libsecret-1)
+pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0)
 find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -69,6 +70,34 @@ target_link_libraries(gdshared PUBLIC
 	OpenSSL::Crypto
 	Threads::Threads)
 
+# ---- Icons -------------------------------------------------------------------
+
+# Our own symbolic icons, compiled in under the application's resource path,
+# where GtkApplication adds them to the icon theme by itself. Themes vary too
+# much in which symbolic icons they have; a missing one is drawn as a blob.
+find_program(GD_GLIB_COMPILE_RESOURCES glib-compile-resources REQUIRED)
+file(GLOB GD_ICONS CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/data/icons/scalable/actions/*.svg)
+set(_gd_icon_xml "")
+foreach(icon ${GD_ICONS})
+	get_filename_component(name ${icon} NAME)
+	string(APPEND _gd_icon_xml "    <file>scalable/actions/${name}</file>\n")
+endforeach()
+string(REPLACE "." "/" _gd_res_path "${GD_APP_ID}")
+file(CONFIGURE OUTPUT icons.gresource.xml CONTENT
+"<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<gresources>
+  <gresource prefix=\"/${_gd_res_path}/icons\">
+${_gd_icon_xml}  </gresource>
+</gresources>
+")
+add_custom_command(
+	OUTPUT  ${CMAKE_CURRENT_BINARY_DIR}/icons.c
+	COMMAND ${GD_GLIB_COMPILE_RESOURCES} --generate-source
+	        --sourcedir=${CMAKE_CURRENT_SOURCE_DIR}/data/icons
+	        --target=${CMAKE_CURRENT_BINARY_DIR}/icons.c
+	        ${CMAKE_CURRENT_BINARY_DIR}/icons.gresource.xml
+	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/icons.gresource.xml ${GD_ICONS})
+
 # ---- The player -------------------------------------------------------------
 
 add_executable(gaindrive-player
@@ -76,19 +105,29 @@ add_executable(gaindrive-player
 	src/apiclient.cc
 	src/configfile.cc
 	src/coverstore.cc
+	src/infoblock.cc
+	src/library.cc
 	src/loginview.cc
 	src/mainwindow.cc
 	src/model.cc
 	src/panes.cc
+	src/playback.cc
+	src/player.cc
+	src/playerbar.cc
+	src/playlistpicker.cc
 	src/secretstore.cc
+	src/sections.cc
 	src/serverconfig.cc
+	src/settings.cc
+	src/settingspage.cc
 	src/uithread.cc
 	src/workpool.cc
+	${CMAKE_CURRENT_BINARY_DIR}/icons.c
 )
 target_compile_definitions(gaindrive-player PRIVATE
 	GD_APP_ID="${GD_APP_ID}"
 	GAINDRIVE_VERSION="${PROJECT_VERSION}")
-target_link_libraries(gaindrive-player PRIVATE gdshared PkgConfig::GTKMM PkgConfig::SECRET)
+target_link_libraries(gaindrive-player PRIVATE gdshared PkgConfig::GTKMM PkgConfig::SECRET PkgConfig::GST)
 
 # ---- Installation -----------------------------------------------------------
 
@@ -133,10 +172,15 @@ endif()
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_SECTION sound)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+# playbin is a plugin, and so is the HTTP source; nothing links them, so
+# shlibdeps cannot find them.
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "gstreamer1.0-plugins-base, gstreamer1.0-plugins-good")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "gstreamer1.0-plugins-bad, gstreamer1.0-libav")
 
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
+set(CPACK_RPM_PACKAGE_REQUIRES "gstreamer1-plugins-base, gstreamer1-plugins-good")
 # Directories owned by the filesystem and hicolor-icon-theme packages; listing
 # them in our rpm makes it conflict with those on install.
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION

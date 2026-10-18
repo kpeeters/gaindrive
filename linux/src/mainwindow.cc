@@ -2,10 +2,13 @@
 #include "apiclient.hh"
 #include "configfile.hh"
 #include "jsonread.hh"
+#include "playlistpicker.hh"
 #include "secretstore.hh"
 #include "uithread.hh"
 
+#include <giomm/simpleaction.h>
 #include <glibmm/main.h>
+#include <gtkmm/alertdialog.h>
 #include <gtkmm/cssprovider.h>
 #include <nlohmann/json.hpp>
 
@@ -20,25 +23,58 @@ namespace {
 		.cover { border-radius: 4px; }
 		.notice { padding: 6px 12px; background-color: alpha(@error_color, 0.2); }
 		.sidebar { min-width: 170px; }
+		.playing .row-title { font-weight: bold; }
+		.player-bar { padding: 8px 12px; border-top: 1px solid alpha(currentColor, 0.15); }
+		.pane-empty { padding: 12px; }
+		.info-block { margin: 0 12px 12px 12px; }
+		.liner-notes { margin: 12px; }
+		.row-action { min-width: 24px; min-height: 24px; padding: 2px; }
+		.row-action.starred { color: @accent_color; }
+		/* Material Symbols leave a wide margin inside the em, so at the
+		   default 16px they look much smaller than theme icons. */
+		.pane button > image, .sidebar button > image { -gtk-icon-size: 20px; }
+		.player-bar button > image { -gtk-icon-size: 24px; }
 	)";
 
 	// Credentials the server refuses: wrong user or password.
 	const int auth_refused = 40;
+
+	// The server's own rule for what gets a resume point.
+	const int resume_min_seconds = 20*60;
+
+	struct Section { const char *name, *label; };
+	const Section sections[] = {
+		{ "library",   "Library" },
+		{ "playlists", "Playlists" },
+		{ "recents",   "Recents" },
+		{ "search",    "Search" },
+		{ "settings",  "Settings" }
+	};
 }
 
 MainWindow::MainWindow()
 	: pool_(4),
 	  covers_(pool_),
+	  playback_(settings_),
 	  browse_(Gtk::Orientation::VERTICAL),
 	  main_(Gtk::Orientation::HORIZONTAL),
 	  sidebar_(Gtk::Orientation::VERTICAL),
+	  queue_(playback_),
 	  logout_("Log out"),
 	  panes_(Gtk::Orientation::HORIZONTAL),
 	  artists_(covers_),
-	  albums_(covers_),
-	  tracks_(covers_)
+	  playlists_(covers_),
+	  recents_(covers_),
+	  search_(covers_),
+	  settings_pane_(covers_, settings_),
+	  albums_(covers_, settings_),
+	  playlist_(covers_),
+	  settings_page_(settings_),
+	  tracks_(covers_),
+	  bar_(covers_, playback_)
 	{
 	ui_init();
+	settings_.load();
 
 	auto provider = Gtk::CssProvider::create();
 	provider->load_from_data(css);
@@ -49,6 +85,7 @@ MainWindow::MainWindow()
 	set_icon_name(GD_APP_ID);
 	restore_size();
 	signal_close_request().connect([this]() {
+		playback_.report_stopped_now();
 		save_size();
 		return false;
 		}, false);
@@ -61,29 +98,40 @@ MainWindow::MainWindow()
 	notice_.set_child(notice_text_);
 	browse_.append(notice_);
 
-	// The sidebar holds only Library for now; Playlists, Recents, Search and
-	// Settings join it in later stages, as on the web client.
-	auto library = Gtk::make_managed<Gtk::Label>("Library");
-	library->set_xalign(0);
-	nav_.append(*library);
+	for(const auto& sec: sections) {
+		auto label = Gtk::make_managed<Gtk::Label>(sec.label);
+		label->set_xalign(0);
+		nav_.append(*label);
+		}
 	nav_.add_css_class("navigation-sidebar");
-	nav_.select_row(*nav_.get_row_at_index(0));
-	nav_.set_vexpand(true);
 	sidebar_.add_css_class("sidebar");
 	sidebar_.append(nav_);
+	queue_scroll_.set_child(queue_);
+	queue_scroll_.set_vexpand(true);
+	queue_scroll_.set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
+	sidebar_.append(queue_scroll_);
 	logout_.add_css_class("flat");
 	logout_.set_margin(6);
 	sidebar_.append(logout_);
 	main_.append(sidebar_);
 
+	left_.add(artists_, "library");
+	left_.add(playlists_, "playlists");
+	left_.add(recents_, "recents");
+	left_.add(search_, "search");
+	left_.add(settings_pane_, "settings");
+	middle_.add(albums_, "albums");
+	middle_.add(playlist_, "playlist");
+	middle_.add(settings_page_, "settings");
 	panes_.set_homogeneous(true);
 	panes_.set_hexpand(true);
-	panes_.append(artists_);
-	panes_.append(albums_);
+	panes_.append(left_);
+	panes_.append(middle_);
 	panes_.append(tracks_);
 	main_.append(panes_);
 	main_.set_vexpand(true);
 	browse_.append(main_);
+	browse_.append(bar_);
 
 	stack_.add(login_, "login");
 	stack_.add(browse_, "browse");
@@ -91,15 +139,54 @@ MainWindow::MainWindow()
 
 	login_.signal_login.connect(sigc::mem_fun(*this, &MainWindow::login));
 	logout_.signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::logout));
-	artists_.signal_artist.connect([this](const Artist& a) {
-		tracks_.clear();
-		albums_.show_artist(api_, a);
+	nav_.signal_row_selected().connect([this](Gtk::ListBoxRow *row) {
+		if(row && api_) show_section(sections[row->get_index()].name);
 		});
-	albums_.signal_album.connect([this](const Album& a) {
-		tracks_.show_album(api_, a);
+	auto search = Gio::SimpleAction::create("search");
+	search->signal_activate().connect([this](const Glib::VariantBase&) {
+		if(api_) nav_.select_row(*nav_.get_row_at_index(3));
 		});
-	for(Pane *p: {static_cast<Pane*>(&artists_), static_cast<Pane*>(&albums_), static_cast<Pane*>(&tracks_)})
+	add_action(search);
+
+	for(auto p: all_panes()) {
 		p->signal_failed.connect(sigc::mem_fun(*this, &MainWindow::failed));
+		p->signal_play.connect(sigc::mem_fun(*this, &MainWindow::play));
+		p->signal_enqueue.connect(sigc::mem_fun(playback_, &Playback::enqueue));
+		p->signal_star.connect(sigc::mem_fun(*this, &MainWindow::star));
+		p->signal_open_album.connect(sigc::mem_fun(*this, &MainWindow::open_album));
+		p->signal_open_artist.connect(sigc::mem_fun(*this, &MainWindow::open_artist));
+		p->signal_pick_playlist.connect([this](const Song& s, Gtk::Widget& anchor) {
+			pick_playlist(anchor, api_, s, [this](const ApiResult& r) { failed(r); });
+			});
+		}
+	albums_.signal_album.connect([this](const Album& a) {
+		open_album(a.ref.id, "");
+		});
+	tracks_.signal_loaded.connect(sigc::mem_fun(*this, &MainWindow::album_loaded));
+	playlists_.signal_playlist.connect([this](const Playlist& pl) {
+		middle_.set_visible_child("playlist");
+		tracks_.clear();
+		playlist_.show_playlist(api_, pl);
+		});
+	settings_pane_.signal_category.connect([this](const std::string& key) {
+		middle_.set_visible_child("settings");
+		settings_page_.show(key, api_);
+		});
+	settings_page_.signal_changed.connect([this]() {
+		settings_pane_.load();
+		});
+	bar_.signal_cover.connect([this]() {
+		if(auto s = playback_.current())
+			open_album(s->album_id, "");
+		});
+	playback_.signal_track.connect([this]() {
+		const Song *s = playback_.current();
+		for(auto p: all_panes())
+			p->set_playing(s ? s->ref : ItemRef{});
+		});
+	playback_.signal_error.connect([this](const std::string& e) {
+		notify("Cannot play this track: " + e);
+		});
 
 	servers_ = load_servers();
 	if(!servers_.empty()) {
@@ -184,9 +271,15 @@ void MainWindow::start_session(const Session& s)
 	{
 	api_ = std::make_shared<ApiClient>(pool_, s);
 	covers_.set_api(api_);
-	albums_.clear();
-	tracks_.clear();
+	playback_.set_api(api_);
+	search_.set_api(api_);
+	for(auto p: all_panes())
+		p->clear();
 	artists_.load(api_);
+	// Selecting the row when it already is selected does nothing, so the
+	// section is shown by hand as well.
+	nav_.select_row(*nav_.get_row_at_index(0));
+	show_section("library");
 	stack_.set_visible_child("browse");
 	}
 
@@ -194,12 +287,121 @@ void MainWindow::logout()
 	{
 	if(!servers_.empty())
 		secret_clear(servers_.front());
+	playback_.set_api(nullptr);
 	api_.reset();
 	covers_.set_api(nullptr);
-	artists_.clear();
-	albums_.clear();
-	tracks_.clear();
+	search_.set_api(nullptr);
+	for(auto p: all_panes())
+		p->clear();
+	settings_page_.clear();
 	show_login("");
+	}
+
+std::vector<Pane*> MainWindow::all_panes()
+	{
+	return { &artists_, &playlists_, &recents_, &search_, &settings_pane_,
+	         &albums_, &playlist_, &tracks_ };
+	}
+
+void MainWindow::show_section(const std::string& name)
+	{
+	left_.set_visible_child(name);
+	// As on the web client, a section starts with the other two panes empty.
+	middle_.set_visible_child("albums");
+	albums_.clear();
+	playlist_.clear();
+	settings_page_.clear();
+	tracks_.clear();
+	for(Pane *p: {static_cast<Pane*>(&artists_), static_cast<Pane*>(&playlists_),
+	              static_cast<Pane*>(&recents_), static_cast<Pane*>(&search_),
+	              static_cast<Pane*>(&settings_pane_)})
+		p->unselect();
+
+	if(name=="library") {
+		if(!artists_.loaded()) artists_.load(api_);
+		}
+	else if(name=="playlists") playlists_.load(api_);
+	else if(name=="recents")   recents_.load(api_);
+	else if(name=="search")    search_.focus_entry();
+	else if(name=="settings")  settings_pane_.load();
+	}
+
+void MainWindow::open_artist(const Artist& a)
+	{
+	middle_.set_visible_child("albums");
+	tracks_.clear();
+	albums_.show_artist(api_, a);
+	}
+
+void MainWindow::open_album(const std::string& album_id, const std::string& play_id)
+	{
+	if(album_id.empty() || !api_) return;
+	tracks_.show_album(api_, album_id, play_id);
+	}
+
+void MainWindow::album_loaded(const Album& a)
+	{
+	// An album opened from a search, a recent play or the player bar brings
+	// its artist's albums along, so the middle pane is not left empty or
+	// showing something unrelated.
+	if(a.artist_id.empty()) return;
+	if(middle_.get_visible_child_name()=="albums" && albums_.artist_id()==a.artist_id) return;
+	Artist artist;
+	artist.ref  = {a.ref.server, a.artist_id};
+	artist.name = a.artist;
+	middle_.set_visible_child("albums");
+	albums_.show_artist(api_, artist);
+	}
+
+void MainWindow::play(const std::vector<Song>& songs, size_t index)
+	{
+	if(index>=songs.size() || !api_) return;
+	const Song& song = songs[index];
+	if(song.duration<resume_min_seconds) {
+		playback_.play(songs, index);
+		return;
+		}
+	api_->call("getBookmarks", {}, [this, songs, index](const ApiResult& r) {
+		const Song& song = songs[index];
+		double pos = 0;
+		const auto& marks = jsub(jsub(r.body, "bookmarks"), "bookmark");
+		for(size_t i=0; i<marks.size(); ++i) {
+			const auto& b = jidx(marks, i);
+			if(jstr(jsub(b, "entry"), "id")==song.ref.id)
+				pos = jnum(b, "position")/1000.0;
+			}
+		if(pos<=0) {
+			playback_.play(songs, index);
+			return;
+			}
+		auto dialog = Gtk::AlertDialog::create("Resume");
+		dialog->set_detail("Continue \u201c" + song.title + "\u201d where you left off?");
+		dialog->set_buttons({"Start over", "Resume at " + format_duration(int(pos))});
+		dialog->set_default_button(1);
+		dialog->choose(*this, [this, dialog, songs, index, pos](Glib::RefPtr<Gio::AsyncResult>& res) {
+			try {
+				int button = dialog->choose_finish(res);
+				playback_.play(songs, index, button==1 ? pos : 0);
+				}
+			catch(const Glib::Error&) {
+				// Dismissed: play nothing, as on the web client.
+				}
+			});
+		});
+	}
+
+void MainWindow::star(ListRow::Kind kind, const ItemRef& ref, bool on)
+	{
+	if(!api_) return;
+	Params p = {{kind==ListRow::Kind::album ? "albumId" : "id", ref.id}};
+	api_->call(on ? "star" : "unstar", p, [this, kind, ref, on](const ApiResult& r) {
+		if(!r.ok) {
+			failed(r);
+			return;
+			}
+		for(auto pane: all_panes())
+			pane->star_changed(kind, ref, on);
+		});
 	}
 
 void MainWindow::failed(const ApiResult& r)

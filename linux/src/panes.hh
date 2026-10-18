@@ -7,29 +7,48 @@
 #include <gtkmm/button.h>
 #include <gtkmm/label.h>
 #include <gtkmm/listview.h>
+#include <gtkmm/overlay.h>
 #include <gtkmm/scrolledwindow.h>
+#include <gtkmm/searchentry.h>
 #include <gtkmm/singleselection.h>
 
-#include <map>
 #include <memory>
+#include <set>
 
 class ApiClient;
 class CoverStore;
 class CoverImage;
+class InfoBlock;
 struct ApiResult;
-namespace Gtk { class ListItem; }
+struct AppSettings;
 
-// One row widget for all three panes: a heading, or an item with an optional
-// cover, a leading number, a title over a subtitle, and a trailing note.
-// Unused parts are hidden; a ListView recycles these between row kinds.
+// One row widget for every pane: a heading, or an item with an optional
+// cover, a leading number, a title over a subtitle, a trailing note and up to
+// three buttons. Unused parts are hidden; a ListView recycles these between
+// row kinds.
 class RowWidget : public Gtk::Box {
 	public:
 		RowWidget(CoverStore *covers, int cover_px);
+		~RowWidget() override;
 
 		void show_heading(const std::string& text);
 		void show_item(const std::string& cover_id, const std::string& lead,
 		               const std::string& title, const std::string& subtitle,
 		               const std::string& trail);
+		// The list button either offers "add to playlist" or, inside a
+		// playlist the user owns, "remove from it".
+		enum class ListButton { none, add, remove };
+		void show_actions(bool star, bool starred, ListButton list, bool queue);
+		void set_playing(bool on);
+
+		// The row currently bound here.
+		Glib::RefPtr<ListRow> row;
+		Gtk::Button           star, list, queue;
+		ListButton            list_mode=ListButton::none;
+		// The pane's set of live row widgets, which this one leaves when it
+		// is destroyed. GTK does not promise the child is still reachable
+		// from the factory's teardown, so that cannot do the bookkeeping.
+		std::shared_ptr<std::set<RowWidget*>> registry;
 
 	private:
 		Gtk::Label  heading_;
@@ -40,45 +59,68 @@ class RowWidget : public Gtk::Box {
 };
 
 // A titled, scrolling list of ListRows, as on the web client's pane strip.
+// The signals are what every pane may ask of the window.
 class Pane : public Gtk::Box {
 	public:
-		Pane(CoverStore& covers, int cover_px, bool hero);
+		// `boxed` puts boxes above and below the list, scrolling with it. It
+		// costs the list its virtualisation, so only short lists use it.
+		Pane(CoverStore& covers, int cover_px, bool boxed);
 
-		void clear();
+		virtual void clear();
+		// A star set or cleared anywhere: rows showing that item follow.
+		virtual void star_changed(ListRow::Kind kind, const ItemRef& ref, bool on);
+		void set_playing(const ItemRef& song);
+		void unselect();
 
-		// Raised for any failed request, for the window to report, or to go
-		// back to the login screen when the credentials were refused.
-		sigc::signal<void(const ApiResult&)> signal_failed;
+		sigc::signal<void(const ApiResult&)>                  signal_failed;
+		sigc::signal<void(const std::vector<Song>&, size_t)>  signal_play;
+		sigc::signal<void(const Song&)>                       signal_enqueue;
+		sigc::signal<void(ListRow::Kind, const ItemRef&, bool)> signal_star;
+		sigc::signal<void(const Song&, Gtk::Widget&)>         signal_pick_playlist;
+		// Open an album in the track pane, and play `play_id` from it if set.
+		sigc::signal<void(const std::string& album_id, const std::string& play_id)> signal_open_album;
+		sigc::signal<void(const Artist&)>                     signal_open_artist;
 
 	protected:
 		void set_title(const std::string& t);
 		void set_rows(const std::vector<Glib::RefPtr<ListRow>>& rows);
+		// Shown in place of an empty list; empty text hides it.
+		void set_empty(const std::string& text);
 		virtual void bind(RowWidget& w, const ListRow& row) = 0;
 		virtual void activated(const ListRow&) {}
+		virtual void remove_from_list(const ListRow&) {}
+		void rebind_all();
+		void report(const ApiResult& r);
+
+		// The usual song row outside an album: title, "artist · album".
+		void bind_song_hit(RowWidget& w, const Song& s, const std::string& trail);
+		void bind_album_hit(RowWidget& w, const Album& a);
 
 		CoverStore&                           covers_;
 		Gtk::Box                              header_;
 		Gtk::Label                            title_;
-		// Above the list, scrolling with it; only the track pane has one.
-		std::unique_ptr<CoverImage>           hero_;
-		// Bumped by each load, so the answer to a superseded one is dropped.
+		Gtk::Box                              top_, bottom_;
 		unsigned                              gen_=0;
 
 	private:
+		std::shared_ptr<std::set<RowWidget*>> widgets_;
+		Gtk::Label                            empty_;
 		Gtk::ScrolledWindow                   scroll_;
 		Gtk::Box                              scroll_box_;
 		Glib::RefPtr<Gio::ListStore<ListRow>> store_;
 		Glib::RefPtr<Gtk::SingleSelection>    selection_;
 		Gtk::ListView                         list_;
+		ItemRef                               playing_;
 };
+
+// ---- Library: artists, an artist's albums, an album's tracks ---------------
 
 class ArtistPane : public Pane {
 	public:
 		explicit ArtistPane(CoverStore& covers);
 
 		void load(std::shared_ptr<ApiClient> api);
-
-		sigc::signal<void(const Artist&)> signal_artist;
+		bool loaded() const;
 
 	protected:
 		void bind(RowWidget& w, const ListRow& row) override;
@@ -90,13 +132,17 @@ class ArtistPane : public Pane {
 
 		// Whether the server sorts its roots by contentType (gaindrive does).
 		bool typed_=false;
+		bool loaded_=false;
 };
 
 class AlbumPane : public Pane {
 	public:
-		explicit AlbumPane(CoverStore& covers);
+		AlbumPane(CoverStore& covers, AppSettings& settings);
+		~AlbumPane() override;
 
 		void show_artist(std::shared_ptr<ApiClient> api, const Artist& artist);
+		const std::string& artist_id() const;
+		void clear() override;
 
 		sigc::signal<void(const Album&)> signal_album;
 
@@ -107,21 +153,139 @@ class AlbumPane : public Pane {
 	private:
 		void render();
 		void label_sort();
+		std::string section() const;
 
-		Gtk::Button        sort_;
-		std::vector<Album> albums_;
-		bool               category_=false;
-		// Per section, as the web client keeps it: a category of radio shows
-		// reads best by name, an artist's records by year.
-		std::map<bool, bool> by_name_;
+		AppSettings&               settings_;
+		Gtk::Button                sort_;
+		std::unique_ptr<InfoBlock> bio_;
+		Gtk::ScrolledWindow        bio_scroll_;
+		std::vector<Album>         albums_;
+		std::string                artist_id_;
+		bool                       category_=false;
 };
 
 class TrackPane : public Pane {
 	public:
 		explicit TrackPane(CoverStore& covers);
+		~TrackPane() override;
 
-		void show_album(std::shared_ptr<ApiClient> api, const Album& album);
+		// Everything else about the album comes from getAlbum.
+		void show_album(std::shared_ptr<ApiClient> api, const std::string& album_id,
+		                const std::string& play_id="");
+		void clear() override;
+
+		// The album's own details, once getAlbum has answered.
+		sigc::signal<void(const Album&)> signal_loaded;
 
 	protected:
 		void bind(RowWidget& w, const ListRow& row) override;
+		void activated(const ListRow& row) override;
+
+	private:
+		void show_image(int index);
+		void load_texts(std::shared_ptr<ApiClient> api, const std::string& album_id);
+		void show_text(size_t index);
+
+		std::vector<Song>           songs_;
+		Album                       album_;
+		std::shared_ptr<ApiClient>  api_;
+
+		Gtk::Overlay                hero_box_;
+		std::unique_ptr<CoverImage> hero_;
+		Gtk::Button                 img_prev_, img_next_;
+		int                         image_=0, images_=1;
+		std::unique_ptr<InfoBlock>  notes_;
+
+		// Liner notes: the .txt files in the album's folder.
+		Gtk::Box                    texts_, texts_nav_;
+		Gtk::Button                 text_prev_, text_next_;
+		Gtk::Label                  text_name_, text_body_;
+		std::vector<std::string>    text_files_;
+		size_t                      text_=0;
+};
+
+// ---- The other sidebar sections --------------------------------------------
+
+// Playlists, then starred albums and tracks, as on the web client.
+class PlaylistsPane : public Pane {
+	public:
+		explicit PlaylistsPane(CoverStore& covers);
+
+		void load(std::shared_ptr<ApiClient> api);
+		void star_changed(ListRow::Kind kind, const ItemRef& ref, bool on) override;
+
+		sigc::signal<void(const Playlist&)> signal_playlist;
+
+	protected:
+		void bind(RowWidget& w, const ListRow& row) override;
+		void activated(const ListRow& row) override;
+
+	private:
+		std::shared_ptr<ApiClient> api_;
+};
+
+// One playlist's tracks, in the middle pane.
+class PlaylistPane : public Pane {
+	public:
+		explicit PlaylistPane(CoverStore& covers);
+
+		void show_playlist(std::shared_ptr<ApiClient> api, const Playlist& pl);
+		void reload();
+
+	protected:
+		void bind(RowWidget& w, const ListRow& row) override;
+		void activated(const ListRow& row) override;
+		void remove_from_list(const ListRow& row) override;
+
+	private:
+		std::shared_ptr<ApiClient> api_;
+		Playlist                   playlist_;
+		std::vector<Song>          songs_;
+		bool                       owner_=false;
+};
+
+class RecentsPane : public Pane {
+	public:
+		explicit RecentsPane(CoverStore& covers);
+
+		void load(std::shared_ptr<ApiClient> api);
+
+	protected:
+		void bind(RowWidget& w, const ListRow& row) override;
+		void activated(const ListRow& row) override;
+};
+
+class SearchPane : public Pane {
+	public:
+		explicit SearchPane(CoverStore& covers);
+
+		void set_api(std::shared_ptr<ApiClient> api);
+		void focus_entry();
+		void clear() override;
+
+	protected:
+		void bind(RowWidget& w, const ListRow& row) override;
+		void activated(const ListRow& row) override;
+
+	private:
+		void run();
+
+		Gtk::SearchEntry           entry_;
+		std::shared_ptr<ApiClient> api_;
+};
+
+class SettingsPane : public Pane {
+	public:
+		SettingsPane(CoverStore& covers, AppSettings& settings);
+
+		void load();
+
+		sigc::signal<void(const std::string& key)> signal_category;
+
+	protected:
+		void bind(RowWidget& w, const ListRow& row) override;
+		void activated(const ListRow& row) override;
+
+	private:
+		AppSettings& settings_;
 };

@@ -40,6 +40,11 @@ class ApiClient {
 		void call(const std::string& endpoint, Params params,
 		          std::function<void(const ApiResult&)> done);
 
+		// For an endpoint that answers with a file rather than JSON, such as
+		// getAlbumText. `done` is called on the main loop.
+		void text(const std::string& endpoint, Params params,
+		          std::function<void(bool ok, const std::string& body)> done);
+
 		// For URLs handed to something else, such as covers and streams.
 		std::string url(const std::string& endpoint, const Params& params) const;
 

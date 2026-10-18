@@ -64,6 +64,17 @@ void ApiClient::call(const std::string& endpoint, Params params,
 		});
 	}
 
+void ApiClient::text(const std::string& endpoint, Params params,
+                     std::function<void(bool, const std::string&)> done)
+	{
+	std::string u = url(endpoint, params);
+	pool_.submit([u, done=std::move(done)]() {
+		std::string body, error;
+		bool ok = get_bytes(u, body, error);
+		on_ui([ok, body=std::move(body), done]() { done(ok, body); });
+		});
+	}
+
 bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string& error)
 	{
 	std::string origin, path;

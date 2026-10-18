@@ -3,6 +3,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <glibmm/datetime.h>
+
+#include <algorithm>
 #include <cstdio>
 
 Artist parse_artist(const std::string& server, const nlohmann::json& j, bool category)
@@ -25,7 +28,11 @@ Album parse_album(const std::string& server, const nlohmann::json& j)
 	if(a.title.empty())
 		a.title    = jstr(j, "title");
 	a.artist      = jstr(j, "artist");
+	a.artist_id   = jstr(j, "artistId");
+	if(a.artist_id.empty())
+		a.artist_id = jstr(j, "parent");
 	a.cover_art   = jstr(j, "coverArt");
+	a.starred     = !jstr(j, "starred").empty();
 	a.year        = jint(j, "year");
 	a.song_count  = jint(j, "songCount");
 	a.video_count = jint(j, "videoCount");
@@ -46,7 +53,42 @@ Song parse_song(const std::string& server, const nlohmann::json& j)
 	if(s.disc==0) s.disc   = 1;
 	s.season               = jint(j, "season");
 	s.duration             = jint(j, "duration");
+	s.album_id             = jstr(j, "albumId");
+	if(s.album_id.empty())
+		s.album_id          = jstr(j, "parent");
+	s.last_played          = jstr(j, "lastPlayed");
+	s.starred              = !jstr(j, "starred").empty();
 	return s;
+	}
+
+Playlist parse_playlist(const std::string& server, const nlohmann::json& j)
+	{
+	Playlist p;
+	p.ref        = {server, jstr(j, "id")};
+	p.name       = jstr(j, "name");
+	p.owner      = jstr(j, "owner");
+	p.comment    = jstr(j, "comment");
+	p.song_count = jint(j, "songCount");
+	p.duration   = jint(j, "duration");
+	const auto& pub = jsub(j, "public");
+	p.is_public  = pub.is_boolean() && pub.get<bool>();
+	return p;
+	}
+
+std::string format_ago(const std::string& iso8601)
+	{
+	auto then = Glib::DateTime::create_from_iso8601(iso8601);
+	if(!then) return "";
+	auto mins = Glib::DateTime::create_now_utc().difference(then)/G_TIME_SPAN_MINUTE;
+	if(mins<60) return std::to_string(std::max<long>(0, mins)) + "m ago";
+	auto hrs = mins/60;
+	if(hrs<24)  return std::to_string(hrs) + "h ago";
+	return std::to_string(hrs/24) + "d ago";
+	}
+
+std::string plural(int n, const char *one, const char *many)
+	{
+	return std::to_string(n) + " " + (n==1 ? one : many);
 	}
 
 std::string format_duration(int seconds)
@@ -89,5 +131,22 @@ Glib::RefPtr<ListRow> ListRow::of(const Song& s)
 	{
 	auto r = Glib::make_refptr_for_instance<ListRow>(new ListRow(Kind::song));
 	r->song = s;
+	return r;
+	}
+
+Glib::RefPtr<ListRow> ListRow::of(const Playlist& p)
+	{
+	auto r = Glib::make_refptr_for_instance<ListRow>(new ListRow(Kind::playlist));
+	r->playlist = p;
+	return r;
+	}
+
+Glib::RefPtr<ListRow> ListRow::setting(const std::string& key, const std::string& text,
+                                       const std::string& detail)
+	{
+	auto r = Glib::make_refptr_for_instance<ListRow>(new ListRow(Kind::setting));
+	r->key    = key;
+	r->text   = text;
+	r->detail = detail;
 	return r;
 	}

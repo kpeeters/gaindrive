@@ -26,7 +26,9 @@ class CoverStore {
 
 		// The texture if it is in memory. Otherwise null, a fetch is started,
 		// and signal_ready fires with the same key once it has landed.
-		Glib::RefPtr<Gdk::Texture> get(const std::string& cover_id, int px, std::string& key);
+		// `index` picks one of an album's further images (getAlbumImages).
+		Glib::RefPtr<Gdk::Texture> get(const std::string& cover_id, int px, std::string& key,
+		                               int index=0);
 
 		sigc::signal<void(const std::string& key, const Glib::RefPtr<Gdk::Texture>&)> signal_ready;
 
@@ -56,7 +58,7 @@ class CoverImage : public Gtk::Image {
 	public:
 		CoverImage(CoverStore& store, int css_px);
 
-		void show_cover(const std::string& cover_id);
+		void show_cover(const std::string& cover_id, int index=0);
 
 	private:
 		void ready(const std::string& key, const Glib::RefPtr<Gdk::Texture>& tex);
