@@ -36,7 +36,9 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void login(const std::string& url, const std::string& user, const std::string& password);
 		void logged_in(const ApiResult& r, const Session& s);
 		void start_session(const Session& s);
-		void logout();
+		// Back to the login view, forgetting nothing on disk.
+		void end_session(const std::string& error);
+		void remove_server(const std::string& key);
 		void failed(const ApiResult& r);
 		void notify(const std::string& text);
 
@@ -71,7 +73,6 @@ class MainWindow : public Gtk::ApplicationWindow {
 		Gtk::ListBox               nav_;
 		Gtk::ScrolledWindow        queue_scroll_;
 		QueueView                  queue_;
-		Gtk::Button                logout_;
 
 		// Three columns, as on the web client: a section, what was picked in
 		// it, and an album's tracks.

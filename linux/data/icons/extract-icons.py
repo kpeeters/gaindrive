@@ -33,7 +33,6 @@ ICONS = {
 	'recents':        ('history',       False),
 	'search':         ('search',        False),
 	'settings':       ('settings',      False),
-	'logout':         ('logout',        False),
 }
 
 def glyphsets():

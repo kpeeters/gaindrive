@@ -1,12 +1,15 @@
 #include "settingspage.hh"
 #include "apiclient.hh"
+#include "serverconfig.hh"
 #include "settings.hh"
 
+#include <gtkmm/button.h>
 #include <gtkmm/stringlist.h>
 
-SettingsPage::SettingsPage(AppSettings& settings)
+SettingsPage::SettingsPage(AppSettings& settings, const std::vector<ServerConfig>& servers)
 	: Gtk::Box(Gtk::Orientation::VERTICAL),
 	  settings_(settings),
+	  servers_(servers),
 	  header_(Gtk::Orientation::HORIZONTAL),
 	  content_(Gtk::Orientation::VERTICAL, 8)
 	{
@@ -41,8 +44,9 @@ Gtk::Label& SettingsPage::add_label(const std::string& text, const char *css)
 void SettingsPage::show(const std::string& key, std::shared_ptr<ApiClient> api)
 	{
 	clear();
-	if(key=="playback") show_playback();
-	else                show_about(api);
+	if(key=="playback")     show_playback();
+	else if(key=="servers") show_servers(api);
+	else                    show_about(api);
 	}
 
 void SettingsPage::show_playback()
@@ -95,6 +99,34 @@ void SettingsPage::show_playback()
 		settings_.save();
 		signal_changed.emit();
 		});
+	}
+
+void SettingsPage::show_servers(std::shared_ptr<ApiClient> api)
+	{
+	title_.set_text("Servers");
+	for(const auto& s: servers_) {
+		auto box  = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+		auto text = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+		text->set_hexpand(true);
+		auto url  = Gtk::make_managed<Gtk::Label>(s.url);
+		url->set_xalign(0);
+		url->set_ellipsize(Pango::EllipsizeMode::END);
+		bool active = api && api->session().server_key==s.key;
+		auto user = Gtk::make_managed<Gtk::Label>(s.user + (active ? " · connected" : ""));
+		user->set_xalign(0);
+		user->add_css_class("dim-label");
+		text->append(*url);
+		text->append(*user);
+		auto remove = Gtk::make_managed<Gtk::Button>("Remove");
+		remove->set_valign(Gtk::Align::CENTER);
+		remove->add_css_class("destructive-action");
+		std::string key = s.key;
+		remove->signal_clicked().connect([this, key]() { signal_remove_server.emit(key); });
+		box->append(*text);
+		box->append(*remove);
+		content_.append(*box);
+		}
+	add_label("Removing a server forgets its login. Log in again to add it back.", "dim-label");
 	}
 
 void SettingsPage::show_about(std::shared_ptr<ApiClient> api)

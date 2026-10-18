@@ -4,6 +4,7 @@
 #include "jsonread.hh"
 #include "playlistpicker.hh"
 #include "secretstore.hh"
+#include "stamp.hh"
 #include "uithread.hh"
 
 #include <giomm/simpleaction.h>
@@ -13,12 +14,19 @@
 #include <gtkmm/image.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <iostream>
+
 namespace {
 	const char *css = R"(
+		/* The web client's light-theme accent. */
+		@define-color gd_red #a31623;
 		.pane { border-left: 1px solid alpha(currentColor, 0.15); }
 		.pane-header { padding: 10px 12px; min-height: 34px; }
 		.pane-title { font-weight: bold; font-size: 1.2em; }
 		.row-heading { font-weight: bold; padding: 12px 4px 4px 4px; opacity: 0.6; }
+		/* In the panes, flush with the row text below and in full colour. */
+		.pane .row-heading { padding-left: 0; opacity: 1; color: @gd_red; }
 		.pane listview > row { padding: 6px 10px; }
 		.hero { margin: 12px; }
 		.cover { border-radius: 4px; }
@@ -35,9 +43,7 @@ namespace {
 		   default 16px they look much smaller than theme icons. */
 		.pane button > image, .sidebar button > image { -gtk-icon-size: 20px; }
 		.player-bar button > image { -gtk-icon-size: 24px; }
-		/* The web client's light-theme accent. */
-		@define-color gd_red #a31623;
-		.nav image, .logout image {
+		.nav image {
 			-gtk-icon-size: 24px;
 			color: @gd_red;
 		}
@@ -72,10 +78,10 @@ MainWindow::MainWindow()
 	  playlists_(covers_),
 	  recents_(covers_),
 	  search_(covers_),
-	  settings_pane_(covers_, settings_),
+	  settings_pane_(covers_, settings_, servers_),
 	  albums_(covers_, settings_),
 	  playlist_(covers_),
-	  settings_page_(settings_),
+	  settings_page_(settings_, servers_),
 	  tracks_(covers_),
 	  bar_(covers_, playback_)
 	{
@@ -122,16 +128,6 @@ MainWindow::MainWindow()
 	queue_scroll_.set_vexpand(true);
 	queue_scroll_.set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
 	sidebar_.append(queue_scroll_);
-	auto logout_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
-	auto logout_icon = Gtk::make_managed<Gtk::Image>();
-	logout_icon->set_from_icon_name("gd-logout-symbolic");
-	logout_box->append(*logout_icon);
-	logout_box->append(*Gtk::make_managed<Gtk::Label>("Log out"));
-	logout_.set_child(*logout_box);
-	logout_.add_css_class("flat");
-	logout_.add_css_class("logout");
-	logout_.set_margin(6);
-	sidebar_.append(logout_);
 	main_.append(sidebar_);
 
 	left_.add(artists_, "library");
@@ -157,7 +153,6 @@ MainWindow::MainWindow()
 	set_child(stack_);
 
 	login_.signal_login.connect(sigc::mem_fun(*this, &MainWindow::login));
-	logout_.signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::logout));
 	nav_.signal_row_selected().connect([this](Gtk::ListBoxRow *row) {
 		if(row && api_) show_section(sections[row->get_index()].name);
 		});
@@ -194,6 +189,7 @@ MainWindow::MainWindow()
 	settings_page_.signal_changed.connect([this]() {
 		settings_pane_.load();
 		});
+	settings_page_.signal_remove_server.connect(sigc::mem_fun(*this, &MainWindow::remove_server));
 	bar_.signal_cover.connect([this]() {
 		if(auto s = playback_.current())
 			open_album(s->album_id, "");
@@ -302,10 +298,8 @@ void MainWindow::start_session(const Session& s)
 	stack_.set_visible_child("browse");
 	}
 
-void MainWindow::logout()
+void MainWindow::end_session(const std::string& error)
 	{
-	if(!servers_.empty())
-		secret_clear(servers_.front());
 	playback_.set_api(nullptr);
 	api_.reset();
 	covers_.set_api(nullptr);
@@ -313,7 +307,42 @@ void MainWindow::logout()
 	for(auto p: all_panes())
 		p->clear();
 	settings_page_.clear();
-	show_login("");
+	show_login(error);
+	}
+
+void MainWindow::remove_server(const std::string& key)
+	{
+	auto it = std::find_if(servers_.begin(), servers_.end(),
+	                       [&](const ServerConfig& s) { return s.key==key; });
+	if(it==servers_.end()) return;
+	auto dialog = Gtk::AlertDialog::create("Remove server?");
+	dialog->set_detail("Forget the login for " + it->user + " on " + it->url + "?");
+	dialog->set_buttons({"Cancel", "Remove"});
+	dialog->set_cancel_button(0);
+	dialog->set_default_button(1);
+	dialog->choose(*this, [this, dialog, key](Glib::RefPtr<Gio::AsyncResult>& res) {
+		int button = 0;
+		try {
+			button = dialog->choose_finish(res);
+			}
+		catch(const Glib::Error& e) {
+			// Dismissed: the same as Cancel.
+			std::cout << stamp() << "Remove server dialog: " << e.what() << std::endl;
+			}
+		if(button!=1) return;
+		auto it = std::find_if(servers_.begin(), servers_.end(),
+		                       [&](const ServerConfig& s) { return s.key==key; });
+		if(it==servers_.end()) return;
+		secret_clear(*it);
+		servers_.erase(it);
+		save_servers(servers_);
+		if(api_ && api_->session().server_key==key)
+			end_session("");
+		else {
+			settings_pane_.load();
+			settings_page_.show("servers", api_);
+			}
+		});
 	}
 
 std::vector<Pane*> MainWindow::all_panes()
@@ -426,8 +455,9 @@ void MainWindow::star(ListRow::Kind kind, const ItemRef& ref, bool on)
 void MainWindow::failed(const ApiResult& r)
 	{
 	if(r.code==auth_refused) {
-		logout();
-		login_.set_error("The server no longer accepts this login. Please log in again.");
+		if(!servers_.empty())
+			secret_clear(servers_.front());
+		end_session("The server no longer accepts this login. Please log in again.");
 		return;
 		}
 	notify(r.error);

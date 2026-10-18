@@ -21,6 +21,7 @@ class CoverImage;
 class InfoBlock;
 struct ApiResult;
 struct AppSettings;
+struct ServerConfig;
 
 // One row widget for every pane: a heading, or an item with an optional
 // cover, a leading number, a title over a subtitle, a trailing note and up to
@@ -276,7 +277,8 @@ class SearchPane : public Pane {
 
 class SettingsPane : public Pane {
 	public:
-		SettingsPane(CoverStore& covers, AppSettings& settings);
+		SettingsPane(CoverStore& covers, AppSettings& settings,
+		             const std::vector<ServerConfig>& servers);
 
 		void load();
 
@@ -287,5 +289,6 @@ class SettingsPane : public Pane {
 		void activated(const ListRow& row) override;
 
 	private:
-		AppSettings& settings_;
+		AppSettings&                     settings_;
+		const std::vector<ServerConfig>& servers_;
 };

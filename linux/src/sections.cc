@@ -1,10 +1,14 @@
 #include "panes.hh"
 #include "apiclient.hh"
 #include "jsonread.hh"
+#include "serverconfig.hh"
 #include "settings.hh"
+#include "stamp.hh"
 
 #include <gtkmm/alertdialog.h>
 #include <gtkmm/window.h>
+
+#include <iostream>
 
 // ---- PlaylistsPane ------------------------------------------------------
 
@@ -169,8 +173,9 @@ void PlaylistPane::remove_from_list(const ListRow& row)
 		try {
 			button = dialog->choose_finish(res);
 			}
-		catch(const Glib::Error&) {
+		catch(const Glib::Error& e) {
 			// Dismissed: the same as Cancel.
+			std::cout << stamp() << "Remove track dialog: " << e.what() << std::endl;
 			}
 		if(button!=1 || gen!=gen_ || !api_) return;
 		// By index rather than id: a playlist may hold the same track twice.
@@ -348,8 +353,9 @@ void SearchPane::activated(const ListRow& row)
 
 // ---- SettingsPane -------------------------------------------------------
 
-SettingsPane::SettingsPane(CoverStore& covers, AppSettings& settings)
-	: Pane(covers, 0, false), settings_(settings)
+SettingsPane::SettingsPane(CoverStore& covers, AppSettings& settings,
+                           const std::vector<ServerConfig>& servers)
+	: Pane(covers, 0, false), settings_(settings), servers_(servers)
 	{
 	}
 
@@ -359,6 +365,8 @@ void SettingsPane::load()
 	set_title("Settings");
 	set_rows({
 		ListRow::setting("playback", "Playback", settings_.quality_label()),
+		ListRow::setting("servers",  "Servers",
+		                 servers_.empty() ? "None" : servers_.front().url),
 		ListRow::setting("about",    "About",    "GainDrive " GAINDRIVE_VERSION)
 		});
 	}
