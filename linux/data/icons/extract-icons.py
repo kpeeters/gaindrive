@@ -28,6 +28,12 @@ ICONS = {
 	'close':          ('close',         False),
 	'chevron-left':   ('chevron_left',  False),
 	'chevron-right':  ('chevron_right', False),
+	'library':        ('library_music', False),
+	'playlists':      ('queue_music',   False),
+	'recents':        ('history',       False),
+	'search':         ('search',        False),
+	'settings':       ('settings',      False),
+	'logout':         ('logout',        False),
 }
 
 def glyphsets():

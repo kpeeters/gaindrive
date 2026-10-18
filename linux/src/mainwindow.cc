@@ -10,6 +10,7 @@
 #include <glibmm/main.h>
 #include <gtkmm/alertdialog.h>
 #include <gtkmm/cssprovider.h>
+#include <gtkmm/image.h>
 #include <nlohmann/json.hpp>
 
 namespace {
@@ -22,7 +23,7 @@ namespace {
 		.hero { margin: 12px; }
 		.cover { border-radius: 4px; }
 		.notice { padding: 6px 12px; background-color: alpha(@error_color, 0.2); }
-		.sidebar { min-width: 170px; }
+		.sidebar { min-width: 255px; }
 		.playing .row-title { font-weight: bold; }
 		.player-bar { padding: 8px 12px; border-top: 1px solid alpha(currentColor, 0.15); }
 		.pane-empty { padding: 12px; }
@@ -34,6 +35,12 @@ namespace {
 		   default 16px they look much smaller than theme icons. */
 		.pane button > image, .sidebar button > image { -gtk-icon-size: 20px; }
 		.player-bar button > image { -gtk-icon-size: 24px; }
+		/* The web client's light-theme accent. */
+		@define-color gd_red #a31623;
+		.nav image, .logout image {
+			-gtk-icon-size: 24px;
+			color: @gd_red;
+		}
 	)";
 
 	// Credentials the server refuses: wrong user or password.
@@ -60,7 +67,6 @@ MainWindow::MainWindow()
 	  main_(Gtk::Orientation::HORIZONTAL),
 	  sidebar_(Gtk::Orientation::VERTICAL),
 	  queue_(playback_),
-	  logout_("Log out"),
 	  panes_(Gtk::Orientation::HORIZONTAL),
 	  artists_(covers_),
 	  playlists_(covers_),
@@ -99,18 +105,31 @@ MainWindow::MainWindow()
 	browse_.append(notice_);
 
 	for(const auto& sec: sections) {
+		auto box   = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
+		auto icon  = Gtk::make_managed<Gtk::Image>();
+		icon->set_from_icon_name(std::string("gd-")+sec.name+"-symbolic");
 		auto label = Gtk::make_managed<Gtk::Label>(sec.label);
 		label->set_xalign(0);
-		nav_.append(*label);
+		box->append(*icon);
+		box->append(*label);
+		nav_.append(*box);
 		}
 	nav_.add_css_class("navigation-sidebar");
+	nav_.add_css_class("nav");
 	sidebar_.add_css_class("sidebar");
 	sidebar_.append(nav_);
 	queue_scroll_.set_child(queue_);
 	queue_scroll_.set_vexpand(true);
 	queue_scroll_.set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
 	sidebar_.append(queue_scroll_);
+	auto logout_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 10);
+	auto logout_icon = Gtk::make_managed<Gtk::Image>();
+	logout_icon->set_from_icon_name("gd-logout-symbolic");
+	logout_box->append(*logout_icon);
+	logout_box->append(*Gtk::make_managed<Gtk::Label>("Log out"));
+	logout_.set_child(*logout_box);
 	logout_.add_css_class("flat");
+	logout_.add_css_class("logout");
 	logout_.set_margin(6);
 	sidebar_.append(logout_);
 	main_.append(sidebar_);
