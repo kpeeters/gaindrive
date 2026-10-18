@@ -42,7 +42,10 @@ namespace {
 		/* Material Symbols leave a wide margin inside the em, so at the
 		   default 16px they look much smaller than theme icons. */
 		.pane button > image, .sidebar button > image { -gtk-icon-size: 20px; }
-		.player-bar button > image { -gtk-icon-size: 24px; }
+		/* Direct children only: the cast popover hangs off the bar too. */
+		.player-bar > button > image,
+		.player-bar > menubutton > button image { -gtk-icon-size: 48px; }
+		.player-bar .casting image { color: @gd_red; }
 		.nav image {
 			-gtk-icon-size: 24px;
 			color: @gd_red;
@@ -68,7 +71,7 @@ namespace {
 MainWindow::MainWindow()
 	: pool_(4),
 	  covers_(pool_),
-	  playback_(settings_),
+	  playback_(settings_, pool_),
 	  browse_(Gtk::Orientation::VERTICAL),
 	  main_(Gtk::Orientation::HORIZONTAL),
 	  sidebar_(Gtk::Orientation::VERTICAL),

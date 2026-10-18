@@ -48,6 +48,7 @@ struct Song {
 	int         duration=0;   // seconds
 	std::string album_id;
 	std::string last_played;  // ISO 8601, from getRecentSongs only
+	std::string content_type; // of the stored file
 	bool        starred=false;
 };
 

@@ -57,6 +57,7 @@ Song parse_song(const std::string& server, const nlohmann::json& j)
 	if(s.album_id.empty())
 		s.album_id          = jstr(j, "parent");
 	s.last_played          = jstr(j, "lastPlayed");
+	s.content_type         = jstr(j, "contentType");
 	s.starred              = !jstr(j, "starred").empty();
 	return s;
 	}

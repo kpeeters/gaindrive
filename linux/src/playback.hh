@@ -1,5 +1,6 @@
 #pragma once
 
+#include "caster.hh"
 #include "model.hh"
 #include "player.hh"
 
@@ -9,14 +10,16 @@
 #include <vector>
 
 class ApiClient;
+class WorkPool;
 struct AppSettings;
 
 // The queue and what plays from it, with the same semantics as the web
 // client: playing a track loads its whole album, everything after it is an
-// automatic tail, and enqueueing by hand replaces that tail.
+// automatic tail, and enqueueing by hand replaces that tail. It plays here, or
+// on a Cast receiver while one is connected.
 class Playback {
 	public:
-		explicit Playback(const AppSettings& settings);
+		Playback(const AppSettings& settings, WorkPool& pool);
 		~Playback();
 
 		// Null on logout, which stops playback.
@@ -41,6 +44,11 @@ class Playback {
 		bool        playing() const;
 		double      position() const;
 
+		Caster&     caster();
+		// Moves what is playing to a receiver, and back.
+		void        cast_to(size_t device);
+		void        stop_casting();
+
 		// Says "stopped" to the server, blocking; for when the window closes
 		// and the pool is about to drop anything queued.
 		void        report_stopped_now();
@@ -52,6 +60,9 @@ class Playback {
 
 	private:
 		void start(double offset=0);
+		void local_start(double offset);
+		void cast_start(double offset);
+		void cast_ended();
 		void update_next();
 		void advanced();
 		void ended();
@@ -61,7 +72,11 @@ class Playback {
 		void        error(const std::string& e);
 
 		const AppSettings&         settings_;
+		WorkPool&                  pool_;
 		Player                     player_;
+		Caster                     caster_;
+		// Bumped by each cast load, so a slow one that is overtaken is dropped.
+		unsigned                   cast_gen_=0;
 		std::shared_ptr<ApiClient> api_;
 		std::vector<Song>          queue_;
 		long                       index_=-1;

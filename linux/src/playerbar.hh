@@ -9,6 +9,7 @@
 #include <chrono>
 #include <memory>
 
+class CastButton;
 class CoverImage;
 class CoverStore;
 class Playback;
@@ -35,6 +36,7 @@ class PlayerBar : public Gtk::Box {
 		Gtk::Button                 prev_, play_, next_;
 		Gtk::Scale                  seek_;
 		Gtk::Label                  time_;
+		std::unique_ptr<CastButton> cast_;
 		sigc::connection            timer_;
 		// The slider is not moved under a hand that is dragging it.
 		std::chrono::steady_clock::time_point user_moved_;

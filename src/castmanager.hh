@@ -18,6 +18,12 @@ struct Tls;
 
 class CastManager {
 	public:
+		CastManager() = default;
+		// Waits for every thread this object started. They are detached and
+		// hold `this`, which the server never minded because its CastManager
+		// lives as long as the process; a desktop client's does not.
+		~CastManager();
+
 		struct CastDevice {
 			std::string id;
 			std::string name;
@@ -161,6 +167,9 @@ class CastManager {
 			// client can speak in track numbers without the server having to
 			// re-probe the file to interpret one.
 			std::vector<int> caption_ids;
+			// The Cast media object's `metadata` (title, artist, images), for a
+			// receiver with a screen to show. Omitted when null.
+			nlohmann::json metadata;
 			// Run on the worker thread before the LOAD is sent; false aborts
 			// the load.  It exists so a caller can make `url` answerable
 			// *before* the receiver is told to fetch it - materialising a
@@ -378,6 +387,17 @@ class CastManager {
 		std::vector<CastDevice>    manual_devices_;
 
 		std::atomic<bool>          poll_active_{false};
+		// Bumped by start(): a poll_loop() from an earlier session exits on
+		// its next wake-up rather than polling beside the new one, which a
+		// stop() followed quickly by start() used to leave running.
+		std::atomic<int>           poll_gen_{0};
+
+		// Every detached thread goes through spawn(), so the destructor can
+		// wait for them.
+		std::mutex                 threads_mutex_;
+		std::condition_variable    threads_cv_;
+		int                        threads_live_ = 0;
+		void spawn(std::function<void()> fn);
 
 		// Parse a MEDIA_STATUS message and store the result in status_.
 		void update_status(const nlohmann::json& msg);
@@ -418,7 +438,7 @@ class CastManager {
 
 		// Background thread: maintains a persistent TLS connection to the Chromecast,
 		// responds to PING heartbeats, and processes pushed MEDIA_STATUS messages.
-		void poll_loop();
+		void poll_loop(int gen);
 
 		// Worker spawned by load() - does the actual TLS connect + LOAD.
 		// Checks load_gen_ against gen at each blocking step and aborts early if

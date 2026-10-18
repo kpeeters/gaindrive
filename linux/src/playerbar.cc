@@ -1,4 +1,5 @@
 #include "playerbar.hh"
+#include "castbutton.hh"
 #include "coverstore.hh"
 #include "playback.hh"
 
@@ -14,7 +15,8 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback)
 	  playback_(playback),
 	  cover_(std::make_unique<CoverImage>(covers, 48)),
 	  info_(Gtk::Orientation::VERTICAL),
-	  seek_(Gtk::Orientation::HORIZONTAL)
+	  seek_(Gtk::Orientation::HORIZONTAL),
+	  cast_(std::make_unique<CastButton>(playback))
 	{
 	add_css_class("player-bar");
 	append(*cover_);
@@ -57,6 +59,7 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback)
 	time_.add_css_class("numeric");
 	time_.add_css_class("dim-label");
 	append(time_);
+	append(*cast_);
 
 	prev_.signal_clicked().connect([this]() { playback_.prev(); });
 	play_.signal_clicked().connect([this]() { playback_.toggle(); });
@@ -85,7 +88,10 @@ void PlayerBar::track_changed()
 	title_.set_text(s ? s->title : "");
 	artist_.set_text(s ? s->artist : "");
 	cover_->show_cover(s ? s->cover_art : "");
-	set_sensitive(s!=nullptr);
+	// Control by control: the cast button works with nothing loaded.
+	cover_->set_sensitive(s!=nullptr);
+	play_.set_sensitive(s!=nullptr);
+	seek_.set_sensitive(s!=nullptr);
 	auto idx = playback_.index();
 	prev_.set_sensitive(s!=nullptr);
 	next_.set_sensitive(idx>=0 && idx+1<long(playback_.queue().size()));

@@ -1,10 +1,15 @@
 #include "playback.hh"
 #include "apiclient.hh"
+#include "jsonread.hh"
 #include "settings.hh"
+#include "stamp.hh"
+#include "uithread.hh"
+#include "workpool.hh"
 
 #include <glibmm/main.h>
 
 #include <cmath>
+#include <iostream>
 
 namespace {
 	// "Previous" restarts the track past this point, as everywhere else.
@@ -12,10 +17,29 @@ namespace {
 	// The server drops a now-playing entry it has not heard about for five
 	// minutes; the web client refreshes it every 30 seconds.
 	const unsigned report_every = 30;
+
+	// What the Default Media Receiver decodes, of the types the server
+	// reports. An allowlist, so an unknown type is converted rather than
+	// refused by the receiver.
+	bool cast_plays(const std::string& mime)
+		{
+		for(const char *m: {"audio/flac", "audio/mpeg", "audio/mp4", "audio/aac",
+		                    "audio/ogg", "audio/wav"})
+			if(mime==m) return true;
+		return false;
+		}
+
+	std::string mime_of_format(const std::string& format)
+		{
+		if(format=="opus") return "audio/ogg";
+		if(format=="m4a")  return "audio/mp4";
+		if(format=="flac") return "audio/flac";
+		return "audio/mpeg";
+		}
 }
 
-Playback::Playback(const AppSettings& settings)
-	: settings_(settings)
+Playback::Playback(const AppSettings& settings, WorkPool& pool)
+	: settings_(settings), pool_(pool)
 	{
 	player_.signal_advanced.connect(sigc::mem_fun(*this, &Playback::advanced));
 	player_.signal_ended.connect(sigc::mem_fun(*this, &Playback::ended));
@@ -27,6 +51,12 @@ Playback::Playback(const AppSettings& settings)
 		signal_state.emit(playing);
 		});
 	player_.signal_error.connect(sigc::mem_fun(*this, &Playback::error));
+	caster_.signal_state.connect([this](bool playing) {
+		if(playing && current()) report("playing", position());
+		signal_state.emit(playing);
+		});
+	caster_.signal_ended.connect(sigc::mem_fun(*this, &Playback::cast_ended));
+	caster_.signal_error.connect([this](const std::string& e) { signal_error.emit(e); });
 	timer_ = Glib::signal_timeout().connect_seconds(sigc::mem_fun(*this, &Playback::tick), 1);
 	}
 
@@ -84,6 +114,17 @@ void Playback::remove(size_t index)
 void Playback::toggle()
 	{
 	if(!current()) return;
+	if(caster_.active()) {
+		if(caster_.playing()) {
+			caster_.pause();
+			report("paused", position());
+			}
+		else if(caster_.loaded())
+			caster_.resume();
+		else
+			start();
+		return;
+		}
 	if(player_.playing()) {
 		player_.pause();
 		report("paused", position());
@@ -119,6 +160,12 @@ void Playback::seek(double seconds)
 	const Song *s = current();
 	if(!s || !api_) return;
 	seconds = std::max(0.0, seconds);
+	// The receiver fetches a converted track from the server's cache, whole,
+	// so it seeks in anything.
+	if(caster_.active()) {
+		caster_.seek(seconds);
+		return;
+		}
 	if(local_offset_==0 && player_.seekable()) {
 		player_.seek(seconds);
 		return;
@@ -134,6 +181,8 @@ void Playback::seek(double seconds)
 void Playback::stop()
 	{
 	if(current()) report("stopped", position());
+	++cast_gen_;
+	caster_.disconnect();
 	player_.stop();
 	}
 
@@ -155,12 +204,42 @@ const Song *Playback::current() const
 
 bool Playback::playing() const
 	{
-	return player_.playing();
+	return caster_.active() ? caster_.playing() : player_.playing();
 	}
 
 double Playback::position() const
 	{
+	if(caster_.active()) return caster_.position();
 	return local_offset_ + player_.position();
+	}
+
+Caster& Playback::caster()
+	{
+	return caster_;
+	}
+
+void Playback::cast_to(size_t device)
+	{
+	double pos = position();
+	if(!caster_.active()) player_.stop();
+	caster_.connect(device);
+	// Whatever was current carries on there, from where it was.
+	if(current()) cast_start(pos);
+	}
+
+void Playback::stop_casting()
+	{
+	if(!caster_.active()) return;
+	double pos = position();
+	bool was   = caster_.playing();
+	++cast_gen_;
+	caster_.disconnect();
+	if(current() && was) {
+		local_start(pos);
+		next_id_.clear();
+		update_next();
+		}
+	signal_state.emit(was && current());
 	}
 
 void Playback::start(double offset)
@@ -172,17 +251,112 @@ void Playback::start(double offset)
 	mp3_retried_  = false;
 	local_offset_ = 0;
 	report("starting", offset);
+	if(caster_.active())
+		cast_start(offset);
+	else {
+		local_start(offset);
+		next_id_.clear();
+		update_next();
+		}
+	signal_track.emit();
+	}
+
+void Playback::local_start(double offset)
+	{
+	const Song *s = current();
 	// With a quality cap the stream may well be converted, and then it
 	// cannot seek: ask for one that starts at the offset instead.
+	local_offset_ = 0;
 	if(offset>0 && settings_.quality_cap>0) {
 		local_offset_ = std::floor(offset);
 		player_.play_uri(stream_url(*s, offset));
 		}
 	else
 		player_.play_uri(stream_url(*s), offset);
-	next_id_.clear();
-	update_next();
-	signal_track.emit();
+	}
+
+void Playback::cast_start(double offset)
+	{
+	const Song *s = current();
+	if(!s || !api_) return;
+	caster_.prepare(offset);
+	unsigned gen = ++cast_gen_;
+
+	Params p = {{"id", s->ref.id}};
+	std::string mime = s->content_type;
+	if(settings_.quality_cap>0) {
+		p.push_back({"maxBitRate", std::to_string(settings_.quality_cap)});
+		p.push_back({"format", settings_.format});
+		p.push_back({"playable", "adts/aac,mp4/aac,mpeg/mp3,ogg/opus,ogg/vorbis"});
+		mime = mime_of_format(settings_.format);
+		}
+	else if(!cast_plays(s->content_type)) {
+		// Lossless, so a lossy original is not given a second generation
+		// of loss.
+		p.push_back({"format", "flac"});
+		mime = "audio/flac";
+		}
+	// A receiver reads at playback speed and stops once its buffer is full;
+	// unpaced, the server sends the whole track at once and the idle
+	// connection is then cut by a proxy or by the receiver's own timeout.
+	p.push_back({"pace", "true"});
+
+	pool_.submit([this, api=api_, song=*s, p, mime, gen, offset]() mutable {
+		std::string token;
+		auto r = ApiClient::get_json(api->session(), "getCastToken", {{"id", song.ref.id}});
+		if(r.ok)
+			token = jstr(r.body, "castToken");
+		else
+			std::cout << stamp() << "Cast: no cast token (" << r.error
+			          << "); sending the account's credentials" << std::endl;
+		std::string url = api->cast_url("stream", p, token);
+
+		// Also what a capped track turned out to be: under the cap the
+		// original is sent as it is.
+		std::string type, error;
+		bool ok = ApiClient::probe_stream(url, type, error);
+		std::string sent = type.substr(0, type.find(';'));
+		if(!sent.empty()) mime = sent;
+
+		nlohmann::json meta = {
+			{"metadataType", 3},
+			{"title",        song.title},
+			{"artist",       song.artist},
+			{"albumName",    song.album}
+			};
+		// Only with a grant, which covers this song's cover.
+		if(!token.empty() && !song.cover_art.empty())
+			meta["images"] = {{{"url", api->cast_url("getCoverArt",
+			                     {{"id", song.cover_art}, {"size", "600"}}, token)}}};
+
+		on_ui([this, ok, error, url, mime, meta, gen, offset, duration=song.duration]() {
+			if(gen!=cast_gen_ || !caster_.active()) return;
+			if(!ok) {
+				std::cout << stamp() << "Cast: stream probe failed: " << error << std::endl;
+				signal_error.emit("Cannot cast this track: " + error);
+				signal_state.emit(false);
+				return;
+				}
+			caster_.load(url, mime, duration, offset, meta);
+			});
+		});
+	}
+
+void Playback::cast_ended()
+	{
+	if(!current()) return;
+	if(!scrobbled_) {
+		scrobbled_ = true;
+		api_->call("scrobble", {{"id", current()->ref.id}, {"submission", "true"}}, [](const ApiResult&) {});
+		}
+	// No gapless on a receiver: the next track is loaded when this one ends.
+	if(index_+1<long(queue_.size())) {
+		++index_;
+		start();
+		return;
+		}
+	report("stopped", current()->duration);
+	signal_state.emit(false);
 	}
 
 void Playback::error(const std::string& e)
@@ -208,6 +382,7 @@ void Playback::update_next()
 	// Recomputed after every queue change: the player cannot ask, because
 	// the moment it needs the answer it is on a streaming thread.
 	std::string id;
+	if(caster_.active()) return;
 	if(api_ && index_>=0 && index_+1<long(queue_.size()))
 		id = queue_[size_t(index_+1)].ref.id;
 	if(id==next_id_) return;
@@ -246,7 +421,7 @@ void Playback::ended()
 bool Playback::tick()
 	{
 	const Song *s = current();
-	if(!s || !api_ || !player_.playing()) return true;
+	if(!s || !api_ || !playing()) return true;
 	if(!scrobbled_ && s->duration>0 && position()>=s->duration/2.0) {
 		scrobbled_ = true;
 		api_->call("scrobble", {{"id", s->ref.id}, {"submission", "true"}}, [](const ApiResult&) {});
@@ -272,7 +447,8 @@ void Playback::report(const char *state, double pos)
 void Playback::report_stopped_now()
 	{
 	const Song *s = current();
-	if(!s || !api_ || !player_.playing()) return;
+	// A receiver plays on after this window closes.
+	if(!s || !api_ || !player_.playing() || caster_.active()) return;
 	ApiClient::get_json(api_->session(), "reportPlayback", {
 		{"mediaId", s->ref.id}, {"mediaType", "song"}, {"state", "stopped"},
 		{"positionMs", std::to_string(std::lround(position()*1000))},

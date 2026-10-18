@@ -667,11 +667,11 @@ std::vector<CastManager::CastDevice> CastManager::discover(int timeout_ms)
 
 void CastManager::discover_background(int timeout_ms)
 	{
-	std::thread([this, timeout_ms]{
+	spawn([this, timeout_ms]{
 		auto devs = discover(timeout_ms);
 		std::lock_guard<std::mutex> lk(cache_mutex_);
 		devices_cache_ = std::move(devs);
-		}).detach();
+		});
 	}
 
 std::string CastManager::manual_id(const std::string& address, int port)
@@ -1126,7 +1126,8 @@ bool CastManager::start(const CastDevice& dev)
 
 	// Start the background status polling thread.
 	poll_active_ = true;
-	std::thread([this]{ poll_loop(); }).detach();
+	int gen = ++poll_gen_;
+	spawn([this, gen]{ poll_loop(gen); });
 
 	std::cout << stamp() << "Cast: enabled → " << dev.name
 	          << " (" << dev.address << ":" << dev.port << ")" << std::endl;
@@ -1179,6 +1180,7 @@ nlohmann::json CastManager::build_load(const LoadRequest& req, int request_id)
 	// within the loaded media - the receiver handles the seek itself
 	// using the file's XING/seek tables.  This avoids server-side
 	// transcoding and gives the receiver real duration metadata.
+	if (!req.metadata.is_null()) msg["media"]["metadata"] = req.metadata;
 	if (req.current_time > 0.0f) msg["currentTime"] = req.current_time;
 	if (!req.active_track_ids.empty())
 		msg["activeTrackIds"] = req.active_track_ids;
@@ -1222,9 +1224,9 @@ void CastManager::load(const LoadRequest& request)
 	// immediately.  load_gen_ acts as a cancellation token: if a newer
 	// load() fires before this worker reaches a blocking call, the worker
 	// detects the stale generation and exits without doing any work.
-	std::thread([this, request, gen]{
+	spawn([this, request, gen]{
 		load_worker(request, gen);
-		}).detach();
+		});
 	}
 
 std::string CastManager::ensure_transport(Tls& t, const std::string& src,
@@ -1595,10 +1597,10 @@ void CastManager::spawn_retry(const LoadRequest& req, const char* why,
 	int gen = load_gen_.load();
 	std::cout << stamp() << "Cast: auto-retry LOAD (gen=" << gen << ") - "
 	          << why << " (" << how << ")" << std::endl;
-	std::thread([this, req, gen]{
+	spawn([this, req, gen]{
 		if (load_gen_.load() != gen) return;
 		load_worker(req, gen);
-		}).detach();
+		});
 	}
 
 void CastManager::note_load_failure(int media_session_id)
@@ -1800,11 +1802,12 @@ void CastManager::update_volume(const nlohmann::json& msg)
 	status_cv_.notify_all();
 	}
 
-void CastManager::poll_loop()
+void CastManager::poll_loop(int gen)
 	{
 	std::string connected_tid;  // transport_id_ we are currently subscribed to
+	auto polling = [this, gen] { return poll_active_ && poll_gen_.load() == gen; };
 
-	while (poll_active_) {
+	while (polling()) {
 		std::string tid;
 		{
 		std::lock_guard<std::mutex> lk(tid_mutex_);
@@ -1851,7 +1854,7 @@ void CastManager::poll_loop()
 		// a thread that has quietly stopped polling looks exactly like a
 		// Chromecast that has stopped answering.
 		try {
-			while (poll_active_) {
+			while (polling()) {
 				// If load() has started a new track, reconnect to the new transport.
 				{
 				std::lock_guard<std::mutex> lk(tid_mutex_);
@@ -1979,6 +1982,41 @@ void CastManager::poll_loop()
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 			}
 		}
+	}
+
+CastManager::~CastManager()
+	{
+	// Everything a running thread waits on gives way: poll_loop() wakes each
+	// second, a load's waits watch load_gen_ and active_, and await_load_ack()
+	// sleeps on status_cv_.
+	poll_active_ = false;
+	active_      = false;
+	++load_gen_;
+	status_cv_.notify_all();
+	std::unique_lock<std::mutex> lk(threads_mutex_);
+	threads_cv_.wait(lk, [this]{ return threads_live_ == 0; });
+	}
+
+void CastManager::spawn(std::function<void()> fn)
+	{
+	{
+	std::lock_guard<std::mutex> lk(threads_mutex_);
+	++threads_live_;
+	}
+	std::thread([this, fn = std::move(fn)]{
+		// Detached, so anything escaping is std::terminate. The bodies catch
+		// what they expect; this is the backstop.
+		try { fn(); }
+		catch (const std::exception& e) {
+			std::cout << stamp() << "Cast: thread failed: " << e.what()
+			          << std::endl;
+			}
+		catch (...) {
+			std::cout << stamp() << "Cast: thread failed" << std::endl;
+			}
+		std::lock_guard<std::mutex> lk(threads_mutex_);
+		if (--threads_live_ == 0) threads_cv_.notify_all();
+		}).detach();
 	}
 
 void CastManager::stop()

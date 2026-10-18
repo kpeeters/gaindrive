@@ -12,12 +12,14 @@
 #include <stdexcept>
 
 namespace {
-	std::string query(const Session& s, const Params& params)
+	std::string query(const Session& s, const Params& params, const std::string& cast_token="")
 		{
-		Params all = {
-			{"u", s.user}, {"t", s.token}, {"s", s.salt},
-			{"v", "1.16.1"}, {"c", "gaindrive-linux"}, {"f", "json"}
-		};
+		Params all;
+		if(cast_token.empty())
+			all = {{"u", s.user}, {"t", s.token}, {"s", s.salt}};
+		else
+			all = {{"castToken", cast_token}};
+		all.insert(all.end(), {{"v", "1.16.1"}, {"c", "gaindrive-linux"}, {"f", "json"}});
 		all.insert(all.end(), params.begin(), params.end());
 		std::string q;
 		for(const auto& [k, v]: all) {
@@ -51,6 +53,12 @@ const Session& ApiClient::session() const
 std::string ApiClient::url(const std::string& endpoint, const Params& params) const
 	{
 	return session_->base_url + "/rest/" + endpoint + ".view?" + query(*session_, params);
+	}
+
+std::string ApiClient::cast_url(const std::string& endpoint, const Params& params,
+                                const std::string& token) const
+	{
+	return session_->base_url + "/rest/" + endpoint + ".view?" + query(*session_, params, token);
 	}
 
 void ApiClient::call(const std::string& endpoint, Params params,
@@ -99,6 +107,41 @@ bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string
 		}
 	// httplib throws on a URL it cannot parse, which a typed server address
 	// can easily be.
+	catch(const std::exception& ex) {
+		error = ex.what();
+		return false;
+		}
+	}
+
+bool ApiClient::probe_stream(const std::string& url, std::string& content_type,
+                             std::string& error)
+	{
+	std::string origin, path;
+	split_url(url, origin, path);
+	try {
+		httplib::Client cli(origin);
+		cli.set_connection_timeout(5);
+		cli.set_read_timeout(300);
+		cli.set_follow_location(true);
+		cli.set_default_headers({{"User-Agent", "gaindrive-player/" GAINDRIVE_VERSION},
+		                         {"Range", "bytes=0-0"}});
+		auto res = cli.Get(path);
+		if(!res) {
+			error = httplib::to_string(res.error());
+			return false;
+			}
+		if(res->status!=200 && res->status!=206) {
+			error = "Server returned HTTP " + std::to_string(res->status);
+			return false;
+			}
+		content_type = res->get_header_value("Content-Type");
+		// An error document is JSON; audio never is.
+		if(content_type.find("json")!=std::string::npos || content_type.find("xml")!=std::string::npos) {
+			error = "Server sent " + content_type + " instead of audio";
+			return false;
+			}
+		return true;
+		}
 	catch(const std::exception& ex) {
 		error = ex.what();
 		return false;

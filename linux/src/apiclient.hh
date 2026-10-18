@@ -47,6 +47,12 @@ class ApiClient {
 
 		// For URLs handed to something else, such as covers and streams.
 		std::string url(const std::string& endpoint, const Params& params) const;
+		// The same for a Cast receiver: a getCastToken grant instead of the
+		// account's credentials, which would let the receiver read the whole
+		// library for as long as the password stands. An empty token keeps
+		// the credentials, for a server without getCastToken.
+		std::string cast_url(const std::string& endpoint, const Params& params,
+		                     const std::string& token) const;
 
 		// Derives a fresh salt and token from the password, and proves them
 		// with ping and getUser before anything is stored. `done` is called on
@@ -58,6 +64,11 @@ class ApiClient {
 		// Blocking; for worker threads only.
 		static ApiResult get_json(const Session& s, const std::string& endpoint, const Params& params);
 		static bool      get_bytes(const std::string& url, std::string& body, std::string& error);
+		// Fetches the first byte of a stream for its Content-Type. The server
+		// builds a conversion whole before sending anything, so this can take
+		// minutes, and is better done before a receiver starts its own clock.
+		static bool      probe_stream(const std::string& url, std::string& content_type,
+		                              std::string& error);
 
 	private:
 		WorkPool&                      pool_;

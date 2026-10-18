@@ -33,6 +33,10 @@ ICONS = {
 	'recents':        ('history',       False),
 	'search':         ('search',        False),
 	'settings':       ('settings',      False),
+	'cast':           ('cast',          False),
+	'cast-connected': ('cast_connected', False),
+	'volume-down':    ('volume_down',   False),
+	'volume-up':      ('volume_up',     False),
 }
 
 def glyphsets():
