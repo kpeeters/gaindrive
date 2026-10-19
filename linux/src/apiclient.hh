@@ -63,7 +63,11 @@ class ApiClient {
 
 		// Blocking; for worker threads only.
 		static ApiResult get_json(const Session& s, const std::string& endpoint, const Params& params);
-		static bool      get_bytes(const std::string& url, std::string& body, std::string& error);
+		// When the server refuses with a Cache-Control max-age, which is how it
+		// says "there is nothing, and that will not change soon", `miss_max_age`
+		// gets those seconds; any other failure leaves it 0.
+		static bool      get_bytes(const std::string& url, std::string& body, std::string& error,
+		                           int *miss_max_age=nullptr);
 		// Fetches the first byte of a stream for its Content-Type. The server
 		// builds a conversion whole before sending anything, so this can take
 		// minutes, and is better done before a receiver starts its own clock.

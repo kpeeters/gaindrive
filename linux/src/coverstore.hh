@@ -4,7 +4,9 @@
 #include <gtkmm/image.h>
 #include <sigc++/signal.h>
 
+#include <chrono>
 #include <list>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -14,8 +16,8 @@ class ApiClient;
 class WorkPool;
 
 // Cover art from getCoverArt, cropped to its centred square: a memory LRU of decoded textures in front of a
-// disk cache in ~/.cache/gaindrive-player/covers. Main thread only; fetching
-// and decoding happen on the pool.
+// disk cache in ~/.cache/gaindrive-player/covers, capped at 128 MB as on the
+// phones. Main thread only; fetching and decoding happen on the pool.
 class CoverStore {
 	public:
 		explicit CoverStore(WorkPool& pool);
@@ -31,6 +33,9 @@ class CoverStore {
 		                               int index=0);
 
 		sigc::signal<void(const std::string& key, const Glib::RefPtr<Gdk::Texture>&)> signal_ready;
+		// A fetch that failed but may work later: a portrait or online cover
+		// the server is still looking up (a no-store 404), or no connection.
+		sigc::signal<void(const std::string& key)> signal_later;
 
 	private:
 		void remember(const std::string& key, const Glib::RefPtr<Gdk::Texture>& tex);
@@ -45,6 +50,10 @@ class CoverStore {
 		std::unordered_map<std::string, Entry> memory_;
 		std::list<std::string>                 ages_;      // most recent first
 		std::set<std::string>                  pending_;
+		// Covers the server says do not exist, until the time it says that
+		// answer may be kept. Without this every scroll past an artist with
+		// no portrait would ask again.
+		std::map<std::string, std::chrono::steady_clock::time_point> missing_;
 		unsigned                               epoch_=0;   // bumped by set_api
 };
 
@@ -54,16 +63,24 @@ class CoverStore {
 // has already cut the texture square, so nothing is letterboxed.
 // A ListView recycles its row widgets, so the picture remembers which cover it
 // was last asked for and ignores any other that arrives.
+// A cover that is not there yet is asked for again every 15 seconds for up to
+// ten minutes while it is on screen, as the web client does.
 class CoverImage : public Gtk::Image {
 	public:
 		CoverImage(CoverStore& store, int css_px);
+		~CoverImage() override;
 
 		void show_cover(const std::string& cover_id, int index=0);
 
 	private:
+		void fetch();
 		void ready(const std::string& key, const Glib::RefPtr<Gdk::Texture>& tex);
+		void later(const std::string& key);
 
-		CoverStore& store_;
-		int         css_px_;
-		std::string wanted_;
+		CoverStore&      store_;
+		int              css_px_;
+		std::string      cover_id_, wanted_;
+		int              index_=0;
+		unsigned         tries_=0;
+		sigc::connection retry_;
 };

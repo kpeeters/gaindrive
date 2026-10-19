@@ -8,6 +8,7 @@
 #include <httplib.h>
 #include <openssl/rand.h>
 
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 
@@ -83,8 +84,10 @@ void ApiClient::text(const std::string& endpoint, Params params,
 		});
 	}
 
-bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string& error)
+bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string& error,
+                          int *miss_max_age)
 	{
+	if(miss_max_age) *miss_max_age = 0;
 	std::string origin, path;
 	split_url(url, origin, path);
 	try {
@@ -100,6 +103,10 @@ bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string
 			}
 		if(res->status!=200) {
 			error = "Server returned HTTP " + std::to_string(res->status);
+			auto cc = res->get_header_value("Cache-Control");
+			auto at = cc.find("max-age=");
+			if(miss_max_age && at!=std::string::npos)
+				*miss_max_age = std::atoi(cc.c_str()+at+8);
 			return false;
 			}
 		body = std::move(res->body);
