@@ -84,10 +84,20 @@ void ApiClient::text(const std::string& endpoint, Params params,
 		});
 	}
 
-bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string& error,
-                          int *miss_max_age)
+bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string& error)
 	{
-	if(miss_max_age) *miss_max_age = 0;
+	auto f = get_if_changed(url, "");
+	if(f.status!=200) {
+		error = std::move(f.error);
+		return false;
+		}
+	body = std::move(f.body);
+	return true;
+	}
+
+ApiClient::Fetch ApiClient::get_if_changed(const std::string& url, const std::string& etag)
+	{
+	Fetch f;
 	std::string origin, path;
 	split_url(url, origin, path);
 	try {
@@ -95,29 +105,31 @@ bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string
 		cli.set_connection_timeout(5);
 		cli.set_read_timeout(20);
 		cli.set_follow_location(true);
-		cli.set_default_headers({{"User-Agent", "gaindrive-player/" GAINDRIVE_VERSION}});
-		auto res = cli.Get(path);
+		httplib::Headers headers = {{"User-Agent", "gaindrive-player/" GAINDRIVE_VERSION}};
+		if(!etag.empty()) headers.emplace("If-None-Match", etag);
+		auto res = cli.Get(path, headers);
 		if(!res) {
-			error = httplib::to_string(res.error());
-			return false;
+			f.error = httplib::to_string(res.error());
+			return f;
 			}
-		if(res->status!=200) {
-			error = "Server returned HTTP " + std::to_string(res->status);
+		f.status = res->status;
+		f.etag   = res->get_header_value("ETag");
+		if(f.status==200)
+			f.body = std::move(res->body);
+		else if(f.status!=304) {
+			f.error = "Server returned HTTP " + std::to_string(f.status);
 			auto cc = res->get_header_value("Cache-Control");
 			auto at = cc.find("max-age=");
-			if(miss_max_age && at!=std::string::npos)
-				*miss_max_age = std::atoi(cc.c_str()+at+8);
-			return false;
+			if(at!=std::string::npos)
+				f.miss_max_age = std::atoi(cc.c_str()+at+8);
 			}
-		body = std::move(res->body);
-		return true;
 		}
 	// httplib throws on a URL it cannot parse, which a typed server address
 	// can easily be.
 	catch(const std::exception& ex) {
-		error = ex.what();
-		return false;
+		f.error = ex.what();
 		}
+	return f;
 	}
 
 bool ApiClient::probe_stream(const std::string& url, std::string& content_type,

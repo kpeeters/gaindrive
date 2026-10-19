@@ -33,14 +33,16 @@ namespace {
 		return std::filesystem::path(Glib::get_user_cache_dir()) / "gaindrive-player" / "covers";
 		}
 
-	bool read_file(const std::filesystem::path& p, std::string& out)
+	// An entry is the server's ETag on the first line, then the image. One
+	// file rather than a sidecar, so that trim() cannot part the two.
+	bool read_entry(const std::filesystem::path& p, std::string& etag, std::string& data)
 		{
 		std::ifstream in(p, std::ios::binary);
-		if(!in) return false;
+		if(!in || !std::getline(in, etag)) return false;
 		std::ostringstream ss;
 		ss << in.rdbuf();
-		out = ss.str();
-		return !out.empty();
+		data = ss.str();
+		return !data.empty();
 		}
 
 	// The centred square of a texture, the way a record sleeve is shown: a
@@ -68,7 +70,7 @@ namespace {
 		return out;
 		}
 
-	bool write_file(const std::filesystem::path& p, const std::string& data)
+	bool write_entry(const std::filesystem::path& p, const std::string& etag, const std::string& data)
 		{
 		std::error_code ec;
 		std::filesystem::create_directories(p.parent_path(), ec);
@@ -76,7 +78,8 @@ namespace {
 		tmp += ".tmp";
 		{
 		std::ofstream out(tmp, std::ios::binary);
-		out << data;
+		// A header cannot hold a newline, so none can end up in the etag.
+		out << etag << '\n' << data;
 		if(!out) return false;
 		}
 		std::filesystem::rename(tmp, p, ec);
@@ -176,23 +179,37 @@ Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, 
 	if(pending_.count(key)) return {};
 	pending_.insert(key);
 
-	auto file = cache_dir() / (md5_hex(key) + ".img");
+	// .cover, not the .img of the entries before ETags: those are never read,
+	// and trim() clears them out as the oldest files.
+	auto file = cache_dir() / (md5_hex(key) + ".cover");
 	Params p = {{"id", cover_id}, {"size", std::to_string(px)}};
 	if(index>0) p.push_back({"index", std::to_string(index)});
 	auto url  = api_->url("getCoverArt", p);
 	pool_.submit([this, key, file, url, epoch=epoch_]() {
-		std::string data, error;
-		int keep_miss = 0;
+		// Always asked, never trusted: the server's ETag covers the file and
+		// its size, and a rescan can hand a cover id to another album, so a
+		// stored copy may be another album's art. A 304 costs no image.
+		std::string etag, data;
+		bool stored = read_entry(file, etag, data);
+		auto f = ApiClient::get_if_changed(url, stored ? etag : "");
 		std::error_code ec;
-		if(read_file(file, data))
+		if(f.status==200) {
+			data = std::move(f.body);
+			if(write_entry(file, f.etag, data))
+				note_written(data.size());
+			}
+		else if(f.status!=304 && f.status!=0) {
+			// Gone, or not there yet; either way the stored copy is not it.
+			if(stored) std::filesystem::remove(file, ec);
+			data.clear();
+			}
+		// A 304, or no answer at all: what is stored is the best there is.
+		else if(stored)
 			// Marks it as recently used, for trim().
 			std::filesystem::last_write_time(file, std::filesystem::file_time_type::clock::now(), ec);
-		else if(!ApiClient::get_bytes(url, data, error, &keep_miss))
-			data.clear();
-		else if(write_file(file, data))
-			note_written(data.size());
 		// Not fetched at all, as opposed to fetched and undecodable.
-		bool failed = data.empty();
+		bool failed    = data.empty();
+		int  keep_miss = f.miss_max_age;
 		// Decoded here rather than on the main loop; only the C object is
 		// made off the main thread, the C++ wrapper is made on it.
 		GdkTexture *tex = nullptr;
