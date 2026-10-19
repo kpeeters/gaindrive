@@ -343,3 +343,11 @@ void WiimPanel::delete_slot()
 	settings_.save();
 	render();
 	}
+
+void WiimPanel::set_narrow(bool narrow)
+	{
+	// Shorter faders, and no minimum width, so the card fits a narrow
+	// window, as the web client's does.
+	for(auto f: faders_) f->set_size_request(-1, narrow ? 88 : 160);
+	bands_.set_size_request(narrow ? -1 : 460, -1);
+	}

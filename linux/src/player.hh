@@ -4,11 +4,16 @@
 
 #include <mutex>
 #include <string>
+#include <vector>
 
 typedef struct _GstElement GstElement;
 typedef struct _GstBus     GstBus;
 typedef struct _GstMessage GstMessage;
 typedef struct _GdkPaintable GdkPaintable;
+
+// The local equaliser's bands, as on the web client: a low shelf, eight
+// peaking bands, a high shelf.
+extern const std::vector<int> eq_bands;    // Hz
 
 // Local output: one playbin3, for music and films alike. Knows URIs, not songs;
 // Playback decides what plays. All signals are emitted on the main loop.
@@ -36,6 +41,13 @@ class Player {
 		// Range support, so the only way to move in it is a new request.
 		bool   seekable() const;
 
+		// The local equaliser: one gain in whole dB per band of eq_bands,
+		// with headroom taken off for the largest boost. Off is flat.
+		void set_eq(bool on, const std::vector<int>& gains);
+		// 0..1, the playbin's own; the desktop's media controls set it.
+		void   set_volume(double level);
+		double volume() const;
+
 		// What the films are drawn on; null when GStreamer has no
 		// gtk4paintablesink, and then a film plays as sound only.
 		GdkPaintable *paintable() const;
@@ -54,6 +66,9 @@ class Player {
 		static int      bus_message(GstBus *bus, GstMessage *msg, void *self);
 
 		GstElement   *playbin_=nullptr;
+		// Inside playbin's audio-filter; null when gst-plugins-good lacks it.
+		GstElement   *eq_=nullptr;
+		GstElement   *preamp_=nullptr;
 		GdkPaintable *paintable_=nullptr;
 		unsigned    watch_=0;
 		// Whether the user wants sound; buffering pauses underneath it.

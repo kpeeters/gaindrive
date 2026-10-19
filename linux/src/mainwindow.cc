@@ -3,6 +3,7 @@
 #include "configfile.hh"
 #include "jsonread.hh"
 #include "playlistpicker.hh"
+#include "mpris.hh"
 #include "secretstore.hh"
 #include "stamp.hh"
 #include "tunebutton.hh"
@@ -18,6 +19,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <iterator>
 #include <iostream>
 
 namespace {
@@ -46,9 +48,15 @@ namespace {
 		   default 16px they look much smaller than theme icons. */
 		.pane button > image, .sidebar button > image { -gtk-icon-size: 20px; }
 		/* Direct children only: the cast popover hangs off the bar too. */
-		.player-bar > button > image,
-		.player-bar > menubutton > button image { -gtk-icon-size: 48px; }
+		.player-row > button > image,
+		.player-row > menubutton > button image { -gtk-icon-size: 48px; }
 		.player-bar .casting image { color: @gd_red; }
+		.back-link { color: @gd_red; padding: 2px 6px; min-height: 0; font-size: 0.9em; }
+		.bottom-nav { border-top: 1px solid alpha(currentColor, 0.15); padding: 2px 4px; }
+		.bottom-nav button { padding: 4px 0; }
+		.bottom-nav image { -gtk-icon-size: 24px; color: @gd_red; }
+		.bottom-nav label { font-size: 0.75em; }
+		.player-bar .eq-on image { color: @gd_red; }
 		.tune-panel {
 			padding: 10px 12px;
 			background-color: @theme_bg_color;
@@ -96,18 +104,30 @@ namespace {
 		{ "search",    "Search" },
 		{ "settings",  "Settings" }
 	};
+
+	// Below this window width, the web client's phone layout: no sidebar,
+	// the sections in a bar along the bottom.
+	const int narrow_window = 650;
+
+	AppSettings loaded_settings()
+		{
+		AppSettings s;
+		s.load();
+		return s;
+		}
 }
 
 MainWindow::MainWindow()
 	: pool_(4),
+	  // Before anything built below reads it, the equaliser among them.
+	  settings_(loaded_settings()),
 	  covers_(pool_),
 	  playback_(settings_, pool_),
-	  browse_(Gtk::Orientation::VERTICAL),
+	  browse_(Gtk::Orientation::VERTICAL, narrow_window),
 	  main_(Gtk::Orientation::HORIZONTAL),
 	  sidebar_(Gtk::Orientation::VERTICAL),
 	  queue_(playback_),
 	  video_(playback_),
-	  panes_(Gtk::Orientation::HORIZONTAL),
 	  artists_(covers_),
 	  playlists_(covers_),
 	  recents_(covers_),
@@ -117,10 +137,10 @@ MainWindow::MainWindow()
 	  playlist_(covers_),
 	  settings_page_(settings_, servers_),
 	  tracks_(covers_),
-	  bar_(covers_, playback_, settings_)
+	  bar_(covers_, playback_, settings_),
+	  tabs_(Gtk::Orientation::HORIZONTAL)
 	{
 	ui_init();
-	settings_.load();
 
 	auto provider = Gtk::CssProvider::create();
 	provider->load_from_data(css);
@@ -172,12 +192,11 @@ MainWindow::MainWindow()
 	middle_.add(albums_, "albums");
 	middle_.add(playlist_, "playlist");
 	middle_.add(settings_page_, "settings");
-	panes_.set_homogeneous(true);
-	panes_.set_hexpand(true);
-	panes_.append(left_);
-	panes_.append(middle_);
-	panes_.append(tracks_);
-	content_.add(panes_, "panes");
+	strip_.add(left_);
+	strip_.add(middle_);
+	strip_.add(tracks_);
+	strip_.signal_layout.connect(sigc::mem_fun(*this, &MainWindow::update_back));
+	content_.add(strip_, "panes");
 	content_.add(video_, "video");
 	content_.set_hexpand(true);
 	main_.append(content_);
@@ -191,7 +210,26 @@ MainWindow::MainWindow()
 	body_.set_vexpand(true);
 	browse_.append(body_);
 	browse_.append(bar_);
+	build_tabs();
+	browse_.append(tabs_);
+	browse_.signal_narrow.connect(sigc::mem_fun(*this, &MainWindow::set_narrow));
 	install_tune_closers();
+
+	// Back a pane, as a browser's back does on the web client: Alt+Left,
+	// the keyboard's Back key, or a mouse's back button.
+	auto back_keys = Gtk::EventControllerKey::create();
+	back_keys->signal_key_pressed().connect([this](guint keyval, guint, Gdk::ModifierType state) {
+		bool alt_left = keyval==GDK_KEY_Left && (state & Gdk::ModifierType::ALT_MASK)==Gdk::ModifierType::ALT_MASK;
+		if(!alt_left && keyval!=GDK_KEY_Back) return false;
+		back();
+		return true;
+		}, false);
+	browse_.add_controller(back_keys);
+	auto back_button = Gtk::GestureClick::create();
+	back_button->set_button(8);
+	back_button->signal_pressed().connect([this](int, double, double) { back(); });
+	browse_.add_controller(back_button);
+	mpris_ = std::make_unique<Mpris>(playback_, covers_, [this]() { present(); });
 
 	stack_.add(login_, "login");
 	stack_.add(browse_, "browse");
@@ -234,11 +272,16 @@ MainWindow::MainWindow()
 		middle_.set_visible_child("playlist");
 		tracks_.clear();
 		playlist_.show_playlist(api_, pl);
+		go(1);
 		});
 	settings_pane_.signal_category.connect([this](const std::string& key) {
 		middle_.set_visible_child("settings");
 		settings_page_.show(key, api_);
+		go(1);
 		});
+	for(auto p: all_panes())
+		p->signal_back.connect(sigc::mem_fun(*this, &MainWindow::back));
+	settings_page_.signal_back.connect(sigc::mem_fun(*this, &MainWindow::back));
 	settings_page_.signal_changed.connect([this]() {
 		settings_pane_.load();
 		});
@@ -451,6 +494,83 @@ void MainWindow::show_section(const std::string& name)
 	else if(name=="recents")   recents_.load(api_);
 	else if(name=="search")    search_.focus_entry();
 	else if(name=="settings")  settings_pane_.load();
+	go(0);
+	}
+
+void MainWindow::go(int depth)
+	{
+	strip_.slide_to(depth);
+	update_back();
+	}
+
+void MainWindow::back()
+	{
+	if(strip_.leftmost()>0) go(strip_.depth()-1);
+	}
+
+void MainWindow::update_back()
+	{
+	// Only the leftmost pane shown carries one, and only when the strip has
+	// moved off its first pane, as on the web client.
+	for(auto p: all_panes()) p->set_back("");
+	settings_page_.set_back("");
+	int left = strip_.leftmost();
+	if(left==1) {
+		auto middle = middle_.get_visible_child_name();
+		auto section = left_.get_visible_child_name();
+		std::string label = "Artists";
+		for(const auto& s: sections)
+			if(section==s.name && section!="library") label = s.label;
+		if(middle=="albums")        albums_.set_back(label);
+		else if(middle=="playlist") playlist_.set_back("Playlists");
+		else                        settings_page_.set_back("Settings");
+		}
+	else if(left==2)
+		tracks_.set_back(tracks_back_.empty() ? "Albums" : tracks_back_);
+	}
+
+void MainWindow::build_tabs()
+	{
+	// The sidebar's sections as the web client's bottom bar: an icon over a
+	// small label. Kept in step with nav_, which stays the one way in.
+	tabs_.add_css_class("bottom-nav");
+	tabs_.set_homogeneous(true);
+	for(size_t i=0; i<std::size(sections); ++i) {
+		auto button = Gtk::make_managed<Gtk::ToggleButton>();
+		auto box    = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+		auto icon   = Gtk::make_managed<Gtk::Image>();
+		icon->set_from_icon_name(std::string("gd-")+sections[i].name+"-symbolic");
+		auto label  = Gtk::make_managed<Gtk::Label>(sections[i].label);
+		box->append(*icon);
+		box->append(*label);
+		button->set_child(*box);
+		button->add_css_class("flat");
+		if(!tab_buttons_.empty()) button->set_group(*tab_buttons_.front());
+		button->signal_toggled().connect([this, i, button]() {
+			if(button->get_active())
+				if(auto row = nav_.get_row_at_index(int(i))) nav_.select_row(*row);
+			});
+		tabs_.append(*button);
+		tab_buttons_.push_back(button);
+		}
+	nav_.signal_row_selected().connect([this](Gtk::ListBoxRow *row) {
+		if(row && size_t(row->get_index())<tab_buttons_.size())
+			tab_buttons_[size_t(row->get_index())]->set_active(true);
+		});
+	tabs_.set_visible(false);
+	}
+
+void MainWindow::set_narrow(bool narrow)
+	{
+	narrow_ = narrow;
+	bar_.set_narrow(narrow);
+	// Across the window, as the web pins both edges of its panel.
+	auto& tune = bar_.tune_panel();
+	tune.set_narrow(narrow);
+	tune.set_halign(narrow ? Gtk::Align::FILL : Gtk::Align::END);
+	tune.set_margin_start(narrow ? 8 : 0);
+	tune.set_margin_end(narrow ? 8 : 16);
+	fullscreen_changed();
 	}
 
 void MainWindow::open_artist(const Artist& a)
@@ -458,12 +578,15 @@ void MainWindow::open_artist(const Artist& a)
 	middle_.set_visible_child("albums");
 	tracks_.clear();
 	albums_.show_artist(api_, a);
+	go(1);
 	}
 
 void MainWindow::open_album(const std::string& album_id, const std::string& play_id)
 	{
 	if(album_id.empty() || !api_) return;
+	tracks_back_.clear();
 	tracks_.show_album(api_, album_id, play_id);
+	go(2);
 	}
 
 void MainWindow::album_loaded(const Album& a)
@@ -471,6 +594,8 @@ void MainWindow::album_loaded(const Album& a)
 	// An album opened from a search, a recent play or the player bar brings
 	// its artist's albums along, so the middle pane is not left empty or
 	// showing something unrelated.
+	tracks_back_ = a.artist;
+	update_back();
 	if(a.artist_id.empty()) return;
 	if(middle_.get_visible_child_name()=="albums" && albums_.artist_id()==a.artist_id) return;
 	Artist artist;
@@ -577,7 +702,8 @@ void MainWindow::fullscreen_changed()
 	// Only a film takes the whole screen; anything else fullscreened by the
 	// window manager keeps its sidebar and player bar.
 	bool film = is_fullscreen() && content_.get_visible_child_name()=="video";
-	sidebar_.set_visible(!film);
+	sidebar_.set_visible(!film && !narrow_);
+	tabs_.set_visible(!film && narrow_);
 	bar_.set_visible(!film);
 	notice_.set_visible(!film);
 	video_.set_fullscreen(film);

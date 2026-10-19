@@ -4,6 +4,8 @@
 #include <gst/gst.h>
 #include <gtk/gtk.h>
 
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 
 namespace {
@@ -38,7 +40,50 @@ namespace {
 		g_object_set(bin, "sink", sink, nullptr);
 		return bin;
 		}
+
+	// The web client's Q for its peaking bands.
+	const double eq_q = 1.41;
+
+	// equalizer-nbands then a volume for headroom, as one element for
+	// playbin's audio-filter. Null, with nothing changed, when either is
+	// missing: music then plays without an equaliser.
+	GstElement *make_eq(GstElement *& eq, GstElement *& preamp)
+		{
+		eq     = gst_element_factory_make("equalizer-nbands", nullptr);
+		preamp = gst_element_factory_make("volume", nullptr);
+		if(!eq || !preamp) {
+			std::cout << stamp() << "GStreamer has no equalizer-nbands (gst-plugins-good): "
+			          << "playing without an equaliser" << std::endl;
+			if(eq)     gst_object_unref(eq);
+			if(preamp) gst_object_unref(preamp);
+			eq = preamp = nullptr;
+			return nullptr;
+			}
+		g_object_set(eq, "num-bands", guint(eq_bands.size()), nullptr);
+		for(guint i=0; i<eq_bands.size(); ++i) {
+			GObject *band = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq), i);
+			double f = eq_bands[i];
+			const char *type = i==0 ? "low-shelf" : i+1==eq_bands.size() ? "high-shelf" : "peak";
+			gst_util_set_object_arg(band, "type", type);
+			g_object_set(band, "freq", f, "gain", 0.0, nullptr);
+			if(std::string(type)=="peak")
+				g_object_set(band, "bandwidth", f/eq_q, nullptr);
+			g_object_unref(band);
+			}
+		GstElement *bin = gst_bin_new("eq");
+		gst_bin_add_many(GST_BIN(bin), eq, preamp, nullptr);
+		gst_element_link(eq, preamp);
+		GstPad *sink = gst_element_get_static_pad(eq, "sink");
+		GstPad *src  = gst_element_get_static_pad(preamp, "src");
+		gst_element_add_pad(bin, gst_ghost_pad_new("sink", sink));
+		gst_element_add_pad(bin, gst_ghost_pad_new("src", src));
+		gst_object_unref(sink);
+		gst_object_unref(src);
+		return bin;
+		}
 }
+
+const std::vector<int> eq_bands = { 32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000 };
 
 Player::Player()
 	{
@@ -54,6 +99,10 @@ Player::Player()
 	g_object_set(playbin_, "flags", flag_audio | flag_soft_volume | flag_buffering, nullptr);
 	if(GstElement *vsink = make_video_sink(paintable_))
 		g_object_set(playbin_, "video-sink", vsink, nullptr);
+	// Always in place, flat when off, so switching it never relinks
+	// anything under a playing stream.
+	if(GstElement *eq = make_eq(eq_, preamp_))
+		g_object_set(playbin_, "audio-filter", eq, nullptr);
 	g_signal_connect(playbin_, "about-to-finish", G_CALLBACK(&Player::about_to_finish), this);
 	g_signal_connect(playbin_, "source-setup", G_CALLBACK(&Player::source_setup), this);
 
@@ -147,6 +196,34 @@ void Player::seek(double seconds)
 		std::cout << stamp() << "GStreamer refused a seek to " << seconds << " s" << std::endl;
 		seek_target_ = -1;
 		}
+	}
+
+void Player::set_eq(bool on, const std::vector<int>& gains)
+	{
+	if(!eq_) return;
+	// Headroom for the largest boost, so a boosted band cannot clip; cuts
+	// need none.
+	int boost = 0;
+	for(size_t i=0; i<eq_bands.size(); ++i) {
+		int g = on && i<gains.size() ? gains[i] : 0;
+		boost = std::max(boost, g);
+		GObject *band = gst_child_proxy_get_child_by_index(GST_CHILD_PROXY(eq_), guint(i));
+		g_object_set(band, "gain", double(g), nullptr);
+		g_object_unref(band);
+		}
+	g_object_set(preamp_, "volume", std::pow(10.0, -boost/20.0), nullptr);
+	}
+
+void Player::set_volume(double level)
+	{
+	if(playbin_) g_object_set(playbin_, "volume", std::clamp(level, 0.0, 1.0), nullptr);
+	}
+
+double Player::volume() const
+	{
+	double v = 1;
+	if(playbin_) g_object_get(playbin_, "volume", &v, nullptr);
+	return v;
 	}
 
 double Player::position() const

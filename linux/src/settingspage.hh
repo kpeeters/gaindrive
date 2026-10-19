@@ -1,6 +1,7 @@
 #pragma once
 
 #include <gtkmm/box.h>
+#include <gtkmm/button.h>
 #include <gtkmm/dropdown.h>
 #include <gtkmm/label.h>
 
@@ -18,6 +19,9 @@ class SettingsPage : public Gtk::Box {
 
 		void show(const std::string& key, std::shared_ptr<ApiClient> api);
 		void clear();
+		// As Pane::set_back.
+		void set_back(const std::string& label);
+		sigc::signal<void()> signal_back;
 
 		// A setting changed, so summaries elsewhere are out of date.
 		sigc::signal<void()> signal_changed;
@@ -33,5 +37,6 @@ class SettingsPage : public Gtk::Box {
 		AppSettings&                     settings_;
 		const std::vector<ServerConfig>& servers_;
 		Gtk::Box                         header_, content_;
+		Gtk::Button                      back_;
 		Gtk::Label                       title_;
 };

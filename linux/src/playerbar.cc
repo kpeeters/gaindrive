@@ -12,8 +12,10 @@ namespace {
 }
 
 PlayerBar::PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settings)
-	: Gtk::Box(Gtk::Orientation::HORIZONTAL, 10),
+	: Gtk::Box(Gtk::Orientation::VERTICAL, 6),
 	  playback_(playback),
+	  row_(Gtk::Orientation::HORIZONTAL, 10),
+	  row2_(Gtk::Orientation::HORIZONTAL, 10),
 	  cover_(std::make_unique<CoverImage>(covers, 48)),
 	  info_(Gtk::Orientation::VERTICAL),
 	  seek_(Gtk::Orientation::HORIZONTAL),
@@ -21,7 +23,7 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settin
 	  tune_(std::make_unique<TuneButton>(playback, settings))
 	{
 	add_css_class("player-bar");
-	append(*cover_);
+	row_.append(*cover_);
 	auto click = Gtk::GestureClick::create();
 	click->signal_released().connect([this](int, double, double) { signal_cover.emit(); });
 	cover_->add_controller(click);
@@ -38,7 +40,7 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settin
 	info_.set_size_request(220, -1);
 	info_.append(title_);
 	info_.append(artist_);
-	append(info_);
+	row_.append(info_);
 
 	prev_.set_icon_name("gd-skip-previous-symbolic");
 	prev_.set_tooltip_text("Previous");
@@ -49,7 +51,7 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settin
 	for(auto b: {&prev_, &play_, &next_}) {
 		b->add_css_class("flat");
 		b->set_valign(Gtk::Align::CENTER);
-		append(*b);
+		row_.append(*b);
 		}
 	play_.add_css_class("circular");
 
@@ -57,12 +59,17 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settin
 	seek_.set_hexpand(true);
 	seek_.set_valign(Gtk::Align::CENTER);
 	seek_.set_range(0, 1);
-	append(seek_);
+	row_.append(seek_);
 	time_.add_css_class("numeric");
 	time_.add_css_class("dim-label");
-	append(time_);
-	append(*cast_);
-	append(*tune_);
+	row_.append(time_);
+	row_.append(*cast_);
+	row_.append(*tune_);
+	row_.add_css_class("player-row");
+	row2_.add_css_class("player-row");
+	row2_.set_visible(false);
+	append(row_);
+	append(row2_);
 
 	prev_.signal_clicked().connect([this]() { playback_.prev(); });
 	play_.signal_clicked().connect([this]() { playback_.toggle(); });
@@ -83,6 +90,29 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settin
 PlayerBar::~PlayerBar()
 	{
 	timer_.disconnect();
+	}
+
+void PlayerBar::set_narrow(bool narrow)
+	{
+	if(narrow==row2_.get_visible()) return;
+	// The seek bar and time on a row of their own, as the web client's bar
+	// wraps, so the controls keep their size.
+	if(narrow) {
+		row_.remove(seek_);
+		row_.remove(time_);
+		row2_.append(seek_);
+		row2_.append(time_);
+		}
+	else {
+		row2_.remove(seek_);
+		row2_.remove(time_);
+		row_.insert_child_after(seek_, next_);
+		row_.insert_child_after(time_, seek_);
+		}
+	row2_.set_visible(narrow);
+	// The title then takes what is left rather than a fixed share.
+	info_.set_size_request(narrow ? -1 : 220, -1);
+	info_.set_hexpand(narrow);
 	}
 
 TunePanel& PlayerBar::tune_panel()

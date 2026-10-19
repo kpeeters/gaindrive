@@ -44,6 +44,11 @@ class Playback {
 		bool        playing() const;
 		double      position() const;
 
+		// The local equaliser and volume; see Player.
+		void        set_eq(bool on, const std::vector<int>& gains);
+		void        set_volume(double level);
+		double      volume() const;
+
 		// What a film is drawn on; see Player::paintable().
 		GdkPaintable *paintable() const;
 
@@ -70,6 +75,8 @@ class Playback {
 		sigc::signal<void()>                   signal_started;
 		sigc::signal<void(bool playing)>       signal_state;
 		sigc::signal<void(const std::string&)> signal_error;
+		// A seek within the current track, in seconds; for MPRIS's Seeked.
+		sigc::signal<void(double)>             signal_seeked;
 
 	private:
 		void start(double offset=0);

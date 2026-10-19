@@ -17,6 +17,11 @@ struct AppSettings {
 	bool        cast_original=false;
 	// Album order per section ("artists", "categories"): by name or by year.
 	std::map<std::string, bool> sort_by_name;
+	// The local equaliser, for this machine's output: on or off, the
+	// curve in whole dB per band, and curves saved under a name.
+	bool             eq_on=false;
+	std::vector<int> eq_gains;
+	std::map<std::string, std::vector<int>> eq_slots;
 	// WiiM equaliser curves saved here, by Cast device id (which survives a
 	// rename and a new address), then by name. Never on the device: its
 	// preset store has no documented write.
@@ -27,6 +32,9 @@ struct AppSettings {
 
 	std::string quality_label() const;
 };
+
+// The local equaliser's faders run from -eq_range to +eq_range dB.
+constexpr int eq_range = 12;
 
 // The ceilings and formats offered, best format first.
 extern const std::vector<int> quality_caps;

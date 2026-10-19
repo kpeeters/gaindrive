@@ -73,6 +73,10 @@ class Pane : public Gtk::Box {
 		virtual void star_changed(ListRow::Kind kind, const ItemRef& ref, bool on);
 		void set_playing(const ItemRef& song);
 		void unselect();
+		// "← label" before the title, when the pane is the leftmost of a
+		// narrow strip; empty hides it.
+		void set_back(const std::string& label);
+		sigc::signal<void()>                                  signal_back;
 
 		sigc::signal<void(const ApiResult&)>                  signal_failed;
 		sigc::signal<void(const std::vector<Song>&, size_t)>  signal_play;
@@ -103,6 +107,7 @@ class Pane : public Gtk::Box {
 
 		CoverStore&                           covers_;
 		Gtk::Box                              header_;
+		Gtk::Button                           back_;
 		Gtk::Label                            title_;
 		Gtk::Box                              top_, bottom_;
 		unsigned                              gen_=0;

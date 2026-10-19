@@ -3,6 +3,7 @@
 #include "coverstore.hh"
 #include "loginview.hh"
 #include "panes.hh"
+#include "panestrip.hh"
 #include "playback.hh"
 #include "playerbar.hh"
 #include "serverconfig.hh"
@@ -11,6 +12,8 @@
 #include "videoview.hh"
 #include "workpool.hh"
 
+#include <memory>
+
 #include <gtkmm/applicationwindow.h>
 #include <gtkmm/headerbar.h>
 #include <gtkmm/label.h>
@@ -18,6 +21,7 @@
 #include <gtkmm/overlay.h>
 #include <gtkmm/revealer.h>
 #include <gtkmm/stack.h>
+#include <gtkmm/togglebutton.h>
 
 #include <memory>
 #include <vector>
@@ -25,6 +29,8 @@
 class ApiClient;
 struct ApiResult;
 struct Session;
+
+class Mpris;
 
 class MainWindow : public Gtk::ApplicationWindow {
 	public:
@@ -53,6 +59,13 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void star(ListRow::Kind kind, const ItemRef& ref, bool on);
 		void close_video();
 		void install_tune_closers();
+		void build_tabs();
+		void set_narrow(bool narrow);
+		// One pane back in a narrow strip.
+		void back();
+		// Shows pane `depth` and puts the back links right.
+		void go(int depth);
+		void update_back();
 		void fullscreen_changed();
 		std::vector<Pane*> all_panes();
 
@@ -69,7 +82,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		Gtk::Stack                 stack_;
 		LoginView                  login_;
 
-		Gtk::Box                   browse_;
+		// Says when the window is narrow enough for the phone-like layout.
+		NarrowBox                  browse_;
 		Gtk::Revealer              notice_;
 		Gtk::Label                 notice_text_;
 		sigc::connection           notice_timer_;
@@ -85,8 +99,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		Gtk::Stack                 content_;
 		VideoView                  video_;
 		// Three columns, as on the web client: a section, what was picked in
-		// it, and an album's tracks.
-		Gtk::Box                   panes_;
+		// it, and an album's tracks; fewer in a smaller window.
+		PaneStrip                  strip_;
 		Gtk::Stack                 left_, middle_;
 		ArtistPane                 artists_;
 		PlaylistsPane              playlists_;
@@ -98,4 +112,12 @@ class MainWindow : public Gtk::ApplicationWindow {
 		SettingsPage               settings_page_;
 		TrackPane                  tracks_;
 		PlayerBar                  bar_;
+		// The sections, below the bar, in place of the sidebar when narrow.
+		Gtk::Box                   tabs_;
+		std::vector<Gtk::ToggleButton*> tab_buttons_;
+		bool                       narrow_=false;
+		// What the track pane's back link names: the album's artist.
+		std::string                tracks_back_;
+		// Last, so it goes first, before what it reports on.
+		std::unique_ptr<Mpris>     mpris_;
 };

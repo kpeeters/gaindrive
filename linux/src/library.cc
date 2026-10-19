@@ -285,6 +285,8 @@ TrackPane::TrackPane(CoverStore& covers)
 	text_body_.set_wrap(true);
 	text_body_.set_xalign(0);
 	text_body_.set_selectable(true);
+	// As InfoBlock's text: no select-all when focus wanders onto it.
+	text_body_.set_focusable(false);
 	text_body_.add_css_class("monospace");
 	texts_.append(texts_nav_);
 	texts_.append(text_body_);

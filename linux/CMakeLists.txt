@@ -117,10 +117,13 @@ add_executable(gaindrive-player
 	src/coverstore.cc
 	src/infoblock.cc
 	src/library.cc
+	src/localeq.cc
 	src/loginview.cc
 	src/mainwindow.cc
 	src/model.cc
+	src/mpris.cc
 	src/panes.cc
+	src/panestrip.cc
 	src/playback.cc
 	src/player.cc
 	src/playerbar.cc

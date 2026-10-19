@@ -31,6 +31,9 @@ class WiimPanel : public Gtk::Box {
 		// The session ended: whatever is still on its way is dropped.
 		void close();
 
+		// Below the narrow-window width.
+		void set_narrow(bool narrow);
+
 	private:
 		struct State {
 			bool             on=false;

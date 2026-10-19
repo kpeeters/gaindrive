@@ -28,6 +28,10 @@ InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 	text_.set_wrap(true);
 	text_.set_xalign(0);
 	text_.set_selectable(true);
+	// Out of the focus chain: a selectable label selects all of itself when
+	// focus lands on it, as it did when a sliding strip hid the pane that
+	// had focus. Still selectable with the mouse.
+	text_.set_focusable(false);
 	text_.set_lines(clamp_lines);
 	text_.set_ellipsize(Pango::EllipsizeMode::END);
 	body_.append(text_);

@@ -2,6 +2,7 @@
 #include "apiclient.hh"
 #include "coverstore.hh"
 
+#include <gtkmm/gestureclick.h>
 #include <gtkmm/listitem.h>
 #include <gtkmm/signallistitemfactory.h>
 
@@ -124,6 +125,12 @@ Pane::Pane(CoverStore& covers, int cover_px, bool boxed)
 	title_.set_ellipsize(Pango::EllipsizeMode::END);
 	title_.add_css_class("pane-title");
 	header_.add_css_class("pane-header");
+	back_.add_css_class("flat");
+	back_.add_css_class("back-link");
+	back_.set_valign(Gtk::Align::CENTER);
+	back_.set_visible(false);
+	back_.signal_clicked().connect([this]() { signal_back.emit(); });
+	header_.append(back_);
 	header_.append(title_);
 	append(header_);
 
@@ -191,8 +198,32 @@ Pane::Pane(CoverStore& covers, int cover_px, bool boxed)
 		if(row) activated(*row);
 		});
 	list_.signal_activate().connect([this](guint pos) {
-		selection_->set_selected(pos);
+		// Enter on the row already selected opens it again, which a narrow
+		// strip needs after going back.
+		if(pos==selection_->get_selected()) {
+			if(auto row = std::dynamic_pointer_cast<ListRow>(selection_->get_selected_item()))
+				activated(*row);
+			}
+		else
+			selection_->set_selected(pos);
 		});
+	// The same for a click: it does not change the selection, so nothing
+	// else would notice it. In the capture phase, before the row's own
+	// handling, and never for one of the row's buttons.
+	auto again = Gtk::GestureClick::create();
+	again->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+	again->signal_released().connect([this](int, double x, double y) {
+		auto selected = std::dynamic_pointer_cast<ListRow>(selection_->get_selected_item());
+		if(!selected) return;
+		for(auto w = list_.pick(x, y); w && w!=&list_; w = w->get_parent()) {
+			if(dynamic_cast<Gtk::Button*>(w)) return;
+			if(auto rw = dynamic_cast<RowWidget*>(w)) {
+				if(rw->row==selected) activated(*selected);
+				return;
+				}
+			}
+		});
+	list_.add_controller(again);
 
 	scroll_.set_vexpand(true);
 	scroll_.set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
@@ -261,6 +292,12 @@ void Pane::unselect()
 void Pane::report(const ApiResult& r)
 	{
 	signal_failed.emit(r);
+	}
+
+void Pane::set_back(const std::string& label)
+	{
+	back_.set_label("\u2190 " + label);
+	back_.set_visible(!label.empty());
 	}
 
 void Pane::set_title(const std::string& t)

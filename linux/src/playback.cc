@@ -163,6 +163,7 @@ void Playback::seek(double seconds)
 	const Song *s = current();
 	if(!s || !api_) return;
 	seconds = std::max(0.0, seconds);
+	signal_seeked.emit(seconds);
 	// The receiver fetches a converted track from the server's cache, whole,
 	// so it seeks in anything.
 	if(caster_.active()) {
@@ -224,6 +225,21 @@ double Playback::position() const
 	{
 	if(caster_.active()) return caster_.position();
 	return local_offset_ + player_.position();
+	}
+
+void Playback::set_eq(bool on, const std::vector<int>& gains)
+	{
+	player_.set_eq(on, gains);
+	}
+
+void Playback::set_volume(double level)
+	{
+	player_.set_volume(level);
+	}
+
+double Playback::volume() const
+	{
+	return player_.volume();
 	}
 
 Caster& Playback::caster()

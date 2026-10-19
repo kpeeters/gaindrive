@@ -18,11 +18,23 @@ SettingsPage::SettingsPage(AppSettings& settings, const std::vector<ServerConfig
 	title_.set_xalign(0);
 	title_.add_css_class("pane-title");
 	header_.add_css_class("pane-header");
+	back_.add_css_class("flat");
+	back_.add_css_class("back-link");
+	back_.set_valign(Gtk::Align::CENTER);
+	back_.set_visible(false);
+	back_.signal_clicked().connect([this]() { signal_back.emit(); });
+	header_.append(back_);
 	header_.append(title_);
 	append(header_);
 	content_.set_margin_start(12);
 	content_.set_margin_end(12);
 	append(content_);
+	}
+
+void SettingsPage::set_back(const std::string& label)
+	{
+	back_.set_label("\u2190 " + label);
+	back_.set_visible(!label.empty());
 	}
 
 void SettingsPage::clear()

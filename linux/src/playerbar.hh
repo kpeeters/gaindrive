@@ -24,6 +24,9 @@ class PlayerBar : public Gtk::Box {
 		PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settings);
 		~PlayerBar() override;
 
+		// Below the narrow-window width: the seek bar on a second row.
+		void set_narrow(bool narrow);
+
 		// The volume and equaliser card, for the window to float above the
 		// bar, and the button that opens it.
 		TunePanel&  tune_panel();
@@ -38,6 +41,7 @@ class PlayerBar : public Gtk::Box {
 		bool tick();
 
 		Playback&                   playback_;
+		Gtk::Box                    row_, row2_;
 		std::unique_ptr<CoverImage> cover_;
 		Gtk::Box                    info_;
 		Gtk::Label                  title_, artist_;
