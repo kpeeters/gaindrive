@@ -40,6 +40,9 @@ class VideoView : public Gtk::Overlay {
 		sigc::signal<void()> signal_close;
 		// Asks the window to toggle fullscreen.
 		sigc::signal<void()> signal_fullscreen;
+		// The chapter now playing changed: its 0-based index in this
+		// film's list, or -1 for none.
+		sigc::signal<void(int)> signal_chapter;
 
 	private:
 		struct Chapter {
@@ -49,6 +52,11 @@ class VideoView : public Gtk::Overlay {
 
 		void select_caption(int row);
 		void fill_chapters();
+		// The chapter `seconds` falls in, or -1 before the first.
+		int  chapter_at(double seconds) const;
+		void chapter_prev();
+		void chapter_next();
+		void update_chapter();
 		bool tick();
 		// Shows the controls and starts the clock that hides them again.
 		void poke();
@@ -68,11 +76,14 @@ class VideoView : public Gtk::Overlay {
 		Gtk::Revealer  top_, bottom_;
 		Gtk::Box       bar_;
 		Gtk::Button    close_, back_, play_, forward_, full_;
+		Gtk::Button    chapter_prev_, chapter_next_;
+		Gtk::Label     chapter_now_;
 		Gtk::MenuButton chapters_button_, captions_button_;
 		Gtk::Popover   chapters_popover_, captions_popover_;
 		Gtk::ListBox   chapters_list_, captions_list_;
 
 		std::vector<Chapter>     chapters_;
+		int                      chapter_=-1;
 		// getVideoInfo's caption ids, in menu order after "Off".
 		std::vector<std::string> caption_ids_;
 		std::vector<Cue>         cues_;

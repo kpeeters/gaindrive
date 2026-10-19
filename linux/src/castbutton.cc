@@ -92,11 +92,15 @@ void CastButton::rebuild()
 		auto name = Gtk::make_managed<Gtk::Label>(d.name);
 		name->set_xalign(0);
 		row->append(*name);
-		if(!d.model.empty()) {
-			auto model = Gtk::make_managed<Gtk::Label>(d.model);
-			model->set_xalign(0);
-			model->add_css_class("dim-label");
-			row->append(*model);
+		// Model and address as on the web client, so a receiver found on the
+		// wrong network shows as such before it fails to answer.
+		std::string sub = d.model;
+		if(!d.address.empty()) sub += (sub.empty() ? "" : " · ") + d.address;
+		if(!sub.empty()) {
+			auto info = Gtk::make_managed<Gtk::Label>(sub);
+			info->set_xalign(0);
+			info->add_css_class("dim-label");
+			row->append(*info);
 			}
 		list_.append(*row);
 		}

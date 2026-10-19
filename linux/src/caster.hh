@@ -93,6 +93,8 @@ class Caster {
 		bool                         started_=false;
 		int                          session_=0, stale_session_=-1;
 		int                          notice_seq_=0;
+		// Where the current load should start; sent as a SEEK once it plays.
+		double                       seek_to_=0;
 		bool                         vol_known_=false, vol_fixed_=false;
 		float                        vol_=0;
 

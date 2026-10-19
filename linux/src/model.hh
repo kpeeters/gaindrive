@@ -86,7 +86,7 @@ std::string plural(int n, const char *one, const char *many);
 // headings and items side by side.
 class ListRow : public Glib::Object {
 	public:
-		enum class Kind { heading, artist, album, song, playlist, setting };
+		enum class Kind { heading, artist, album, song, playlist, setting, chapter };
 
 		static Glib::RefPtr<ListRow> heading(const std::string& text);
 		static Glib::RefPtr<ListRow> of(const Artist& a);
@@ -96,6 +96,10 @@ class ListRow : public Glib::Object {
 		// A settings category: `key` names it, `text` and `detail` show it.
 		static Glib::RefPtr<ListRow> setting(const std::string& key, const std::string& text,
 		                                     const std::string& detail);
+		// One chapter of `film`, listed under it: `index` counts from 1 and
+		// `text` is the name.
+		static Glib::RefPtr<ListRow> chapter(const Song& film, int index, const std::string& name,
+		                                     double start, int duration);
 
 		Kind        kind;
 		// The heading's text; for a song, the number shown before it.
@@ -105,6 +109,9 @@ class ListRow : public Glib::Object {
 		// A song's place in the list it was listed in, for a playlist's
 		// remove-by-index.
 		int         index=-1;
+		// A chapter's place in its film, in seconds.
+		double      start=0;
+		int         duration=0;
 		Artist      artist;
 		Album       album;
 		Song        song;

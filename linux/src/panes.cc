@@ -175,8 +175,7 @@ Pane::Pane(CoverStore& covers, int cover_px, bool boxed)
 		li->set_selectable(item);
 		w->row = row;
 		bind(*w, *row);
-		w->set_playing(row->kind==ListRow::Kind::song && !playing_.id.empty()
-		               && row->song.ref.id==playing_.id && row->song.ref.server==playing_.server);
+		w->set_playing(is_playing(*row));
 		});
 	factory->signal_unbind().connect([](const Glib::RefPtr<Gtk::ListItem>& li) {
 		if(auto w = dynamic_cast<RowWidget*>(li->get_child()))
@@ -244,9 +243,14 @@ void Pane::rebind_all()
 		if(w->row && widgets_->count(w)) {
 			auto row = w->row;
 			bind(*w, *row);
-			w->set_playing(row->kind==ListRow::Kind::song && !playing_.id.empty()
-			               && row->song.ref.id==playing_.id && row->song.ref.server==playing_.server);
+			w->set_playing(is_playing(*row));
 			}
+	}
+
+bool Pane::is_playing(const ListRow& row) const
+	{
+	return row.kind==ListRow::Kind::song && !playing_.id.empty()
+	    && row.song.ref.id==playing_.id && row.song.ref.server==playing_.server;
 	}
 
 void Pane::unselect()

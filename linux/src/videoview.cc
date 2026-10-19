@@ -18,6 +18,11 @@
 namespace {
 	const unsigned hide_after_ms = 3000;
 	const double   skip_seconds  = 10;
+	// "Previous chapter" past this far into one restarts it instead, as
+	// "previous track" does.
+	const double   restart_after = 3;
+	// A seek lands a little before its target; still that chapter.
+	const double   chapter_slack = 0.25;
 
 	// "01:02:03.456" or "02:03.456", in seconds; -1 when it is neither.
 	double vtt_time(const std::string& s)
@@ -140,17 +145,24 @@ VideoView::VideoView(Playback& playback)
 	top_.set_transition_type(Gtk::RevealerTransitionType::CROSSFADE);
 	add_overlay(top_);
 
+	icon_button(chapter_prev_, "gd-skip-previous-symbolic", "Previous chapter");
+	icon_button(chapter_next_, "gd-skip-next-symbolic",     "Next chapter");
 	icon_button(back_,    "gd-replay-10-symbolic",  "Back 10 seconds");
 	icon_button(play_,    "gd-play-symbolic",       "Play");
 	icon_button(forward_, "gd-forward-10-symbolic", "Forward 10 seconds");
 	icon_button(full_,    "gd-fullscreen-symbolic", "Fullscreen");
 	bar_.add_css_class("video-controls");
+	bar_.append(chapter_prev_);
 	bar_.append(back_);
 	bar_.append(play_);
 	bar_.append(forward_);
-	auto spacer = Gtk::make_managed<Gtk::Box>();
-	spacer->set_hexpand(true);
-	bar_.append(*spacer);
+	bar_.append(chapter_next_);
+	chapter_now_.add_css_class("chapter-now");
+	chapter_now_.set_hexpand(true);
+	chapter_now_.set_xalign(0);
+	chapter_now_.set_margin_start(12);
+	chapter_now_.set_ellipsize(Pango::EllipsizeMode::END);
+	bar_.append(chapter_now_);
 
 	for(auto [button, popover, list, icon, tip]: {
 			std::tuple{&chapters_button_, &chapters_popover_, &chapters_list_, "gd-chapters-symbolic", "Chapters"},
@@ -181,6 +193,8 @@ VideoView::VideoView(Playback& playback)
 	forward_.signal_clicked().connect([this]() { playback_.seek(playback_.position()+skip_seconds); });
 	play_.signal_clicked().connect([this]() { playback_.toggle(); });
 	full_.signal_clicked().connect([this]() { signal_fullscreen.emit(); });
+	chapter_prev_.signal_clicked().connect(sigc::mem_fun(*this, &VideoView::chapter_prev));
+	chapter_next_.signal_clicked().connect(sigc::mem_fun(*this, &VideoView::chapter_next));
 
 	chapters_list_.signal_row_activated().connect([this](Gtk::ListBoxRow *row) {
 		size_t i = size_t(row->get_index());
@@ -230,6 +244,8 @@ void VideoView::show_film(const Song& film, std::shared_ptr<ApiClient> api)
 	api_     = std::move(api);
 	unsigned gen = ++gen_;
 	chapters_.clear();
+	chapter_ = -1;
+	signal_chapter.emit(-1);
 	caption_ids_.clear();
 	cues_.clear();
 	caption_.set_visible(false);
@@ -307,9 +323,13 @@ void VideoView::fill_chapters()
 	{
 	while(auto row = chapters_list_.get_row_at_index(0))
 		chapters_list_.remove(*row);
-	for(const auto& c: chapters_) {
+	for(size_t i=0; i<chapters_.size(); ++i) {
+		const auto& c = chapters_[i];
 		auto box   = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
-		auto name  = Gtk::make_managed<Gtk::Label>(c.name);
+		// The server leaves an empty name empty, so a save cannot write a
+		// placeholder into the file; drawing one is ours to do.
+		auto name  = Gtk::make_managed<Gtk::Label>(c.name.empty()
+			? "Chapter " + std::to_string(i+1) : c.name);
 		auto start = Gtk::make_managed<Gtk::Label>(format_duration(int(c.start)));
 		name->set_xalign(0);
 		name->set_hexpand(true);
@@ -319,12 +339,70 @@ void VideoView::fill_chapters()
 		box->append(*start);
 		chapters_list_.append(*box);
 		}
-	chapters_button_.set_visible(!chapters_.empty());
+	bool any = !chapters_.empty();
+	chapters_button_.set_visible(any);
+	chapter_prev_.set_visible(any);
+	chapter_next_.set_visible(any);
+	chapter_now_.set_visible(any);
+	// Never a value of chapter_at(), so the update below redraws whatever
+	// the old list showed.
+	chapter_ = -2;
+	update_chapter();
+	}
+
+int VideoView::chapter_at(double seconds) const
+	{
+	int at = -1;
+	for(size_t i=0; i<chapters_.size(); ++i)
+		if(chapters_[i].start<=seconds+chapter_slack) at = int(i);
+	return at;
+	}
+
+void VideoView::chapter_prev()
+	{
+	double pos = playback_.position();
+	int i = chapter_at(pos);
+	if(i<0)
+		playback_.seek(0);
+	else if(i==0 || pos-chapters_[size_t(i)].start>restart_after)
+		playback_.seek(chapters_[size_t(i)].start);
+	else
+		playback_.seek(chapters_[size_t(i-1)].start);
+	poke();
+	}
+
+void VideoView::chapter_next()
+	{
+	double pos = playback_.position();
+	for(const auto& c: chapters_)
+		if(c.start>pos+chapter_slack) {
+			playback_.seek(c.start);
+			break;
+			}
+	poke();
+	}
+
+void VideoView::update_chapter()
+	{
+	int i = chapter_at(playback_.position());
+	if(i==chapter_) return;
+	chapter_ = i;
+	if(i>=0) {
+		const auto& name = chapters_[size_t(i)].name;
+		chapter_now_.set_text(name.empty() ? "Chapter " + std::to_string(i+1) : name);
+		chapters_list_.select_row(*chapters_list_.get_row_at_index(i));
+		}
+	else {
+		chapter_now_.set_text("");
+		chapters_list_.unselect_all();
+		}
+	signal_chapter.emit(i);
 	}
 
 bool VideoView::tick()
 	{
 	if(!get_mapped()) return true;
+	update_chapter();
 	double pos = playback_.position();
 	const Cue *now = nullptr;
 	for(const auto& c: cues_)

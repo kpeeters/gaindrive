@@ -46,6 +46,8 @@ namespace {
 		.player-bar > button > image,
 		.player-bar > menubutton > button image { -gtk-icon-size: 48px; }
 		.player-bar .casting image { color: @gd_red; }
+		.player-bar scale highlight,
+		.player-bar scale slider { background: @gd_red; }
 		.nav image {
 			-gtk-icon-size: 24px;
 			color: @gd_red;
@@ -62,7 +64,9 @@ namespace {
 			padding: 10px 16px;
 			background-image: linear-gradient(to bottom, transparent, alpha(black, 0.7));
 		}
-		.video > revealer button, .video-controls button { color: white; }
+		.video > revealer button, .video-controls button,
+		.video-controls .chapter-now { color: white; }
+		.pane .chapter { margin-left: 28px; }
 		.video > revealer button image { -gtk-icon-size: 32px; }
 	)";
 
@@ -198,6 +202,14 @@ MainWindow::MainWindow()
 		open_album(a.ref.id, "");
 		});
 	tracks_.signal_loaded.connect(sigc::mem_fun(*this, &MainWindow::album_loaded));
+	// No resume prompt: the chapter is where to start.
+	tracks_.signal_play_chapter.connect([this](const std::vector<Song>& songs, size_t index, double start) {
+		const Song *now = playback_.current();
+		if(now && now->ref.id==songs[index].ref.id && now->ref.server==songs[index].ref.server)
+			playback_.seek(start);
+		else
+			playback_.play(songs, index, start);
+		});
 	playlists_.signal_playlist.connect([this](const Playlist& pl) {
 		middle_.set_visible_child("playlist");
 		tracks_.clear();
@@ -229,6 +241,10 @@ MainWindow::MainWindow()
 			}
 		else if(content_.get_visible_child_name()=="video")
 			close_video();
+		});
+	video_.signal_chapter.connect([this](int index) {
+		const Song *s = playback_.current();
+		tracks_.set_chapter(s ? s->ref : ItemRef{}, index);
 		});
 	video_.signal_close.connect([this]() {
 		playback_.stop();
@@ -499,6 +515,7 @@ void MainWindow::close_video()
 	{
 	if(is_fullscreen()) unfullscreen();
 	content_.set_visible_child("panes");
+	tracks_.set_chapter({}, -1);
 	}
 
 void MainWindow::fullscreen_changed()

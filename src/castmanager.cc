@@ -233,6 +233,10 @@ struct DiscState {
 	std::map<std::string, std::string>              hosts;  // hostname → IPv4 address
 	std::map<std::string, std::string>              hosts6; // hostname → IPv6 address (with scope)
 	std::map<std::string, std::string>              srvs;   // service instance → SRV host
+	// Service instance → the address its first packet came from.  Only a
+	// fallback: a relayed reply (VPN, VM bridge, reflector) carries the
+	// relay's address, which the receiver cannot be reached on.
+	std::map<std::string, std::string>              srcs;
 	// Case-folded instance name → the name as the device spelled it, so a
 	// device that sent no `fn` can still be labelled in its own casing.
 	std::map<std::string, std::string>              raws;
@@ -340,8 +344,7 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 		else {
 			auto& dev = st->devs[key];
 			st->raws[key] = raw;
-			if (!src_ip.empty() && dev.address.empty())
-				dev.address = src_ip;
+			if (!src_ip.empty()) st->srcs.emplace(key, src_ip);
 			if (!id.empty()) dev.id    = id;
 			if (!fn.empty()) dev.name  = fn;
 			if (!md.empty()) dev.model = md;
@@ -366,8 +369,7 @@ static int mdns_cb(int, const struct sockaddr* from, size_t,
 			auto& dev = st->devs[key];
 			st->raws[key] = raw;
 			dev.port = srv.port;
-			if (!src_ip.empty() && dev.address.empty())
-				dev.address = src_ip;
+			if (!src_ip.empty()) st->srcs.emplace(key, src_ip);
 			st->srvs[key] = lc(target);
 			}
 		say();
@@ -566,15 +568,19 @@ std::vector<CastManager::CastDevice> CastManager::discover(const DiscoverOpts& o
 
 	for (auto& s : socks) mdns_socket_close(s.fd);
 
-	// Resolve each SRV target hostname → IPv4 A record, then IPv6 AAAA as fallback.
+	// Resolve each SRV target hostname → IPv4 A record, then IPv6 AAAA, and
+	// only then the packet's source address: the records are what the device
+	// says about itself, the source is whoever handed the packet on.
 	for (auto& [inst, dev] : state.devs) {
-		if (!dev.address.empty()) continue;
 		auto ti = state.srvs.find(inst);
-		if (ti == state.srvs.end()) continue;
-		auto hi = state.hosts.find(ti->second);
-		if (hi != state.hosts.end()) { dev.address = hi->second; continue; }
-		auto hi6 = state.hosts6.find(ti->second);
-		if (hi6 != state.hosts6.end()) dev.address = hi6->second;
+		if (ti != state.srvs.end()) {
+			auto hi = state.hosts.find(ti->second);
+			if (hi != state.hosts.end()) { dev.address = hi->second; continue; }
+			auto hi6 = state.hosts6.find(ti->second);
+			if (hi6 != state.hosts6.end()) { dev.address = hi6->second; continue; }
+			}
+		auto si = state.srcs.find(inst);
+		if (si != state.srcs.end()) dev.address = si->second;
 		}
 
 	std::cout << stamp() << "Cast: discovery done - "

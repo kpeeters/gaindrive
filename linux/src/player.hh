@@ -62,6 +62,13 @@ class Player {
 		bool        playing_=false;
 		// A start offset, applied once the stream has prerolled.
 		double      pending_seek_=0;
+		// Where a seek is going, reported as the position until it lands:
+		// meanwhile GStreamer answers nothing, or 0, and the seek bar would
+		// jump to the start and back. -1 when no seek is under way.
+		double      seek_target_=-1;
+		// The last position GStreamer did answer, for the moments it
+		// cannot, such as while buffering.
+		mutable double last_position_=0;
 
 		// Shared with about-to-finish, which runs on a streaming thread.
 		std::mutex  mtx_;

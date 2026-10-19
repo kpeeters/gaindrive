@@ -4,8 +4,10 @@
 #include "infoblock.hh"
 #include "jsonread.hh"
 #include "settings.hh"
+#include "stamp.hh"
 
 #include <algorithm>
+#include <iostream>
 #include <set>
 
 namespace {
@@ -309,6 +311,7 @@ void TrackPane::clear()
 	texts_.set_visible(false);
 	text_files_.clear();
 	songs_.clear();
+	chapters_.clear();
 	album_ = Album{};
 	api_.reset();
 	}
@@ -344,29 +347,27 @@ void TrackPane::show_album(std::shared_ptr<ApiClient> api, const std::string& al
 		const auto& arr = jsub(album, "song");
 		for(size_t i=0; i<arr.size(); ++i)
 			songs_.push_back(parse_song(server, jidx(arr, i)));
-
-		std::set<int> discs;
-		for(const auto& s: songs_) discs.insert(s.disc);
-		bool multi_disc = discs.size()>1;
-		// Untagged files all say track 0 or 1; counting is more use then.
-		bool sequential = std::all_of(songs_.begin(), songs_.end(),
-		                              [](const Song& s) { return s.track<=1; });
-
-		std::vector<Glib::RefPtr<ListRow>> rows;
-		int disc = 0;
-		for(size_t i=0; i<songs_.size(); ++i) {
-			const auto& s = songs_[i];
-			if(multi_disc && s.disc!=disc) {
-				disc = s.disc;
-				// A season of a series arrives as a disc.
-				rows.push_back(ListRow::heading((s.season>0 ? "Series " : "Disc ") + std::to_string(disc)));
-				}
-			auto row = ListRow::of(s);
-			int n = sequential ? int(i)+1 : s.track;
-			row->text = n>0 ? std::to_string(n) : "";
-			rows.push_back(row);
-			}
-		set_rows(rows);
+		show_rows();
+		// Films may carry chapters, listed under them once they arrive.
+		if(std::any_of(songs_.begin(), songs_.end(), [](const Song& s) { return s.is_video; }))
+			api->call("getAlbumChapters", {{"id", album_id}}, [this, gen, album_id](const ApiResult& r) {
+				if(gen!=gen_) return;
+				if(!r.ok) {
+					// Not reported: the tracks are listed all the same.
+					std::cout << stamp() << "getAlbumChapters " << album_id << ": " << r.error << std::endl;
+					return;
+					}
+				const auto& films = jsub(jsub(r.body, "albumChapters"), "song");
+				for(size_t i=0; i<films.size(); ++i) {
+					const auto& f = jidx(films, i);
+					auto& list = chapters_[jstr(f, "id")];
+					const auto& ch = jsub(f, "chapter");
+					for(size_t k=0; k<ch.size(); ++k)
+						list.push_back({jnum(jidx(ch, k), "start"), jint(jidx(ch, k), "duration"),
+						                jstr(jidx(ch, k), "name")});
+					}
+				if(!chapters_.empty()) show_rows();
+				});
 		signal_loaded.emit(album_);
 
 		if(!play_id.empty())
@@ -376,6 +377,38 @@ void TrackPane::show_album(std::shared_ptr<ApiClient> api, const std::string& al
 					break;
 					}
 		});
+	}
+
+void TrackPane::show_rows()
+	{
+	std::set<int> discs;
+	for(const auto& s: songs_) discs.insert(s.disc);
+	bool multi_disc = discs.size()>1;
+	// Untagged files all say track 0 or 1; counting is more use then.
+	bool sequential = std::all_of(songs_.begin(), songs_.end(),
+	                              [](const Song& s) { return s.track<=1; });
+
+	std::vector<Glib::RefPtr<ListRow>> rows;
+	int disc = 0;
+	for(size_t i=0; i<songs_.size(); ++i) {
+		const auto& s = songs_[i];
+		if(multi_disc && s.disc!=disc) {
+			disc = s.disc;
+			// A season of a series arrives as a disc.
+			rows.push_back(ListRow::heading((s.season>0 ? "Series " : "Disc ") + std::to_string(disc)));
+			}
+		auto row = ListRow::of(s);
+		int n = sequential ? int(i)+1 : s.track;
+		row->text = n>0 ? std::to_string(n) : "";
+		rows.push_back(row);
+		auto ch = chapters_.find(s.ref.id);
+		if(ch!=chapters_.end())
+			for(size_t k=0; k<ch->second.size(); ++k) {
+				const auto& c = ch->second[k];
+				rows.push_back(ListRow::chapter(s, int(k)+1, c.name, c.start, c.duration));
+				}
+		}
+	set_rows(rows);
 	}
 
 void TrackPane::show_image(int index)
@@ -420,10 +453,36 @@ void TrackPane::show_text(size_t index)
 		});
 	}
 
+void TrackPane::set_chapter(const ItemRef& film, int index)
+	{
+	if(film.id==chapter_film_.id && film.server==chapter_film_.server && index==chapter_) return;
+	chapter_film_ = film;
+	chapter_      = index;
+	rebind_all();
+	}
+
+bool TrackPane::is_playing(const ListRow& row) const
+	{
+	if(row.kind!=ListRow::Kind::chapter) return Pane::is_playing(row);
+	return row.song.ref.id==chapter_film_.id && row.song.ref.server==chapter_film_.server
+	    && row.index==chapter_+1;
+	}
+
 void TrackPane::bind(RowWidget& w, const ListRow& row)
 	{
+	// Recycled widgets: the class must come off as surely as it goes on.
+	if(row.kind==ListRow::Kind::chapter) w.add_css_class("chapter");
+	else                                 w.remove_css_class("chapter");
 	if(row.kind==ListRow::Kind::heading) {
 		w.show_heading(row.text);
+		return;
+		}
+	if(row.kind==ListRow::Kind::chapter) {
+		w.show_item("", std::to_string(row.index),
+		            row.text.empty() ? "Chapter " + std::to_string(row.index) : row.text,
+		            "", row.duration>0 ? format_duration(row.duration) : "");
+		// No star, playlist or queue: they all address a song, and a
+		// chapter is not one. The film's own row has them.
 		return;
 		}
 	const auto& s = row.song;
@@ -439,7 +498,10 @@ void TrackPane::activated(const ListRow& row)
 	{
 	for(size_t i=0; i<songs_.size(); ++i)
 		if(songs_[i].ref.id==row.song.ref.id) {
-			signal_play.emit(songs_, i);
+			if(row.kind==ListRow::Kind::chapter)
+				signal_play_chapter.emit(songs_, i, row.start);
+			else
+				signal_play.emit(songs_, i);
 			break;
 			}
 	// The playing mark shows what plays; a lingering selection would only

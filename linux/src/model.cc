@@ -147,6 +147,18 @@ Glib::RefPtr<ListRow> ListRow::of(const Playlist& p)
 	return r;
 	}
 
+Glib::RefPtr<ListRow> ListRow::chapter(const Song& film, int index, const std::string& name,
+                                       double start, int duration)
+	{
+	auto r = Glib::make_refptr_for_instance<ListRow>(new ListRow(Kind::chapter));
+	r->song     = film;
+	r->index    = index;
+	r->text     = name;
+	r->start    = start;
+	r->duration = duration;
+	return r;
+	}
+
 Glib::RefPtr<ListRow> ListRow::setting(const std::string& key, const std::string& text,
                                        const std::string& detail)
 	{

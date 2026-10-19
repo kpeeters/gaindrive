@@ -12,6 +12,7 @@
 #include <gtkmm/searchentry.h>
 #include <gtkmm/singleselection.h>
 
+#include <map>
 #include <memory>
 #include <set>
 
@@ -90,6 +91,9 @@ class Pane : public Gtk::Box {
 		virtual void bind(RowWidget& w, const ListRow& row) = 0;
 		virtual void activated(const ListRow&) {}
 		virtual void remove_from_list(const ListRow&) {}
+		// Whether the row stands for what plays now; by default the song row
+		// of the current track.
+		virtual bool is_playing(const ListRow& row) const;
 		void rebind_all();
 		void report(const ApiResult& r);
 
@@ -175,19 +179,38 @@ class TrackPane : public Pane {
 		                const std::string& play_id="");
 		void clear() override;
 
+		// Marks a chapter of `film` as playing; -1 for none. 0-based, as
+		// the film's own chapter list counts.
+		void set_chapter(const ItemRef& film, int index);
+
 		// The album's own details, once getAlbum has answered.
 		sigc::signal<void(const Album&)> signal_loaded;
+		// A chapter row was picked: play songs[index] from `start`.
+		sigc::signal<void(const std::vector<Song>&, size_t, double start)> signal_play_chapter;
 
 	protected:
 		void bind(RowWidget& w, const ListRow& row) override;
 		void activated(const ListRow& row) override;
+		bool is_playing(const ListRow& row) const override;
 
 	private:
+		struct Chapter {
+			double      start=0;
+			int         duration=0;
+			std::string name;
+		};
+		void show_rows();
+
 		void show_image(int index);
 		void load_texts(std::shared_ptr<ApiClient> api, const std::string& album_id);
 		void show_text(size_t index);
 
 		std::vector<Song>           songs_;
+		// getAlbumChapters, by film id: from the scan's index, so a film
+		// whose markers are only inside its container has none here.
+		std::map<std::string, std::vector<Chapter>> chapters_;
+		ItemRef                     chapter_film_;
+		int                         chapter_=-1;
 		Album                       album_;
 		std::shared_ptr<ApiClient>  api_;
 

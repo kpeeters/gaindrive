@@ -91,6 +91,8 @@ void Player::play_uri(const std::string& uri, double start, bool video)
 	target_playing_ = true;
 	buffering_      = false;
 	pending_seek_   = start;
+	seek_target_    = start>0 ? start : -1;
+	last_position_  = start;
 	// To an offset by way of PAUSED, so nothing is heard from the beginning.
 	gst_element_set_state(playbin_, start>0 ? GST_STATE_PAUSED : GST_STATE_PLAYING);
 	}
@@ -126,6 +128,8 @@ void Player::stop()
 	}
 	target_playing_ = false;
 	pending_seek_   = 0;
+	seek_target_    = -1;
+	last_position_  = 0;
 	gst_element_set_state(playbin_, GST_STATE_NULL);
 	if(playing_) {
 		playing_ = false;
@@ -136,17 +140,22 @@ void Player::stop()
 void Player::seek(double seconds)
 	{
 	if(!playbin_) return;
-	gst_element_seek_simple(playbin_, GST_FORMAT_TIME,
+	seek_target_ = seconds;
+	if(!gst_element_seek_simple(playbin_, GST_FORMAT_TIME,
 		GstSeekFlags(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
-		gint64(seconds*GST_SECOND));
+		gint64(seconds*GST_SECOND))) {
+		std::cout << stamp() << "GStreamer refused a seek to " << seconds << " s" << std::endl;
+		seek_target_ = -1;
+		}
 	}
 
 double Player::position() const
 	{
+	if(seek_target_>=0) return seek_target_;
 	gint64 pos = 0;
-	if(!playbin_ || !gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos))
-		return 0;
-	return double(pos)/GST_SECOND;
+	if(playbin_ && gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos))
+		last_position_ = double(pos)/GST_SECOND;
+	return last_position_;
 	}
 
 GdkPaintable *Player::paintable() const
@@ -205,6 +214,8 @@ gboolean Player::bus_message(GstBus *, GstMessage *msg, gpointer self)
 			}
 		case GST_MESSAGE_EOS:
 			p->target_playing_ = false;
+			// So a press of play starts over rather than resuming at the end.
+			p->last_position_  = 0;
 			gst_element_set_state(p->playbin_, GST_STATE_READY);
 			p->signal_ended.emit();
 			break;
@@ -222,6 +233,8 @@ gboolean Player::bus_message(GstBus *, GstMessage *msg, gpointer self)
 			break;
 			}
 		case GST_MESSAGE_ASYNC_DONE:
+			// A flushing seek ends here; the next answer is the new place.
+			p->seek_target_ = -1;
 			if(p->pending_seek_>0) {
 				double s = p->pending_seek_;
 				p->pending_seek_ = 0;
