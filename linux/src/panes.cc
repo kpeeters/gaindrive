@@ -40,9 +40,8 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 	text_.append(subtitle_);
 	item_.append(text_);
 
-	trail_.add_css_class("dim-label");
-	trail_.add_css_class("numeric");
-	item_.append(trail_);
+	// The actions before the time, as on the web, so the times line up
+	// at the edge.
 	for(auto b: {&star, &list, &queue}) {
 		b->add_css_class("flat");
 		b->add_css_class("row-action");
@@ -50,6 +49,9 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 		b->set_visible(false);
 		item_.append(*b);
 		}
+	trail_.add_css_class("dim-label");
+	trail_.add_css_class("numeric");
+	item_.append(trail_);
 	queue.set_icon_name("gd-add-symbolic");
 	queue.set_tooltip_text("Add to queue");
 	append(item_);
@@ -102,6 +104,10 @@ void RowWidget::show_actions(bool show_star, bool starred, ListButton mode, bool
 		list.set_tooltip_text("Remove from playlist");
 		}
 	queue.set_visible(show_queue);
+	// A track's actions show on hover, as on the web, so a long album is
+	// not a column of icons; only tracks have the queue button.
+	if(show_queue) add_css_class("hover-actions");
+	else           remove_css_class("hover-actions");
 	}
 
 void RowWidget::set_playing(bool on)

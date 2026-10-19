@@ -63,6 +63,9 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settin
 	time_.add_css_class("numeric");
 	time_.add_css_class("dim-label");
 	row_.append(time_);
+	// Smaller than the transport buttons, which are what the bar is for.
+	for(Gtk::Widget *w: {(Gtk::Widget*)cast_.get(), (Gtk::Widget*)&info_button_, (Gtk::Widget*)tune_.get()})
+		w->add_css_class("bar-extra");
 	row_.append(*cast_);
 	// Between the cast and equaliser buttons, as on the web client.
 	info_button_.set_icon_name("gd-info-symbolic");

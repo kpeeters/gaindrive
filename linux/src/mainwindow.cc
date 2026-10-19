@@ -27,8 +27,18 @@ namespace {
 	const char *css = R"(
 		/* The web client's light-theme accent. */
 		@define-color gd_red #a31623;
-		.pane { border-left: 1px solid alpha(currentColor, 0.15); }
-		.pane-header { padding: 10px 12px; min-height: 34px; }
+		/* The content on the view colour, a shade off the sidebar's and the
+		   bar's, as on macOS; the lists take it from the pane, so a header,
+		   hero or notes above them sit on the same surface. */
+		.pane {
+			border-left: 1px solid alpha(currentColor, 0.15);
+			background-color: @theme_base_color;
+		}
+		.pane listview { background-color: transparent; }
+		.pane-header {
+			padding: 16px 12px 12px 12px; min-height: 40px;
+			border-bottom: 1px solid alpha(currentColor, 0.12);
+		}
 		.pane-title { font-weight: bold; font-size: 1.2em; }
 		.row-heading { font-weight: bold; padding: 12px 4px 4px 4px; opacity: 0.6; }
 		/* In the panes, flush with the row text below and in full colour. */
@@ -45,12 +55,19 @@ namespace {
 		.liner-notes { margin: 12px; }
 		.row-action { min-width: 24px; min-height: 24px; padding: 2px; }
 		.row-action.starred { color: @accent_color; }
+		/* Selected and focused too, so the keyboard reaches them. */
+		.hover-actions .row-action { opacity: 0; transition: opacity 100ms; }
+		row:hover .hover-actions .row-action,
+		row:selected .hover-actions .row-action,
+		row:focus-within .hover-actions .row-action,
+		.hover-actions .row-action.starred { opacity: 1; }
 		/* Material Symbols leave a wide margin inside the em, so at the
 		   default 16px they look much smaller than theme icons. */
 		.pane button > image, .sidebar button > image { -gtk-icon-size: 20px; }
 		/* Direct children only: the cast popover hangs off the bar too. */
 		.player-row > button > image,
 		.player-row > menubutton > button image { -gtk-icon-size: 48px; }
+		.player-row > .bar-extra image { -gtk-icon-size: 32px; }
 		.player-bar .casting image { color: @gd_red; }
 		.info-card .card-title { font-weight: bold; font-size: 1.15em; }
 		.info-card .card-section {
