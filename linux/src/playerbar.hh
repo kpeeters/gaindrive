@@ -5,6 +5,7 @@
 #include <gtkmm/label.h>
 #include <gtkmm/listbox.h>
 #include <gtkmm/scale.h>
+#include <gtkmm/togglebutton.h>
 
 #include <chrono>
 #include <memory>
@@ -31,9 +32,12 @@ class PlayerBar : public Gtk::Box {
 		// bar, and the button that opens it.
 		TunePanel&  tune_panel();
 		TuneButton& tune_button();
+		// Opens and closes the track info card, which the window places.
+		Gtk::ToggleButton& info_button();
 
 		// The cover was clicked: open the playing album.
 		sigc::signal<void()> signal_cover;
+
 
 	private:
 		void track_changed();
@@ -46,6 +50,7 @@ class PlayerBar : public Gtk::Box {
 		Gtk::Box                    info_;
 		Gtk::Label                  title_, artist_;
 		Gtk::Button                 prev_, play_, next_;
+		Gtk::ToggleButton           info_button_;
 		Gtk::Scale                  seek_;
 		Gtk::Label                  time_;
 		std::unique_ptr<CastButton> cast_;

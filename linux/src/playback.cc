@@ -305,6 +305,24 @@ void Playback::local_start(double offset)
 		player_.play_uri(stream_url(*s), offset, s->is_video);
 	}
 
+const std::string& Playback::cast_sent() const
+	{
+	return cast_sent_;
+	}
+
+const std::string& Playback::cast_type() const
+	{
+	return cast_type_;
+	}
+
+std::string Playback::local_url() const
+	{
+	const Song *s = current();
+	if(!s || !api_) return "";
+	if(s->is_video) return video_url(*s, mp3_retried_);
+	return stream_url(*s, local_offset_, mp3_retried_);
+	}
+
 bool Playback::cast_picture() const
 	{
 	const Song *s = current();
@@ -365,10 +383,10 @@ void Playback::cast_start(double offset)
 
 		// Also what a capped track turned out to be: under the cap the
 		// original is sent as it is.
-		std::string type, error;
-		bool ok = ApiClient::probe_stream(url, type, error);
-		std::string sent = type.substr(0, type.find(';'));
-		if(!sent.empty()) mime = sent;
+		std::string type, error, sent;
+		bool ok = ApiClient::probe_stream(url, type, error, &sent);
+		std::string arrived = type.substr(0, type.find(';'));
+		if(!arrived.empty()) mime = arrived;
 
 		nlohmann::json meta = {
 			{"metadataType", 3},
@@ -381,8 +399,10 @@ void Playback::cast_start(double offset)
 			meta["images"] = {{{"url", api->cast_url("getCoverArt",
 			                     {{"id", song.cover_art}, {"size", "600"}}, token)}}};
 
-		on_ui([this, ok, error, url, mime, meta, gen, offset, duration=song.duration]() {
+		on_ui([this, ok, error, url, mime, meta, gen, offset, sent, duration=song.duration]() {
 			if(gen!=cast_gen_ || !caster_.active()) return;
+			cast_sent_ = sent;
+			cast_type_ = mime;
 			if(!ok) {
 				std::cout << stamp() << "Cast: stream probe failed: " << error << std::endl;
 				signal_error.emit("Cannot cast this track: " + error);
@@ -460,8 +480,23 @@ void Playback::cast_film(double offset)
 		p.push_back({"timeOffset", std::to_string(long(base))});
 		}
 	p.push_back({"pace", "true"});
+	// In words for the track info, as the web client's: the server says
+	// nothing about a film's stream the way X-Gaindrive-Sent does a track's.
+	std::string how;
+	if(picture)
+		how = endpoint=="hls" ? "HLS" : s->suffix + " - as stored";
+	else {
+		std::string fmt, kbps;
+		for(const auto& [k, v]: p) {
+			if(k=="format")     fmt  = v;
+			if(k=="maxBitRate") kbps = v;
+			}
+		bool copied = fmt==s->soundtrack_format && kbps.empty();
+		how = fmt + (kbps.empty() ? "" : " " + kbps + " kbps")
+		    + (copied ? " - soundtrack only, copied" : " - soundtrack only, re-encoded");
+		}
 
-	pool_.submit([this, api=api_, song=*s, p, mime, endpoint, ext, gen, offset, base, picture]() {
+	pool_.submit([this, api=api_, song=*s, p, mime, endpoint, ext, gen, offset, base, picture, how]() {
 		std::string token;
 		auto r = ApiClient::get_json(api->session(), "getCastToken", {{"id", song.ref.id}});
 		if(r.ok)
@@ -508,9 +543,11 @@ void Playback::cast_film(double offset)
 			meta["images"] = {{{"url", api->cast_url("getCoverArt",
 			                     {{"id", song.cover_art}, {"size", "600"}}, token)}}};
 
-		on_ui([this, url, mime, meta, tracks, gen, offset, base, picture,
+		on_ui([this, url, mime, meta, tracks, gen, offset, base, picture, how,
 		       id=song.ref.id, duration=song.duration]() {
 			if(gen!=cast_gen_ || !caster_.active()) return;
+			cast_sent_ = how;
+			cast_type_ = mime;
 			Caster::Load l;
 			l.url      = url;
 			l.mime     = mime;

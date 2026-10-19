@@ -133,6 +133,7 @@ add_executable(gaindrive-player
 	src/serverconfig.cc
 	src/settings.cc
 	src/settingspage.cc
+	src/trackinfo.cc
 	src/tunebutton.cc
 	src/uithread.cc
 	src/videocodecs.cc

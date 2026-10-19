@@ -9,6 +9,7 @@
 #include "serverconfig.hh"
 #include "settings.hh"
 #include "settingspage.hh"
+#include "trackinfo.hh"
 #include "videoview.hh"
 #include "workpool.hh"
 
@@ -59,6 +60,7 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void star(ListRow::Kind kind, const ItemRef& ref, bool on);
 		void close_video();
 		void install_tune_closers();
+		void close_cards();
 		void build_tabs();
 		void set_narrow(bool narrow);
 		// One pane back in a narrow strip.
@@ -116,6 +118,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		// panes, so it goes first and unparents them while they still exist.
 		PaneStrip                  strip_;
 		PlayerBar                  bar_;
+		// Floats over the panes beside the equaliser's card; one at a time.
+		TrackInfo                  info_card_;
 		// The sections, below the bar, in place of the sidebar when narrow.
 		Gtk::Box                   tabs_;
 		std::vector<Gtk::ToggleButton*> tab_buttons_;

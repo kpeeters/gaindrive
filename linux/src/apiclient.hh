@@ -79,8 +79,14 @@ class ApiClient {
 		// Fetches the first byte of a stream for its Content-Type. The server
 		// builds a conversion whole before sending anything, so this can take
 		// minutes, and is better done before a receiver starts its own clock.
+		// `sent`, when given, gets the server's X-Gaindrive-Sent: what it
+		// decided to send ("original", or a format and bitrate).
 		static bool      probe_stream(const std::string& url, std::string& content_type,
-		                              std::string& error);
+		                              std::string& error, std::string *sent=nullptr);
+		// X-Gaindrive-Sent alone, from a request dropped as soon as its
+		// headers are in, so a conversion sent as it is made is not read
+		// through. Empty when there is none, or no answer.
+		static std::string sent_of(const std::string& url);
 
 	private:
 		WorkPool&                      pool_;

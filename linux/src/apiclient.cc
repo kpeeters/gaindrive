@@ -150,8 +150,31 @@ ApiClient::Fetch ApiClient::get_if_changed(const std::string& url, const std::st
 	return f;
 	}
 
+std::string ApiClient::sent_of(const std::string& url)
+	{
+	std::string origin, path, sent;
+	split_url(url, origin, path);
+	try {
+		httplib::Client cli(origin);
+		cli.set_connection_timeout(5);
+		cli.set_read_timeout(20);
+		cli.set_follow_location(true);
+		httplib::Headers headers = {{"User-Agent", "gaindrive-player/" GAINDRIVE_VERSION},
+		                            {"Range", "bytes=0-0"}};
+		// Refusing the body ends the request: the answer is in the headers.
+		cli.Get(path, headers, [&sent](const httplib::Response& r) {
+			sent = r.get_header_value("X-Gaindrive-Sent");
+			return false;
+			}, [](const char *, size_t) { return false; });
+		}
+	catch(const std::exception& ex) {
+		std::cout << stamp() << "sent_of: " << ex.what() << std::endl;
+		}
+	return sent;
+	}
+
 bool ApiClient::probe_stream(const std::string& url, std::string& content_type,
-                             std::string& error)
+                             std::string& error, std::string *sent)
 	{
 	std::string origin, path;
 	split_url(url, origin, path);
@@ -172,6 +195,7 @@ bool ApiClient::probe_stream(const std::string& url, std::string& content_type,
 			return false;
 			}
 		content_type = res->get_header_value("Content-Type");
+		if(sent) *sent = res->get_header_value("X-Gaindrive-Sent");
 		// An error document is JSON; audio never is.
 		if(content_type.find("json")!=std::string::npos || content_type.find("xml")!=std::string::npos) {
 			error = "Server sent " + content_type + " instead of audio";

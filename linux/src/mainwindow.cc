@@ -4,6 +4,7 @@
 #include "jsonread.hh"
 #include "playlistpicker.hh"
 #include "mpris.hh"
+#include "trackinfo.hh"
 #include "secretstore.hh"
 #include "stamp.hh"
 #include "tunebutton.hh"
@@ -51,19 +52,25 @@ namespace {
 		.player-row > button > image,
 		.player-row > menubutton > button image { -gtk-icon-size: 48px; }
 		.player-bar .casting image { color: @gd_red; }
+		.info-card .card-title { font-weight: bold; font-size: 1.15em; }
+		.info-card .card-section {
+			font-size: 0.75em; font-weight: bold; letter-spacing: 1px;
+			opacity: 0.55; margin-top: 10px;
+		}
 		.back-link { color: @gd_red; padding: 2px 6px; min-height: 0; font-size: 0.9em; }
 		.bottom-nav { border-top: 1px solid alpha(currentColor, 0.15); padding: 2px 4px; }
 		.bottom-nav button { padding: 4px 0; }
 		.bottom-nav image { -gtk-icon-size: 24px; color: @gd_red; }
 		.bottom-nav label { font-size: 0.75em; }
 		.player-bar .eq-on image { color: @gd_red; }
-		.tune-panel {
+		.tune-panel, .info-card {
 			padding: 10px 12px;
 			background-color: @theme_bg_color;
 			border: 1px solid alpha(currentColor, 0.15);
 			border-radius: 6px;
 			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 		}
+		.info-card { padding: 14px 16px; }
 		.player-bar scale highlight,
 		.player-bar scale slider,
 		.tune-panel scale highlight,
@@ -137,6 +144,7 @@ MainWindow::MainWindow()
 	  settings_page_(settings_, servers_),
 	  tracks_(covers_),
 	  bar_(covers_, playback_, settings_),
+	  info_card_(covers_, playback_, pool_),
 	  tabs_(Gtk::Orientation::HORIZONTAL)
 	{
 	ui_init();
@@ -208,6 +216,9 @@ MainWindow::MainWindow()
 	tune.set_margin_end(16);
 	tune.set_margin_bottom(6);
 	body_.add_overlay(tune);
+	info_card_.set_margin_end(16);
+	info_card_.set_margin_bottom(6);
+	body_.add_overlay(info_card_);
 	body_.set_vexpand(true);
 	browse_.append(body_);
 	browse_.append(bar_);
@@ -292,6 +303,20 @@ MainWindow::MainWindow()
 		settings_pane_.load();
 		});
 	settings_page_.signal_remove_server.connect(sigc::mem_fun(*this, &MainWindow::remove_server));
+	// The info and equaliser cards share the corner: opening one closes the
+	// other.
+	bar_.info_button().signal_toggled().connect([this]() {
+		bool on = bar_.info_button().get_active();
+		if(on) {
+			bar_.tune_button().set_active(false);
+			info_card_.refresh();
+			}
+		info_card_.set_visible(on);
+		});
+	bar_.tune_button().signal_toggled().connect([this]() {
+		if(bar_.tune_button().get_active()) bar_.info_button().set_active(false);
+		});
+	info_card_.signal_close.connect([this]() { bar_.info_button().set_active(false); });
 	bar_.signal_cover.connect([this]() {
 		if(auto s = playback_.current())
 			open_album(s->album_id, "");
@@ -300,6 +325,9 @@ MainWindow::MainWindow()
 		const Song *s = playback_.current();
 		for(auto p: all_panes())
 			p->set_playing(s ? s->ref : ItemRef{});
+		// An open info card follows the track, not every queue change.
+		if(info_card_.get_visible() && s && s->ref.id!=info_card_.shown())
+			info_card_.refresh();
 		});
 	playback_.signal_started.connect([this]() {
 		const Song *s = playback_.current();
@@ -415,6 +443,7 @@ void MainWindow::start_session(const Session& s)
 	covers_.set_api(api_);
 	playback_.set_api(api_);
 	search_.set_api(api_);
+	info_card_.set_api(api_);
 	for(auto p: all_panes())
 		p->clear();
 	artists_.load(api_);
@@ -513,6 +542,8 @@ void MainWindow::end_session(const std::string& error)
 	api_.reset();
 	covers_.set_api(nullptr);
 	search_.set_api(nullptr);
+	close_cards();
+	info_card_.set_api(nullptr);
 	for(auto p: all_panes())
 		p->clear();
 	settings_page_.clear();
@@ -663,6 +694,10 @@ void MainWindow::set_narrow(bool narrow)
 	tune.set_halign(narrow ? Gtk::Align::FILL : Gtk::Align::END);
 	tune.set_margin_start(narrow ? 8 : 0);
 	tune.set_margin_end(narrow ? 8 : 16);
+	info_card_.set_narrow(narrow);
+	info_card_.set_halign(narrow ? Gtk::Align::FILL : Gtk::Align::END);
+	info_card_.set_margin_start(narrow ? 8 : 0);
+	info_card_.set_margin_end(narrow ? 8 : 16);
 	fullscreen_changed();
 	}
 
@@ -772,11 +807,17 @@ void MainWindow::star(ListRow::Kind kind, const ItemRef& ref, bool on)
 		});
 	}
 
+void MainWindow::close_cards()
+	{
+	bar_.tune_button().set_active(false);
+	bar_.info_button().set_active(false);
+	}
+
 void MainWindow::install_tune_closers()
 	{
 	// The card closes as the web client's panel does: its button, Escape, or
 	// a click anywhere else. Not claimed, so that click still does its job.
-	auto close = [this]() { bar_.tune_button().set_active(false); };
+	auto close = [this]() { close_cards(); };
 	auto outside = Gtk::GestureClick::create();
 	outside->set_button(0);
 	outside->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
@@ -786,10 +827,11 @@ void MainWindow::install_tune_closers()
 	in_bar->set_button(0);
 	in_bar->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
 	in_bar->signal_pressed().connect([this, close](int, double x, double y) {
-		// The button toggles the card itself.
-		auto& button = bar_.tune_button();
+		// The buttons toggle the cards themselves.
 		auto *w = bar_.pick(x, y);
-		if(w && (w==&button || w->is_ancestor(button))) return;
+		for(Gtk::Widget *button: {static_cast<Gtk::Widget*>(&bar_.tune_button()),
+		                          static_cast<Gtk::Widget*>(&bar_.info_button())})
+			if(w && (w==button || w->is_ancestor(*button))) return;
 		close();
 		});
 	bar_.add_controller(in_bar);
@@ -797,7 +839,8 @@ void MainWindow::install_tune_closers()
 	// first.
 	auto keys = Gtk::EventControllerKey::create();
 	keys->signal_key_pressed().connect([this, close](guint keyval, guint, Gdk::ModifierType) {
-		if(keyval!=GDK_KEY_Escape || !bar_.tune_button().get_active()) return false;
+		if(keyval!=GDK_KEY_Escape) return false;
+		if(!bar_.tune_button().get_active() && !bar_.info_button().get_active()) return false;
 		close();
 		return true;
 		}, false);

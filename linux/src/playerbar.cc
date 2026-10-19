@@ -64,6 +64,13 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settin
 	time_.add_css_class("dim-label");
 	row_.append(time_);
 	row_.append(*cast_);
+	// Between the cast and equaliser buttons, as on the web client.
+	info_button_.set_icon_name("gd-info-symbolic");
+	info_button_.set_tooltip_text("Track info");
+	info_button_.add_css_class("flat");
+	info_button_.set_valign(Gtk::Align::CENTER);
+	info_button_.set_sensitive(false);
+	row_.append(info_button_);
 	row_.append(*tune_);
 	row_.add_css_class("player-row");
 	row2_.add_css_class("player-row");
@@ -120,6 +127,11 @@ TunePanel& PlayerBar::tune_panel()
 	return tune_->panel();
 	}
 
+Gtk::ToggleButton& PlayerBar::info_button()
+	{
+	return info_button_;
+	}
+
 TuneButton& PlayerBar::tune_button()
 	{
 	return *tune_;
@@ -135,6 +147,8 @@ void PlayerBar::track_changed()
 	cover_->set_sensitive(s!=nullptr);
 	play_.set_sensitive(s!=nullptr);
 	seek_.set_sensitive(s!=nullptr);
+	info_button_.set_sensitive(s!=nullptr);
+	if(!s) info_button_.set_active(false);
 	auto idx = playback_.index();
 	prev_.set_sensitive(s!=nullptr);
 	next_.set_sensitive(idx>=0 && idx+1<long(playback_.queue().size()));

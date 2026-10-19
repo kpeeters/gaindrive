@@ -56,6 +56,14 @@ class Playback {
 		// Moves what is playing to a receiver, and back.
 		void        cast_to(size_t device);
 		void        stop_casting();
+		// For the track info: what the receiver was given. `sent` is the
+		// server's X-Gaindrive-Sent for a track, or for a film already in
+		// words; `type` is the Content-Type the LOAD declared.
+		const std::string& cast_sent() const;
+		const std::string& cast_type() const;
+		// The URL the local player reads the current track from.
+		std::string local_url() const;
+
 		// A film is being cast and the receiver shows its picture, so it
 		// also draws the subtitles.
 		bool        cast_picture() const;
@@ -102,6 +110,7 @@ class Playback {
 		// The film on the receiver is its soundtrack alone, piped from a
 		// timeOffset, so a seek reloads from there.
 		bool                       cast_soundtrack_=false;
+		std::string                cast_sent_, cast_type_;
 		std::string                caption_song_;
 		int                        caption_track_=0;
 		std::shared_ptr<ApiClient> api_;
