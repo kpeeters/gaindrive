@@ -13,6 +13,7 @@
 #include <gtkmm/singleselection.h>
 
 #include <map>
+#include <functional>
 #include <memory>
 #include <set>
 
@@ -73,6 +74,14 @@ class Pane : public Gtk::Box {
 		virtual void star_changed(ListRow::Kind kind, const ItemRef& ref, bool on);
 		void set_playing(const ItemRef& song);
 		void unselect();
+		// Reselects the first row `match` accepts, as a click would, once
+		// there are rows: now if there are, else with the next list that
+		// arrives. For reopening the last view; `done` says whether it was
+		// found.
+		void restore(std::function<bool(const ListRow&)> match,
+		             std::function<void(bool found)> done={});
+		void cancel_restore();
+		bool restoring() const;
 		// "← label" before the title, when the pane is the leftmost of a
 		// narrow strip; empty hides it.
 		void set_back(const std::string& label);
@@ -121,6 +130,10 @@ class Pane : public Gtk::Box {
 		Glib::RefPtr<Gtk::SingleSelection>    selection_;
 		Gtk::ListView                         list_;
 		ItemRef                               playing_;
+		std::function<bool(const ListRow&)>   restore_match_;
+		std::function<void(bool)>             restore_done_;
+
+		void apply_restore();
 };
 
 // ---- Library: artists, an artist's albums, an album's tracks ---------------
@@ -291,6 +304,9 @@ class SearchPane : public Pane {
 		void set_api(std::shared_ptr<ApiClient> api);
 		void focus_entry();
 		void clear() override;
+		// The search text; setting it runs the search, as typing does.
+		std::string query() const;
+		void        set_query(const std::string& q);
 
 	protected:
 		void bind(RowWidget& w, const ListRow& row) override;

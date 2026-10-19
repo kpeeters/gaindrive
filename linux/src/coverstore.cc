@@ -6,6 +6,10 @@
 #include "workpool.hh"
 
 #include <glibmm/main.h>
+#include <gdkmm/frameclock.h>
+#include <gtkmm/adjustment.h>
+#include <gtkmm/scrolledwindow.h>
+#include <gtk/gtk.h>
 #include <glibmm/miscutils.h>
 #include <gdk/gdk.h>
 
@@ -18,6 +22,8 @@
 #include <vector>
 
 namespace {
+	// Covers in flight at once; each keeps its connection to the server.
+	const int cover_threads = 4;
 	// Enough for a few screens of album rows at both sizes.
 	const size_t memory_entries = 400;
 	// The phones' limit too. Trimmed to 90% so that a full cache is not
@@ -141,10 +147,12 @@ namespace {
 		}
 }
 
-CoverStore::CoverStore(WorkPool& pool)
-	: pool_(pool)
+CoverStore::CoverStore()
+	: pool_(std::make_unique<WorkPool>(cover_threads))
 	{
 	}
+
+CoverStore::~CoverStore() = default;
 
 void CoverStore::set_api(std::shared_ptr<ApiClient> api)
 	{
@@ -157,7 +165,7 @@ void CoverStore::set_api(std::shared_ptr<ApiClient> api)
 	}
 
 Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, std::string& key,
-                                           int index)
+                                           int index, bool fetch)
 	{
 	key.clear();
 	if(!api_ || cover_id.empty()) return {};
@@ -171,6 +179,7 @@ Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, 
 		ages_.splice(ages_.begin(), ages_, it->second.age);
 		return it->second.texture;
 		}
+	if(!fetch) return {};
 	auto miss = missing_.find(key);
 	if(miss!=missing_.end()) {
 		if(std::chrono::steady_clock::now()<miss->second) return {};
@@ -185,7 +194,7 @@ Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, 
 	Params p = {{"id", cover_id}, {"size", std::to_string(px)}};
 	if(index>0) p.push_back({"index", std::to_string(index)});
 	auto url  = api_->url("getCoverArt", p);
-	pool_.submit([this, key, file, url, epoch=epoch_]() {
+	pool_->submit([this, key, file, url, epoch=epoch_]() {
 		// Always asked, never trusted: the server's ETag covers the file and
 		// its size, and a rescan can hand a cover id to another album, so a
 		// stored copy may be another album's art. A 304 costs no image.
@@ -273,6 +282,7 @@ CoverImage::CoverImage(CoverStore& store, int css_px)
 CoverImage::~CoverImage()
 	{
 	retry_.disconnect();
+	stop_watching();
 	}
 
 void CoverImage::ready(const std::string& key, const Glib::RefPtr<Gdk::Texture>& tex)
@@ -284,10 +294,70 @@ void CoverImage::ready(const std::string& key, const Glib::RefPtr<Gdk::Texture>&
 void CoverImage::show_cover(const std::string& cover_id, int index)
 	{
 	retry_.disconnect();
+	stop_watching();
 	cover_id_ = cover_id;
 	index_    = index;
 	tries_    = 0;
-	fetch();
+	// What is in memory is shown at once, wherever the image is.
+	int px = css_px_ * (get_scale_factor()>1 ? 2 : 1);
+	if(auto tex = store_.get(cover_id_, px, wanted_, index_, false)) {
+		set(tex);
+		return;
+		}
+	clear();
+	if(cover_id_.empty()) return;
+	// Settled once it is on screen and laid out: a ListView binds a row
+	// before the row is in the list's widget tree, so asking for the
+	// scrolled view now would find none, and every row would fetch.
+	watch();
+	}
+
+void CoverImage::watch()
+	{
+	// A tick runs once the image is mapped, at the next frame.
+	tick_ = add_tick_callback([this](const Glib::RefPtr<Gdk::FrameClock>&) {
+		// Ticks come before the frame's layout: one more frame for a row
+		// that has not been given a size yet.
+		if(get_width()==0) return true;
+		tick_ = 0;
+		scrolled_ = get_ancestor(GTK_TYPE_SCROLLED_WINDOW);
+		if(!scrolled_ || on_screen()) {
+			stop_watching();
+			fetch();
+			return false;
+			}
+		// Scrolled to, or the view grew to show it.
+		auto check = [this]() {
+			if(!on_screen()) return;
+			stop_watching();
+			fetch();
+			};
+		auto adj = static_cast<Gtk::ScrolledWindow*>(scrolled_)->get_vadjustment();
+		scroll_watch_ = adj->signal_value_changed().connect(check);
+		size_watch_   = adj->signal_changed().connect(check);
+		return false;
+		});
+	}
+
+void CoverImage::stop_watching()
+	{
+	scroll_watch_.disconnect();
+	size_watch_.disconnect();
+	// Not once GTK has destroyed the widget, as it does a list's rows before
+	// their C++ side goes; it has dropped the callback with it.
+	if(tick_ && gobj()) remove_tick_callback(tick_);
+	tick_ = 0;
+	}
+
+bool CoverImage::on_screen() const
+	{
+	if(!scrolled_ || !get_mapped()) return false;
+	graphene_rect_t r;
+	auto self = const_cast<GtkWidget*>(static_cast<const Gtk::Widget*>(this)->gobj());
+	if(!gtk_widget_compute_bounds(self, const_cast<GtkWidget*>(scrolled_->gobj()), &r))
+		return false;
+	return r.origin.y + r.size.height > 0 && r.origin.y < scrolled_->get_height()
+	    && r.origin.x + r.size.width  > 0 && r.origin.x < scrolled_->get_width();
 	}
 
 void CoverImage::fetch()

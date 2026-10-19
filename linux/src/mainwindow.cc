@@ -121,7 +121,6 @@ MainWindow::MainWindow()
 	: pool_(4),
 	  // Before anything built below reads it, the equaliser among them.
 	  settings_(loaded_settings()),
-	  covers_(pool_),
 	  playback_(settings_, pool_),
 	  browse_(Gtk::Orientation::VERTICAL, narrow_window),
 	  main_(Gtk::Orientation::HORIZONTAL),
@@ -153,6 +152,8 @@ MainWindow::MainWindow()
 	signal_close_request().connect([this]() {
 		playback_.report_stopped_now();
 		save_size();
+		// Again, for search text typed since the last navigation.
+		save_view();
 		return false;
 		}, false);
 	set_titlebar(header_);
@@ -271,12 +272,17 @@ MainWindow::MainWindow()
 	playlists_.signal_playlist.connect([this](const Playlist& pl) {
 		middle_.set_visible_child("playlist");
 		tracks_.clear();
+		view_.playlist_id   = pl.ref.id;
+		view_.playlist_name = pl.name;
+		view_.album_id.clear();
+		view_.album_title.clear();
 		playlist_.show_playlist(api_, pl);
 		go(1);
 		});
 	settings_pane_.signal_category.connect([this](const std::string& key) {
 		middle_.set_visible_child("settings");
 		settings_page_.show(key, api_);
+		view_.settings = key;
 		go(1);
 		});
 	for(auto p: all_panes())
@@ -412,11 +418,92 @@ void MainWindow::start_session(const Session& s)
 	for(auto p: all_panes())
 		p->clear();
 	artists_.load(api_);
+	restore_view();
+	stack_.set_visible_child("browse");
+	}
+
+void MainWindow::save_view()
+	{
+	if(!api_) return;
+	// Not while the last view is still reopening: what is open then is only
+	// part of it, and a server that never answers would lose the rest.
+	if(restoring_view_ || !expect_album_.empty()) return;
+	for(auto p: all_panes())
+		if(p->restoring()) return;
+	nlohmann::json j = {{"server", api_->session().server_key}, {"section", view_.section}};
+	if(!view_.artist_id.empty())   j["artist"]   = {{"id", view_.artist_id},   {"name", view_.artist_name}};
+	if(!view_.playlist_id.empty()) j["playlist"] = {{"id", view_.playlist_id}, {"name", view_.playlist_name}};
+	if(!view_.settings.empty())    j["settings"] = view_.settings;
+	// The title only once it is known, so an album that never loaded is
+	// not reopened.
+	if(!view_.album_id.empty() && !view_.album_title.empty())
+		j["album"] = {{"id", view_.album_id}, {"title", view_.album_title}};
+	if(view_.section=="search" && !search_.query().empty())
+		j["query"] = search_.query();
+	write_config("view.json", j);
+	}
+
+void MainWindow::restore_view()
+	{
+	auto j = read_config("view.json");
+	restoring_view_ = true;
+	struct Done {
+		bool& flag;
+		~Done() { flag = false; }
+	} done{restoring_view_};
+	// Another server's ids mean nothing here.
+	bool ours = jstr(j, "server")==api_->session().server_key;
+	std::string section = jstr(j, "section");
+	size_t index = 0;
+	if(ours)
+		for(size_t i=0; i<std::size(sections); ++i)
+			if(section==sections[i].name) index = i;
+	section = sections[index].name;
 	// Selecting the row when it already is selected does nothing, so the
 	// section is shown by hand as well.
-	nav_.select_row(*nav_.get_row_at_index(0));
-	show_section("library");
-	stack_.set_visible_child("browse");
+	nav_.select_row(*nav_.get_row_at_index(int(index)));
+	show_section(section);
+	if(!ours) return;
+
+	const auto& artist   = jsub(j, "artist");
+	const auto& album    = jsub(j, "album");
+	const auto& playlist = jsub(j, "playlist");
+	std::string album_id = jstr(album, "id"), album_title = jstr(album, "title");
+	auto album_match = [album_id, album_title](const ListRow& r) {
+		return r.kind==ListRow::Kind::album && r.album.ref.id==album_id && r.album.title==album_title;
+		};
+	// Each level by reselecting its row once its list is there, so the
+	// usual click path opens and slides; a level that is gone, or now
+	// names something else, ends it there.
+	if(section=="library" && !jstr(artist, "id").empty()) {
+		std::string id = jstr(artist, "id"), name = jstr(artist, "name");
+		artists_.restore([id, name](const ListRow& r) {
+			return r.kind==ListRow::Kind::artist && r.artist.ref.id==id && r.artist.name==name;
+			}, [this, album_id, album_match](bool found) {
+			if(found && !album_id.empty()) albums_.restore(album_match);
+			});
+		}
+	else if(section=="playlists" && !jstr(playlist, "id").empty()) {
+		std::string id = jstr(playlist, "id"), name = jstr(playlist, "name");
+		playlists_.restore([id, name](const ListRow& r) {
+			return r.kind==ListRow::Kind::playlist && r.playlist.ref.id==id && r.playlist.name==name;
+			});
+		}
+	else if(section=="settings" && !jstr(j, "settings").empty()) {
+		std::string key = jstr(j, "settings");
+		settings_pane_.restore([key](const ListRow& r) {
+			return r.kind==ListRow::Kind::setting && r.key==key;
+			});
+		}
+	else if(section=="search" || section=="recents") {
+		if(section=="search") search_.set_query(jstr(j, "query"));
+		// Not by reselecting a hit: selecting a song plays it. By id, and
+		// album_loaded checks the title.
+		if(!album_id.empty() && !album_title.empty()) {
+			open_album(album_id, "");
+			expect_album_ = album_title;
+			}
+		}
 	}
 
 void MainWindow::end_session(const std::string& error)
@@ -475,6 +562,11 @@ std::vector<Pane*> MainWindow::all_panes()
 
 void MainWindow::show_section(const std::string& name)
 	{
+	// Whatever was still reopening from the last run gives way.
+	for(auto p: all_panes()) p->cancel_restore();
+	expect_album_.clear();
+	view_ = View{};
+	view_.section = name;
 	left_.set_visible_child(name);
 	// As on the web client, a section starts with the other two panes empty.
 	middle_.set_visible_child("albums");
@@ -501,6 +593,7 @@ void MainWindow::go(int depth)
 	{
 	strip_.slide_to(depth);
 	update_back();
+	save_view();
 	}
 
 void MainWindow::back()
@@ -577,6 +670,11 @@ void MainWindow::open_artist(const Artist& a)
 	{
 	middle_.set_visible_child("albums");
 	tracks_.clear();
+	view_.artist_id   = a.ref.id;
+	view_.artist_name = a.name;
+	view_.playlist_id.clear();
+	view_.album_id.clear();
+	view_.album_title.clear();
 	albums_.show_artist(api_, a);
 	go(1);
 	}
@@ -585,6 +683,9 @@ void MainWindow::open_album(const std::string& album_id, const std::string& play
 	{
 	if(album_id.empty() || !api_) return;
 	tracks_back_.clear();
+	expect_album_.clear();
+	view_.album_id = album_id;
+	view_.album_title.clear();
 	tracks_.show_album(api_, album_id, play_id);
 	go(2);
 	}
@@ -594,6 +695,19 @@ void MainWindow::album_loaded(const Album& a)
 	// An album opened from a search, a recent play or the player bar brings
 	// its artist's albums along, so the middle pane is not left empty or
 	// showing something unrelated.
+	if(!expect_album_.empty()) {
+		bool same = a.title==expect_album_;
+		expect_album_.clear();
+		// The id now names another album: the library changed since.
+		if(!same) {
+			tracks_.clear();
+			view_.album_id.clear();
+			go(0);
+			return;
+			}
+		}
+	view_.album_title = a.title;
+	save_view();
 	tracks_back_ = a.artist;
 	update_back();
 	if(a.artist_id.empty()) return;

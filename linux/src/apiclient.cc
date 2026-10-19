@@ -10,6 +10,8 @@
 
 #include <cstdlib>
 #include <iostream>
+#include <map>
+#include <memory>
 #include <stdexcept>
 
 namespace {
@@ -38,6 +40,24 @@ namespace {
 		auto slash = url.find('/', scheme_end==std::string::npos ? 0 : scheme_end+3);
 		origin = url.substr(0, slash);
 		path   = slash==std::string::npos ? "/" : url.substr(slash);
+		}
+
+	// One kept-alive connection per server and worker thread, so a screenful
+	// of covers does not open a connection, and a TLS session, each. httplib
+	// reconnects by itself when the server has closed one meanwhile; after a
+	// failure the slot is emptied, for a clean start next time.
+	std::unique_ptr<httplib::Client>& client_for(const std::string& origin)
+		{
+		thread_local std::map<std::string, std::unique_ptr<httplib::Client>> clients;
+		auto& cli = clients[origin];
+		if(!cli) {
+			cli = std::make_unique<httplib::Client>(origin);
+			cli->set_connection_timeout(5);
+			cli->set_read_timeout(20);
+			cli->set_follow_location(true);
+			cli->set_keep_alive(true);
+			}
+		return cli;
 		}
 }
 
@@ -101,15 +121,13 @@ ApiClient::Fetch ApiClient::get_if_changed(const std::string& url, const std::st
 	std::string origin, path;
 	split_url(url, origin, path);
 	try {
-		httplib::Client cli(origin);
-		cli.set_connection_timeout(5);
-		cli.set_read_timeout(20);
-		cli.set_follow_location(true);
+		auto& cli = client_for(origin);
 		httplib::Headers headers = {{"User-Agent", "gaindrive-player/" GAINDRIVE_VERSION}};
 		if(!etag.empty()) headers.emplace("If-None-Match", etag);
-		auto res = cli.Get(path, headers);
+		auto res = cli->Get(path, headers);
 		if(!res) {
 			f.error = httplib::to_string(res.error());
+			cli.reset();
 			return f;
 			}
 		f.status = res->status;

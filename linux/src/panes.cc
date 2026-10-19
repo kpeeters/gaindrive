@@ -2,6 +2,7 @@
 #include "apiclient.hh"
 #include "coverstore.hh"
 
+#include <gtkmm/version.h>
 #include <gtkmm/gestureclick.h>
 #include <gtkmm/listitem.h>
 #include <gtkmm/signallistitemfactory.h>
@@ -316,6 +317,48 @@ void Pane::set_rows(const std::vector<Glib::RefPtr<ListRow>>& rows)
 	selection_->unselect_all();
 	store_->splice(0, store_->get_n_items(), rows);
 	scroll_.get_vadjustment()->set_value(0);
+	// An empty list is a pane being cleared before its load.
+	if(restore_match_ && !rows.empty()) apply_restore();
+	}
+
+void Pane::restore(std::function<bool(const ListRow&)> match, std::function<void(bool)> done)
+	{
+	restore_match_ = std::move(match);
+	restore_done_  = std::move(done);
+	if(store_->get_n_items()>0) apply_restore();
+	}
+
+void Pane::cancel_restore()
+	{
+	restore_match_ = nullptr;
+	restore_done_  = nullptr;
+	}
+
+bool Pane::restoring() const
+	{
+	return bool(restore_match_);
+	}
+
+void Pane::apply_restore()
+	{
+	// Taken first: selecting activates the row, which may start another
+	// restore elsewhere, or here.
+	auto match = std::move(restore_match_);
+	auto done  = std::move(restore_done_);
+	cancel_restore();
+	for(guint i=0; i<store_->get_n_items(); ++i) {
+		auto row = store_->get_item(i);
+		if(!match(*row)) continue;
+		// Before the selection, so a restore the next pane is to make is
+		// already waiting when this row's activation saves the view.
+		if(done) done(true);
+		selection_->set_selected(i);
+#if GTKMM_CHECK_VERSION(4,12,0)
+		list_.scroll_to(i, Gtk::ListScrollFlags::NONE);
+#endif
+		return;
+		}
+	if(done) done(false);
 	}
 
 void Pane::bind_song_hit(RowWidget& w, const Song& s, const std::string& trail)

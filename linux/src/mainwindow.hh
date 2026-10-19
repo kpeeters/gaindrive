@@ -63,6 +63,9 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void set_narrow(bool narrow);
 		// One pane back in a narrow strip.
 		void back();
+		// The last view, kept in view.json and reopened at login.
+		void save_view();
+		void restore_view();
 		// Shows pane `depth` and puts the back links right.
 		void go(int depth);
 		void update_back();
@@ -98,9 +101,6 @@ class MainWindow : public Gtk::ApplicationWindow {
 		// The panes, or a film in their place.
 		Gtk::Stack                 content_;
 		VideoView                  video_;
-		// Three columns, as on the web client: a section, what was picked in
-		// it, and an album's tracks; fewer in a smaller window.
-		PaneStrip                  strip_;
 		Gtk::Stack                 left_, middle_;
 		ArtistPane                 artists_;
 		PlaylistsPane              playlists_;
@@ -111,6 +111,10 @@ class MainWindow : public Gtk::ApplicationWindow {
 		PlaylistPane               playlist_;
 		SettingsPage               settings_page_;
 		TrackPane                  tracks_;
+		// Three columns, as on the web client: a section, what was picked in
+		// it, and an album's tracks; fewer in a smaller window. After the
+		// panes, so it goes first and unparents them while they still exist.
+		PaneStrip                  strip_;
 		PlayerBar                  bar_;
 		// The sections, below the bar, in place of the sidebar when narrow.
 		Gtk::Box                   tabs_;
@@ -118,6 +122,20 @@ class MainWindow : public Gtk::ApplicationWindow {
 		bool                       narrow_=false;
 		// What the track pane's back link names: the album's artist.
 		std::string                tracks_back_;
+		// What is open, as reopened at the next start: each item by id and
+		// name, since a rescan can hand an id to something else.
+		struct View {
+			std::string section="library";
+			std::string artist_id, artist_name;
+			std::string playlist_id, playlist_name;
+			std::string settings;
+			std::string album_id, album_title;
+		};
+		View                       view_;
+		// Set while an album reopens by id alone: the title it must have.
+		std::string                expect_album_;
+		// While restore_view() runs, before its restores are queued.
+		bool                       restoring_view_=false;
 		// Last, so it goes first, before what it reports on.
 		std::unique_ptr<Mpris>     mpris_;
 };

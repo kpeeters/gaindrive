@@ -42,7 +42,7 @@ PaneStrip::PaneStrip()
 
 PaneStrip::~PaneStrip()
 	{
-	if(tick_id_) remove_tick_callback(tick_id_);
+	if(tick_id_ && gobj()) remove_tick_callback(tick_id_);
 	for(auto p: panes_)
 		p->unparent();
 	}

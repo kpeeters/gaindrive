@@ -20,7 +20,8 @@ class WorkPool;
 // phones. Main thread only; fetching and decoding happen on the pool.
 class CoverStore {
 	public:
-		explicit CoverStore(WorkPool& pool);
+		CoverStore();
+		~CoverStore();
 
 		// Clears the memory cache too: covers are keyed by server, but a new
 		// login may be the same server with a different account.
@@ -29,8 +30,9 @@ class CoverStore {
 		// The texture if it is in memory. Otherwise null, a fetch is started,
 		// and signal_ready fires with the same key once it has landed.
 		// `index` picks one of an album's further images (getAlbumImages).
+		// With `fetch` false, only what is in memory; nothing is started.
 		Glib::RefPtr<Gdk::Texture> get(const std::string& cover_id, int px, std::string& key,
-		                               int index=0);
+		                               int index=0, bool fetch=true);
 
 		sigc::signal<void(const std::string& key, const Glib::RefPtr<Gdk::Texture>&)> signal_ready;
 		// A fetch that failed but may work later: a portrait or online cover
@@ -45,7 +47,9 @@ class CoverStore {
 			std::list<std::string>::iterator age;
 		};
 
-		WorkPool&                              pool_;
+		// Its own threads, apart from the API calls': a screenful of covers
+		// queued ahead of getAlbum kept a reopened album's tracks waiting.
+		std::unique_ptr<WorkPool>              pool_;
 		std::shared_ptr<ApiClient>             api_;
 		std::unordered_map<std::string, Entry> memory_;
 		std::list<std::string>                 ages_;      // most recent first
@@ -65,6 +69,10 @@ class CoverStore {
 // was last asked for and ignores any other that arrives.
 // A cover that is not there yet is asked for again every 15 seconds for up to
 // ten minutes while it is on screen, as the web client does.
+// Inside a scrolled view, nothing is fetched until the image is within its
+// visible area: a ListView keeps up to 200 rows bound, not just those shown,
+// and an artist's 200 albums then all fetched their covers at once, ahead of
+// the album actually opened.
 class CoverImage : public Gtk::Image {
 	public:
 		CoverImage(CoverStore& store, int css_px);
@@ -74,6 +82,10 @@ class CoverImage : public Gtk::Image {
 
 	private:
 		void fetch();
+		// Waits for the image to scroll into view, then fetches.
+		void watch();
+		void stop_watching();
+		bool on_screen() const;
 		void ready(const std::string& key, const Glib::RefPtr<Gdk::Texture>& tex);
 		void later(const std::string& key);
 
@@ -83,4 +95,7 @@ class CoverImage : public Gtk::Image {
 		int              index_=0;
 		unsigned         tries_=0;
 		sigc::connection retry_;
+		Gtk::Widget     *scrolled_=nullptr;
+		sigc::connection scroll_watch_, size_watch_;
+		guint            tick_=0;
 };

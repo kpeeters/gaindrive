@@ -279,6 +279,16 @@ void SearchPane::clear()
 	set_title("Search");
 	}
 
+std::string SearchPane::query() const
+	{
+	return entry_.get_text();
+	}
+
+void SearchPane::set_query(const std::string& q)
+	{
+	entry_.set_text(q);
+	}
+
 void SearchPane::focus_entry()
 	{
 	entry_.grab_focus();
