@@ -56,6 +56,8 @@ add_library(gdshared STATIC
 	${GD_ROOT}/src/stamp.cc
 	${GD_ROOT}/src/jsonread.cc
 	${GD_ROOT}/src/md5.cc
+	${GD_ROOT}/src/textutil.cc
+	${GD_ROOT}/src/wiimeq.cc
 	${GD_ROOT}/third_party/httplib.cc
 )
 target_include_directories(gdshared PUBLIC
@@ -128,9 +130,11 @@ add_executable(gaindrive-player
 	src/serverconfig.cc
 	src/settings.cc
 	src/settingspage.cc
+	src/tunebutton.cc
 	src/uithread.cc
 	src/videocodecs.cc
 	src/videoview.cc
+	src/wiimpanel.cc
 	src/workpool.cc
 	${CMAKE_CURRENT_BINARY_DIR}/icons.c
 )

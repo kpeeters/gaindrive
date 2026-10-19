@@ -15,6 +15,7 @@
 #include <gtkmm/headerbar.h>
 #include <gtkmm/label.h>
 #include <gtkmm/listbox.h>
+#include <gtkmm/overlay.h>
 #include <gtkmm/revealer.h>
 #include <gtkmm/stack.h>
 
@@ -51,6 +52,7 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void play(const std::vector<Song>& songs, size_t index);
 		void star(ListRow::Kind kind, const ItemRef& ref, bool on);
 		void close_video();
+		void install_tune_closers();
 		void fullscreen_changed();
 		std::vector<Pane*> all_panes();
 
@@ -71,6 +73,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		Gtk::Revealer              notice_;
 		Gtk::Label                 notice_text_;
 		sigc::connection           notice_timer_;
+		// main_ with the volume and equaliser card floating over it.
+		Gtk::Overlay               body_;
 		Gtk::Box                   main_;
 		Gtk::Box                   sidebar_;
 		Gtk::ListBox               nav_;

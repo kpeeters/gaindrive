@@ -9,7 +9,10 @@
 #include <chrono>
 #include <memory>
 
+struct AppSettings;
 class CastButton;
+class TuneButton;
+class TunePanel;
 class CoverImage;
 class CoverStore;
 class Playback;
@@ -18,8 +21,13 @@ class Playback;
 // previous / play / next, a seek slider and the time.
 class PlayerBar : public Gtk::Box {
 	public:
-		PlayerBar(CoverStore& covers, Playback& playback);
+		PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settings);
 		~PlayerBar() override;
+
+		// The volume and equaliser card, for the window to float above the
+		// bar, and the button that opens it.
+		TunePanel&  tune_panel();
+		TuneButton& tune_button();
 
 		// The cover was clicked: open the playing album.
 		sigc::signal<void()> signal_cover;
@@ -37,6 +45,7 @@ class PlayerBar : public Gtk::Box {
 		Gtk::Scale                  seek_;
 		Gtk::Label                  time_;
 		std::unique_ptr<CastButton> cast_;
+		std::unique_ptr<TuneButton> tune_;
 		sigc::connection            timer_;
 		// The slider is not moved under a hand that is dragging it.
 		std::chrono::steady_clock::time_point user_moved_;

@@ -51,6 +51,14 @@ class Playback {
 		// Moves what is playing to a receiver, and back.
 		void        cast_to(size_t device);
 		void        stop_casting();
+		// A film is being cast and the receiver shows its picture, so it
+		// also draws the subtitles.
+		bool        cast_picture() const;
+
+		// The current film's subtitles: a 1-based track in getVideoInfo's
+		// order, or 0 for none. Sent to a receiver showing the picture, and
+		// declared in the next LOAD of this film.
+		void        set_caption(int track);
 
 		// Says "stopped" to the server, blocking; for when the window closes
 		// and the pool is about to drop anything queued.
@@ -67,6 +75,7 @@ class Playback {
 		void start(double offset=0);
 		void local_start(double offset);
 		void cast_start(double offset);
+		void cast_film(double offset);
 		void cast_ended();
 		void update_next();
 		void advanced();
@@ -83,6 +92,11 @@ class Playback {
 		Caster                     caster_;
 		// Bumped by each cast load, so a slow one that is overtaken is dropped.
 		unsigned                   cast_gen_=0;
+		// The film on the receiver is its soundtrack alone, piped from a
+		// timeOffset, so a seek reloads from there.
+		bool                       cast_soundtrack_=false;
+		std::string                caption_song_;
+		int                        caption_track_=0;
 		std::shared_ptr<ApiClient> api_;
 		std::vector<Song>          queue_;
 		long                       index_=-1;

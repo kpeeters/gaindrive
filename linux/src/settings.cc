@@ -20,16 +20,33 @@ void AppSettings::load()
 	auto fmt = jstr(j, "transcodeFormat");
 	for(const auto& f: transcode_formats)
 		if(fmt==f.param) format = fmt;
+	const auto& co = jsub(j, "castOriginal");
+	cast_original = co.is_boolean() && co.get<bool>();
 	const auto& sorts = jsub(j, "sortByName");
 	if(sorts.is_object())
 		for(const auto& [k, v]: sorts.items())
 			if(v.is_boolean()) sort_by_name[k] = v.get<bool>();
+	const auto& wiim = jsub(j, "wiimSlots");
+	if(wiim.is_object())
+		for(const auto& [dev, slots]: wiim.items()) {
+			if(!slots.is_object()) continue;
+			for(const auto& [name, curve]: slots.items()) {
+				if(!curve.is_array()) continue;
+				std::vector<int> bands;
+				for(const auto& v: curve)
+					if(v.is_number_integer()) bands.push_back(v.get<int>());
+				if(bands.size()==curve.size() && !bands.empty())
+					wiim_slots[dev][name] = bands;
+				}
+			}
 	}
 
 void AppSettings::save() const
 	{
 	write_config("settings.json", {
-		{"qualityCap", quality_cap}, {"transcodeFormat", format}, {"sortByName", sort_by_name}
+		{"qualityCap", quality_cap}, {"transcodeFormat", format},
+		{"castOriginal", cast_original}, {"sortByName", sort_by_name},
+		{"wiimSlots", wiim_slots}
 		});
 	}
 

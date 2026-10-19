@@ -4,6 +4,7 @@
 #include "settings.hh"
 
 #include <gtkmm/button.h>
+#include <gtkmm/checkbutton.h>
 #include <gtkmm/stringlist.h>
 
 SettingsPage::SettingsPage(AppSettings& settings, const std::vector<ServerConfig>& servers)
@@ -85,6 +86,16 @@ void SettingsPage::show_playback()
 	format_row->set_visible(settings_.quality_cap!=0);
 	add_label("A file that fits under the limit is sent as it is; anything else is "
 	          "converted. Takes effect on the next track.", "dim-label");
+
+	auto cast_orig = Gtk::make_managed<Gtk::CheckButton>("Cast at original quality");
+	cast_orig->set_active(settings_.cast_original);
+	content_.append(*cast_orig);
+	add_label("A receiver fetches from the server itself, so the limit above need not "
+	          "apply to it. A file it cannot play is sent as FLAC either way.", "dim-label");
+	cast_orig->signal_toggled().connect([this, cast_orig]() {
+		settings_.cast_original = cast_orig->get_active();
+		settings_.save();
+		});
 
 	quality->property_selected().signal_changed().connect([this, quality, format_row]() {
 		guint i = quality->get_selected();

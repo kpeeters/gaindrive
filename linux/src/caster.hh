@@ -38,13 +38,32 @@ class Caster {
 		void connect(size_t index);
 		void disconnect();
 		bool active() const;
+		// The receiver connected to, while active().
+		const Device& device() const;
 		const std::string& device_name() const;
+		// A WiiM carries its own equaliser beside the Cast receiver.
+		bool is_wiim() const;
+
+		struct Load {
+			std::string      url, mime;
+			double           duration=0;
+			// Where in the stream to begin, and where in the song the stream
+			// itself begins: a soundtrack piped from a timeOffset starts
+			// part way in. Positions here are always the song's.
+			double           start=0, base=0;
+			nlohmann::json   metadata;
+			// Subtitle tracks, declared in every film LOAD, since a track the
+			// LOAD did not declare cannot be turned on later.
+			nlohmann::json   tracks=nlohmann::json::array();
+			std::vector<int> active_tracks;
+		};
 
 		// A load is on its way: from here on, what the receiver says about the
 		// media it is playing now is stale, its end included.
 		void prepare(double start);
-		void load(const std::string& url, const std::string& mime, double duration,
-		          double start, const nlohmann::json& metadata);
+		void load(const Load& l);
+		// Turns subtitles on (one trackId) or off (none) without a reload.
+		void set_tracks(const std::vector<int>& track_ids);
 		void pause();
 		void resume();
 		void seek(double seconds);
@@ -83,7 +102,7 @@ class Caster {
 		std::vector<Device>          devices_;
 		bool                         discovering_=false;
 		bool                         active_=false;
-		std::string                  device_name_;
+		Device                       device_;
 
 		// What the receiver last said, and when, to move the position on
 		// between its reports.
@@ -95,6 +114,7 @@ class Caster {
 		int                          notice_seq_=0;
 		// Where the current load should start; sent as a SEEK once it plays.
 		double                       seek_to_=0;
+		double                       base_=0;
 		bool                         vol_known_=false, vol_fixed_=false;
 		float                        vol_=0;
 

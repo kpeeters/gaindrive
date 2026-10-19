@@ -64,6 +64,9 @@ Song parse_song(const std::string& server, const nlohmann::json& j)
 	s.video_codec          = jstr(j, "videoCodec");
 	s.audio_codec          = jstr(j, "audioCodec");
 	s.transcoded_suffix    = jstr(j, "transcodedSuffix");
+	s.cast_direct          = jsub(j, "castDirect").is_boolean() && jsub(j, "castDirect").get<bool>();
+	s.soundtrack_format    = jstr(j, "soundtrackFormat");
+	s.soundtrack_content_type = jstr(j, "soundtrackContentType");
 	return s;
 	}
 

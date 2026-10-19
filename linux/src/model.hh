@@ -58,6 +58,12 @@ struct Song {
 	std::string video_codec;
 	std::string audio_codec;
 	std::string transcoded_suffix;
+	// Whether a Cast receiver is sent the stored file rather than HLS.
+	bool        cast_direct=false;
+	// The format= that copies the soundtrack out untouched, and what that
+	// arrives as; empty when it would have to be encoded.
+	std::string soundtrack_format;
+	std::string soundtrack_content_type;
 };
 
 struct Playlist {

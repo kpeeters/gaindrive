@@ -5,6 +5,7 @@
 #include "workpool.hh"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <iostream>
 
@@ -78,7 +79,7 @@ void Caster::connect(size_t index)
 	dev.port         = d.port;
 	dev.capabilities = d.capabilities;
 	active_      = true;
-	device_name_ = d.name;
+	device_      = d;
 	state_       = "IDLE";
 	started_     = false;
 	session_     = 0;
@@ -106,9 +107,22 @@ bool Caster::active() const
 	return active_;
 	}
 
+const Caster::Device& Caster::device() const
+	{
+	return device_;
+	}
+
 const std::string& Caster::device_name() const
 	{
-	return device_name_;
+	return device_.name;
+	}
+
+bool Caster::is_wiim() const
+	{
+	// By model, as the web client tells: "WiiM Amp", "WiiM Pro Plus".
+	auto m = device_.model;
+	std::transform(m.begin(), m.end(), m.begin(), [](unsigned char c) { return std::tolower(c); });
+	return active_ && m.find("wiim")!=std::string::npos;
 	}
 
 void Caster::prepare(double start)
@@ -121,21 +135,32 @@ void Caster::prepare(double start)
 	at_      = std::chrono::steady_clock::now();
 	}
 
-void Caster::load(const std::string& url, const std::string& mime, double duration,
-                  double start, const nlohmann::json& metadata)
+void Caster::load(const Load& l)
 	{
 	if(!active_) return;
 	CastManager::LoadRequest req;
-	req.url          = url;
-	req.mime         = mime;
-	req.duration     = duration;
-	req.metadata     = metadata;
-	prepare(start);
+	req.url              = l.url;
+	req.mime             = l.mime;
+	req.duration         = l.duration;
+	req.metadata         = l.metadata;
+	req.tracks           = l.tracks;
+	req.active_track_ids = l.active_tracks;
+	prepare(l.base + l.start);
+	base_ = l.base;
 	// Not as the LOAD's currentTime: a receiver handed an unindexed FLAC
 	// with one plays from the start, or fails with error 102. A SEEK once
 	// it plays is answered with a Range request, which works.
-	seek_to_ = start;
+	seek_to_ = l.start;
 	queue_->submit([cm=cm_, req]() { cm->load(req); });
+	}
+
+void Caster::set_tracks(const std::vector<int>& track_ids)
+	{
+	if(!active_) return;
+	queue_->submit([cm=cm_, track_ids]() {
+		if(!cm->cast_tracks(track_ids))
+			std::cout << stamp() << "Cast: no media session to set subtitles on" << std::endl;
+		});
 	}
 
 void Caster::pause()
@@ -163,12 +188,13 @@ void Caster::seek(double seconds)
 	if(!active_) return;
 	time_ = seconds;
 	at_   = std::chrono::steady_clock::now();
+	double in_stream = std::max(0.0, seconds - base_);
 	// Before the load plays, the seek it is waiting to send is this one.
 	if(seek_to_>0) {
-		seek_to_ = seconds;
+		seek_to_ = in_stream;
 		return;
 		}
-	queue_->submit([cm=cm_, seconds]() { cm->cast_seek(float(seconds)); });
+	queue_->submit([cm=cm_, in_stream]() { cm->cast_seek(float(in_stream)); });
 	}
 
 bool Caster::playing() const
@@ -264,7 +290,7 @@ void Caster::received(const Snapshot& s)
 	if(s.session!=0 && s.session==stale_session_) return;
 	session_ = s.session;
 	bool was_playing = playing();
-	time_ = seek_to_>0 ? seek_to_ : s.time;
+	time_ = base_ + (seek_to_>0 ? seek_to_ : s.time);
 	at_   = std::chrono::steady_clock::now();
 	if(s.state=="IDLE") {
 		// A fresh load reads IDLE with no reason until the receiver starts;
@@ -293,7 +319,7 @@ void Caster::received(const Snapshot& s)
 		if(seek_to_>0 && s.state=="PLAYING") {
 			double to = seek_to_;
 			seek_to_ = 0;
-			seek(to);
+			seek(base_ + to);
 			}
 		}
 	state_ = s.state;

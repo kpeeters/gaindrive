@@ -1,5 +1,6 @@
 #include "playerbar.hh"
 #include "castbutton.hh"
+#include "tunebutton.hh"
 #include "coverstore.hh"
 #include "playback.hh"
 
@@ -10,13 +11,14 @@ namespace {
 	const auto drag_grace = std::chrono::milliseconds(600);
 }
 
-PlayerBar::PlayerBar(CoverStore& covers, Playback& playback)
+PlayerBar::PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settings)
 	: Gtk::Box(Gtk::Orientation::HORIZONTAL, 10),
 	  playback_(playback),
 	  cover_(std::make_unique<CoverImage>(covers, 48)),
 	  info_(Gtk::Orientation::VERTICAL),
 	  seek_(Gtk::Orientation::HORIZONTAL),
-	  cast_(std::make_unique<CastButton>(playback))
+	  cast_(std::make_unique<CastButton>(playback)),
+	  tune_(std::make_unique<TuneButton>(playback, settings))
 	{
 	add_css_class("player-bar");
 	append(*cover_);
@@ -60,6 +62,7 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback)
 	time_.add_css_class("dim-label");
 	append(time_);
 	append(*cast_);
+	append(*tune_);
 
 	prev_.signal_clicked().connect([this]() { playback_.prev(); });
 	play_.signal_clicked().connect([this]() { playback_.toggle(); });
@@ -80,6 +83,16 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback)
 PlayerBar::~PlayerBar()
 	{
 	timer_.disconnect();
+	}
+
+TunePanel& PlayerBar::tune_panel()
+	{
+	return tune_->panel();
+	}
+
+TuneButton& PlayerBar::tune_button()
+	{
+	return *tune_;
 	}
 
 void PlayerBar::track_changed()

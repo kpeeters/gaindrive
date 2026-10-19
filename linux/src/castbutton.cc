@@ -1,13 +1,10 @@
 #include "castbutton.hh"
 #include "playback.hh"
 
-#include <cmath>
-
 CastButton::CastButton(Playback& playback)
 	: playback_(playback),
 	  box_(Gtk::Orientation::VERTICAL, 8),
 	  searching_(Gtk::Orientation::HORIZONTAL, 8),
-	  volume_(Gtk::Orientation::HORIZONTAL, 6),
 	  searching_text_("Looking for receivers…"),
 	  stop_("Stop casting")
 	{
@@ -33,23 +30,6 @@ CastButton::CastButton(Playback& playback)
 		});
 	box_.append(list_);
 
-	// Steps of one percent only: a slider on a remote amplifier is one
-	// careless drag away from full volume.
-	down_.set_icon_name("gd-volume-down-symbolic");
-	down_.set_tooltip_text("Quieter");
-	up_.set_icon_name("gd-volume-up-symbolic");
-	up_.set_tooltip_text("Louder");
-	level_.add_css_class("numeric");
-	level_.set_width_chars(5);
-	for(auto b: {&down_, &up_}) b->add_css_class("flat");
-	volume_.append(down_);
-	volume_.append(level_);
-	volume_.append(up_);
-	volume_.set_halign(Gtk::Align::CENTER);
-	box_.append(volume_);
-	down_.signal_clicked().connect([this]() { playback_.caster().volume_step(-1); });
-	up_.signal_clicked().connect([this]() { playback_.caster().volume_step(1); });
-
 	stop_.signal_clicked().connect([this]() {
 		popover_.popdown();
 		playback_.stop_casting();
@@ -65,8 +45,10 @@ CastButton::CastButton(Playback& playback)
 	auto& caster = playback_.caster();
 	caster.signal_devices.connect(sigc::mem_fun(*this, &CastButton::rebuild));
 	caster.signal_session.connect(sigc::mem_fun(*this, &CastButton::session_changed));
-	caster.signal_volume.connect(sigc::mem_fun(*this, &CastButton::volume_changed));
 	session_changed();
+	// Now rather than on the first open, so the popover has receivers to
+	// show at once; opening it scans again, for ones that came and went.
+	caster.discover();
 	}
 
 void CastButton::opened()
@@ -81,7 +63,8 @@ void CastButton::rebuild()
 	auto& caster = playback_.caster();
 	bool active = caster.active();
 	heading_.set_text(active ? "Casting to " + caster.device_name() : "Cast to");
-	searching_.set_visible(caster.discovering());
+	// The row always keeps its line, the stopped spinner included, so the
+	// popover does not change height when a scan ends.
 	if(caster.discovering()) spinner_.start();
 	else                     spinner_.stop();
 
@@ -105,14 +88,13 @@ void CastButton::rebuild()
 		list_.append(*row);
 		}
 	list_.set_visible(!caster.devices().empty());
-	if(!caster.discovering() && caster.devices().empty()) {
-		searching_.set_visible(true);
-		searching_text_.set_text("No receivers found.");
-		}
-	else
+	if(caster.discovering())
 		searching_text_.set_text("Looking for receivers…");
+	else if(caster.devices().empty())
+		searching_text_.set_text("No receivers found.");
+	else
+		searching_text_.set_text("");
 	stop_.set_visible(active);
-	volume_changed();
 	}
 
 void CastButton::session_changed()
@@ -122,11 +104,4 @@ void CastButton::session_changed()
 	if(active) add_css_class("casting");
 	else       remove_css_class("casting");
 	rebuild();
-	}
-
-void CastButton::volume_changed()
-	{
-	auto& caster = playback_.caster();
-	volume_.set_visible(caster.active() && caster.volume_known() && !caster.volume_fixed());
-	level_.set_text(std::to_string(std::lround(caster.volume()*100)) + "%");
 	}

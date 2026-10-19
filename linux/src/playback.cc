@@ -9,6 +9,8 @@
 
 #include <glibmm/main.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <iostream>
 
@@ -164,7 +166,11 @@ void Playback::seek(double seconds)
 	// The receiver fetches a converted track from the server's cache, whole,
 	// so it seeks in anything.
 	if(caster_.active()) {
-		caster_.seek(seconds);
+		// A receiver cannot seek in a pipe.
+		if(s->is_video && cast_soundtrack_)
+			cast_film(seconds);
+		else
+			caster_.seek(seconds);
 		return;
 		}
 	// A film is either the stored file or HLS, and both seek.
@@ -283,22 +289,39 @@ void Playback::local_start(double offset)
 		player_.play_uri(stream_url(*s), offset, s->is_video);
 	}
 
+bool Playback::cast_picture() const
+	{
+	const Song *s = current();
+	return caster_.active() && s && s->is_video && !cast_soundtrack_;
+	}
+
+void Playback::set_caption(int track)
+	{
+	const Song *s = current();
+	if(!s || !s->is_video) return;
+	caption_song_  = s->ref.id;
+	caption_track_ = track;
+	if(cast_picture())
+		caster_.set_tracks(track>0 ? std::vector<int>{track} : std::vector<int>{});
+	}
+
 void Playback::cast_start(double offset)
 	{
 	const Song *s = current();
 	if(!s || !api_) return;
 	if(s->is_video) {
-		signal_error.emit("Casting films is not supported yet.");
-		signal_state.emit(false);
+		cast_film(offset);
 		return;
 		}
+	cast_soundtrack_ = false;
 	caster_.prepare(offset);
 	unsigned gen = ++cast_gen_;
 
 	Params p = {{"id", s->ref.id}};
 	std::string mime = s->content_type;
-	if(settings_.quality_cap>0) {
-		p.push_back({"maxBitRate", std::to_string(settings_.quality_cap)});
+	int cap = settings_.cast_original ? 0 : settings_.quality_cap;
+	if(cap>0) {
+		p.push_back({"maxBitRate", std::to_string(cap)});
 		p.push_back({"format", settings_.format});
 		p.push_back({"playable", "adts/aac,mp4/aac,mpeg/mp3,ogg/opus,ogg/vorbis"});
 		mime = mime_of_format(settings_.format);
@@ -350,7 +373,140 @@ void Playback::cast_start(double offset)
 				signal_state.emit(false);
 				return;
 				}
-			caster_.load(url, mime, duration, offset, meta);
+			Caster::Load l;
+			l.url      = url;
+			l.mime     = mime;
+			l.duration = duration;
+			l.start    = offset;
+			l.metadata = meta;
+			caster_.load(l);
+			});
+		});
+	}
+
+void Playback::cast_film(double offset)
+	{
+	const Song *s = current();
+	if(!s || !api_) return;
+	// Bit 0 of the receiver's `ca` record is video_out; one that does not
+	// say is taken to have a screen, as the server takes it. A WiiM has none.
+	int  ca      = caster_.device().capabilities;
+	bool picture = ca<0 || (ca & 1)!=0;
+	cast_soundtrack_ = !picture;
+	caster_.prepare(offset);
+	unsigned gen = ++cast_gen_;
+
+	Params p = {{"id", s->ref.id}};
+	std::string mime, endpoint = "stream";
+	const char *ext = ".view";
+	double base = 0;
+	if(picture) {
+		std::string suffix = s->suffix;
+		std::transform(suffix.begin(), suffix.end(), suffix.begin(),
+		               [](unsigned char c) { return std::tolower(c); });
+		// The file itself only when the server says a receiver plays it, and
+		// in a container a receiver is known to take; anything else, AV1
+		// included, as HLS, which a receiver seeks by segment. No format or
+		// cap: either would make the server send the soundtrack alone, or
+		// re-encode.
+		if(s->cast_direct && (suffix=="mp4" || suffix=="m4v" || suffix=="webm"))
+			mime = s->content_type;
+		else {
+			endpoint = "hls";
+			ext      = ".m3u8";
+			mime     = "application/x-mpegURL";
+			}
+		}
+	else {
+		bool copy = settings_.cast_original && !s->soundtrack_format.empty()
+		            && cast_plays(s->soundtrack_content_type);
+		if(copy) {
+			p.push_back({"format", s->soundtrack_format});
+			mime = s->soundtrack_content_type;
+			}
+		else if(settings_.cast_original) {
+			p.push_back({"format", "flac"});
+			mime = "audio/flac";
+			}
+		else {
+			// "Original" means the file as stored, which a soundtrack is
+			// not; the apps send AAC at 160 kbps then.
+			bool capped = settings_.quality_cap>0;
+			std::string fmt = capped ? settings_.format : "m4a";
+			p.push_back({"format", fmt});
+			p.push_back({"maxBitRate", std::to_string(capped ? settings_.quality_cap : 160)});
+			mime = mime_of_format(fmt);
+			}
+		// Always, 0 included: the server then pipes the soundtrack rather
+		// than building it whole first, which takes minutes for a film. A
+		// receiver cannot seek in a pipe, so a seek reloads from there.
+		base = std::floor(offset);
+		p.push_back({"timeOffset", std::to_string(long(base))});
+		}
+	p.push_back({"pace", "true"});
+
+	pool_.submit([this, api=api_, song=*s, p, mime, endpoint, ext, gen, offset, base, picture]() {
+		std::string token;
+		auto r = ApiClient::get_json(api->session(), "getCastToken", {{"id", song.ref.id}});
+		if(r.ok)
+			token = jstr(r.body, "castToken");
+		else
+			std::cout << stamp() << "Cast: no cast token (" << r.error
+			          << "); sending the account's credentials" << std::endl;
+		std::string url = api->cast_url(endpoint, p, token, ext);
+
+		// The grant covers this film's captions too.
+		nlohmann::json tracks = nlohmann::json::array();
+		if(picture) {
+			auto info = ApiClient::get_json(api->session(), "getVideoInfo", {{"id", song.ref.id}});
+			const auto& caps = jsub(jsub(info.body, "videoInfo"), "captions");
+			if(!info.ok)
+				std::cout << stamp() << "Cast: getVideoInfo failed (" << info.error
+				          << "); casting without subtitles" << std::endl;
+			else if(caps.is_array())
+				for(size_t i=0; i<caps.size(); ++i) {
+					const auto& c = caps[i];
+					std::string name = jstr(c, "name");
+					tracks.push_back({
+						{"trackId",          int(i+1)},
+						{"type",             "TEXT"},
+						{"subtype",          "SUBTITLES"},
+						{"trackContentId",   api->cast_url("getCaptions",
+						                       {{"id", song.ref.id}, {"captionId", jstr(c, "id")}}, token)},
+						{"trackContentType", "text/vtt"},
+						// Required for a subtitle track; getVideoInfo has
+						// none, and this is the code meaning exactly that.
+						{"language",         "und"},
+						{"name",             name.empty() ? "Subtitles" : name}
+						});
+					}
+			}
+
+		nlohmann::json meta;
+		if(picture)
+			meta = {{"metadataType", 1}, {"title", song.title}, {"subtitle", song.album}};
+		else
+			meta = {{"metadataType", 3}, {"title", song.title}, {"artist", song.artist},
+			        {"albumName", song.album}};
+		if(!token.empty() && !song.cover_art.empty())
+			meta["images"] = {{{"url", api->cast_url("getCoverArt",
+			                     {{"id", song.cover_art}, {"size", "600"}}, token)}}};
+
+		on_ui([this, url, mime, meta, tracks, gen, offset, base, picture,
+		       id=song.ref.id, duration=song.duration]() {
+			if(gen!=cast_gen_ || !caster_.active()) return;
+			Caster::Load l;
+			l.url      = url;
+			l.mime     = mime;
+			l.metadata = meta;
+			l.tracks   = tracks;
+			l.base     = base;
+			// A pipe starts where it was asked to, so nothing is left to seek.
+			l.start    = picture ? offset : 0;
+			l.duration = std::max(0.0, duration - base);
+			if(picture && caption_song_==id && caption_track_>0 && size_t(caption_track_)<=tracks.size())
+				l.active_tracks = {caption_track_};
+			caster_.load(l);
 			});
 		});
 	}

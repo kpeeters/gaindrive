@@ -43,6 +43,7 @@ ICONS = {
 	'captions':       ('closed_caption', False),
 	'fullscreen':     ('fullscreen',    False),
 	'fullscreen-exit': ('fullscreen_exit', False),
+	'equalizer':      ('graphic_eq',    False),
 }
 
 def glyphsets():

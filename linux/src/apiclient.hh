@@ -51,8 +51,10 @@ class ApiClient {
 		// account's credentials, which would let the receiver read the whole
 		// library for as long as the password stands. An empty token keeps
 		// the credentials, for a server without getCastToken.
+		// `ext` is ".m3u8" for an HLS playlist, which is how a receiver
+		// expects one to be spelled.
 		std::string cast_url(const std::string& endpoint, const Params& params,
-		                     const std::string& token) const;
+		                     const std::string& token, const char *ext=".view") const;
 
 		// Derives a fresh salt and token from the password, and proves them
 		// with ping and getUser before anything is stored. `done` is called on

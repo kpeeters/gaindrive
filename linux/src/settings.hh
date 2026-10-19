@@ -12,8 +12,15 @@ struct AppSettings {
 	// What a ceiling converts to when it has to. Kept across a spell on
 	// Original, as on the apps.
 	std::string format="opus";
+	// A receiver fetches from the server itself, so the ceiling need not
+	// apply to it. Off by default, as on the other clients.
+	bool        cast_original=false;
 	// Album order per section ("artists", "categories"): by name or by year.
 	std::map<std::string, bool> sort_by_name;
+	// WiiM equaliser curves saved here, by Cast device id (which survives a
+	// rename and a new address), then by name. Never on the device: its
+	// preset store has no documented write.
+	std::map<std::string, std::map<std::string, std::vector<int>>> wiim_slots;
 
 	void load();
 	void save() const;

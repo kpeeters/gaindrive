@@ -57,9 +57,9 @@ std::string ApiClient::url(const std::string& endpoint, const Params& params) co
 	}
 
 std::string ApiClient::cast_url(const std::string& endpoint, const Params& params,
-                                const std::string& token) const
+                                const std::string& token, const char *ext) const
 	{
-	return session_->base_url + "/rest/" + endpoint + ".view?" + query(*session_, params, token);
+	return session_->base_url + "/rest/" + endpoint + ext + "?" + query(*session_, params, token);
 	}
 
 void ApiClient::call(const std::string& endpoint, Params params,

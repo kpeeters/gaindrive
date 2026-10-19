@@ -126,6 +126,11 @@ VideoView::VideoView(Playback& playback)
 	missing_.set_valign(Gtk::Align::CENTER);
 	add_overlay(missing_);
 
+	casting_.add_css_class("caption");
+	casting_.set_valign(Gtk::Align::CENTER);
+	casting_.set_visible(false);
+	add_overlay(casting_);
+
 	caption_.add_css_class("caption");
 	caption_.set_wrap(true);
 	caption_.set_justify(Gtk::Justification::CENTER);
@@ -303,6 +308,9 @@ void VideoView::select_caption(int row)
 	{
 	if(auto r = captions_list_.get_row_at_index(row))
 		captions_list_.select_row(*r);
+	// Remembered there for a receiver, which draws its own; the cues are
+	// still fetched, for when the film comes back here.
+	playback_.set_caption(row);
 	cues_.clear();
 	caption_.set_visible(false);
 	if(row<=0 || size_t(row)>caption_ids_.size() || !api_) return;
@@ -403,6 +411,16 @@ bool VideoView::tick()
 	{
 	if(!get_mapped()) return true;
 	update_chapter();
+	auto& caster = playback_.caster();
+	bool cast = caster.active();
+	picture_.set_opacity(cast ? 0 : 1);
+	missing_.set_visible(!cast && playback_.paintable()==nullptr);
+	casting_.set_visible(cast);
+	if(cast) casting_.set_text("Playing on " + caster.device_name());
+	if(playback_.cast_picture()) {
+		caption_.set_visible(false);
+		return true;
+		}
 	double pos = playback_.position();
 	const Cue *now = nullptr;
 	for(const auto& c: cues_)

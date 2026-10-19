@@ -72,6 +72,8 @@ class VideoView : public Gtk::Overlay {
 
 		Gtk::Picture   picture_;
 		Gtk::Label     missing_;
+		// In place of the picture while a receiver plays the film.
+		Gtk::Label     casting_;
 		Gtk::Label     caption_;
 		Gtk::Revealer  top_, bottom_;
 		Gtk::Box       bar_;

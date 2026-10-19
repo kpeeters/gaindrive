@@ -5,12 +5,15 @@
 #include "playlistpicker.hh"
 #include "secretstore.hh"
 #include "stamp.hh"
+#include "tunebutton.hh"
 #include "uithread.hh"
 
 #include <giomm/simpleaction.h>
 #include <glibmm/main.h>
 #include <gtkmm/alertdialog.h>
 #include <gtkmm/cssprovider.h>
+#include <gtkmm/eventcontrollerkey.h>
+#include <gtkmm/gestureclick.h>
 #include <gtkmm/image.h>
 #include <nlohmann/json.hpp>
 
@@ -46,8 +49,17 @@ namespace {
 		.player-bar > button > image,
 		.player-bar > menubutton > button image { -gtk-icon-size: 48px; }
 		.player-bar .casting image { color: @gd_red; }
+		.tune-panel {
+			padding: 10px 12px;
+			background-color: @theme_bg_color;
+			border: 1px solid alpha(currentColor, 0.15);
+			border-radius: 6px;
+			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+		}
 		.player-bar scale highlight,
-		.player-bar scale slider { background: @gd_red; }
+		.player-bar scale slider,
+		.tune-panel scale highlight,
+		.tune-panel scale slider { background: @gd_red; }
 		.nav image {
 			-gtk-icon-size: 24px;
 			color: @gd_red;
@@ -105,7 +117,7 @@ MainWindow::MainWindow()
 	  playlist_(covers_),
 	  settings_page_(settings_, servers_),
 	  tracks_(covers_),
-	  bar_(covers_, playback_)
+	  bar_(covers_, playback_, settings_)
 	{
 	ui_init();
 	settings_.load();
@@ -170,8 +182,16 @@ MainWindow::MainWindow()
 	content_.set_hexpand(true);
 	main_.append(content_);
 	main_.set_vexpand(true);
-	browse_.append(main_);
+	body_.set_child(main_);
+	// Bottom right, just above the button that opens it, as on the web.
+	auto& tune = bar_.tune_panel();
+	tune.set_margin_end(16);
+	tune.set_margin_bottom(6);
+	body_.add_overlay(tune);
+	body_.set_vexpand(true);
+	browse_.append(body_);
 	browse_.append(bar_);
+	install_tune_closers();
 
 	stack_.add(login_, "login");
 	stack_.add(browse_, "browse");
@@ -234,7 +254,9 @@ MainWindow::MainWindow()
 		});
 	playback_.signal_started.connect([this]() {
 		const Song *s = playback_.current();
-		if(s && s->is_video && !playback_.caster().active()) {
+		// While casting too: the controls, chapters and subtitles stay here,
+		// and a soundtrack-only receiver leaves the subtitles to us.
+		if(s && s->is_video) {
 			video_.show_film(*s, api_);
 			content_.set_visible_child("video");
 			video_.grab_focus();
@@ -509,6 +531,38 @@ void MainWindow::star(ListRow::Kind kind, const ItemRef& ref, bool on)
 		for(auto pane: all_panes())
 			pane->star_changed(kind, ref, on);
 		});
+	}
+
+void MainWindow::install_tune_closers()
+	{
+	// The card closes as the web client's panel does: its button, Escape, or
+	// a click anywhere else. Not claimed, so that click still does its job.
+	auto close = [this]() { bar_.tune_button().set_active(false); };
+	auto outside = Gtk::GestureClick::create();
+	outside->set_button(0);
+	outside->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+	outside->signal_pressed().connect([close](int, double, double) { close(); });
+	main_.add_controller(outside);
+	auto in_bar = Gtk::GestureClick::create();
+	in_bar->set_button(0);
+	in_bar->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+	in_bar->signal_pressed().connect([this, close](int, double x, double y) {
+		// The button toggles the card itself.
+		auto& button = bar_.tune_button();
+		auto *w = bar_.pick(x, y);
+		if(w && (w==&button || w->is_ancestor(button))) return;
+		close();
+		});
+	bar_.add_controller(in_bar);
+	// Bubbling, so a list the card's preset menu has open takes its Escape
+	// first.
+	auto keys = Gtk::EventControllerKey::create();
+	keys->signal_key_pressed().connect([this, close](guint keyval, guint, Gdk::ModifierType) {
+		if(keyval!=GDK_KEY_Escape || !bar_.tune_button().get_active()) return false;
+		close();
+		return true;
+		}, false);
+	add_controller(keys);
 	}
 
 void MainWindow::close_video()

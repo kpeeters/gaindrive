@@ -10,9 +10,9 @@
 
 class Playback;
 
-// The cast button at the end of the player bar, as on the web client. Its
-// popover lists the receivers on the network, and while casting offers the
-// receiver's volume in single steps and a way back.
+// The cast button in the player bar, as on the web client. Its popover lists
+// the receivers on the network, and while casting offers a way back. The
+// receiver's volume and equaliser are behind TuneButton.
 class CastButton : public Gtk::MenuButton {
 	public:
 		explicit CastButton(Playback& playback);
@@ -21,13 +21,12 @@ class CastButton : public Gtk::MenuButton {
 		void opened();
 		void rebuild();
 		void session_changed();
-		void volume_changed();
 
 		Playback&    playback_;
 		Gtk::Popover popover_;
-		Gtk::Box     box_, searching_, volume_;
-		Gtk::Label   heading_, searching_text_, level_;
+		Gtk::Box     box_, searching_;
+		Gtk::Label   heading_, searching_text_;
 		Gtk::Spinner spinner_;
 		Gtk::ListBox list_;
-		Gtk::Button  down_, up_, stop_;
+		Gtk::Button  stop_;
 };
