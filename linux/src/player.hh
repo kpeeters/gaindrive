@@ -8,16 +8,20 @@
 typedef struct _GstElement GstElement;
 typedef struct _GstBus     GstBus;
 typedef struct _GstMessage GstMessage;
+typedef struct _GdkPaintable GdkPaintable;
 
-// Local audio output: one playbin3. Knows URIs, not songs; Playback decides
-// what plays. All signals are emitted on the main loop.
+// Local output: one playbin3, for music and films alike. Knows URIs, not songs;
+// Playback decides what plays. All signals are emitted on the main loop.
+// Created on the main thread, after GTK, which the video sink needs.
 class Player {
 	public:
 		Player();
 		~Player();
 
-		// Starting `start` seconds in, for a resumed track.
-		void play_uri(const std::string& uri, double start=0);
+		// Starting `start` seconds in, for a resumed track. Pictures only
+		// for a film: a cover embedded in a music file is a video stream
+		// too.
+		void play_uri(const std::string& uri, double start=0, bool video=false);
 		// What to switch to, without a gap, when the current stream ends.
 		// Empty for nothing.
 		void set_next_uri(const std::string& uri);
@@ -32,6 +36,10 @@ class Player {
 		// Range support, so the only way to move in it is a new request.
 		bool   seekable() const;
 
+		// What the films are drawn on; null when GStreamer has no
+		// gtk4paintablesink, and then a film plays as sound only.
+		GdkPaintable *paintable() const;
+
 		// The stream given to set_next_uri has started.
 		sigc::signal<void()>                   signal_advanced;
 		// The last stream ended with nothing after it.
@@ -45,7 +53,8 @@ class Player {
 		// gboolean and gpointer, spelled without glib's header.
 		static int      bus_message(GstBus *bus, GstMessage *msg, void *self);
 
-		GstElement *playbin_=nullptr;
+		GstElement   *playbin_=nullptr;
+		GdkPaintable *paintable_=nullptr;
 		unsigned    watch_=0;
 		// Whether the user wants sound; buffering pauses underneath it.
 		bool        target_playing_=false;

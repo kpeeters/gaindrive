@@ -50,6 +50,14 @@ struct Song {
 	std::string last_played;  // ISO 8601, from getRecentSongs only
 	std::string content_type; // of the stored file
 	bool        starred=false;
+	// Films only. The codecs are ffprobe's names, empty until the server's
+	// scan has probed the file; transcoded_suffix is set when a browser
+	// would be sent a conversion.
+	bool        is_video=false;
+	std::string suffix;
+	std::string video_codec;
+	std::string audio_codec;
+	std::string transcoded_suffix;
 };
 
 struct Playlist {

@@ -123,6 +123,8 @@ add_executable(gaindrive-player
 	src/settings.cc
 	src/settingspage.cc
 	src/uithread.cc
+	src/videocodecs.cc
+	src/videoview.cc
 	src/workpool.cc
 	${CMAKE_CURRENT_BINARY_DIR}/icons.c
 )
@@ -130,6 +132,43 @@ target_compile_definitions(gaindrive-player PRIVATE
 	GD_APP_ID="${GD_APP_ID}"
 	GAINDRIVE_VERSION="${PROJECT_VERSION}")
 target_link_libraries(gaindrive-player PRIVATE gdshared PkgConfig::GTKMM PkgConfig::SECRET PkgConfig::GST)
+
+# ---- Video sink -------------------------------------------------------------
+
+# gtk4paintablesink, from gst-plugins-rs, hands decoded frames to GTK without a
+# copy. Ubuntu 24.04 does not package it, so it is built here and shipped in
+# our package, in a directory of our own that main.cc points GStreamer at.
+# 0.12 is the series built against GStreamer 1.24, and --locked keeps its
+# dependencies at versions 24.04's Rust 1.75 compiles. Needs cargo and network.
+option(GD_BUNDLE_GTK4SINK "Build and ship gtk4paintablesink" ON)
+set(GD_PLUGIN_SUBDIR ${CMAKE_INSTALL_LIBDIR}/gaindrive-player/gstreamer-1.0)
+target_compile_definitions(gaindrive-player PRIVATE GD_PLUGIN_SUBDIR="${GD_PLUGIN_SUBDIR}")
+if(GD_BUNDLE_GTK4SINK)
+	find_program(GD_CARGO cargo REQUIRED)
+	pkg_check_modules(GTK4 REQUIRED gtk4)
+	# dmabuf is the zero-copy path for hardware decoders; it needs 4.14.
+	set(_gd_sink_features "wayland,x11egl,x11glx")
+	if(GTK4_VERSION VERSION_GREATER_EQUAL 4.14)
+		string(APPEND _gd_sink_features ",gtk_v4_14,dmabuf")
+	elseif(GTK4_VERSION VERSION_GREATER_EQUAL 4.12)
+		string(APPEND _gd_sink_features ",gtk_v4_12")
+	endif()
+	set(_gd_sink ${CMAKE_CURRENT_BINARY_DIR}/gst-plugins/libgstgtk4.so)
+	include(ExternalProject)
+	ExternalProject_Add(gtk4sink
+		GIT_REPOSITORY    https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs.git
+		GIT_TAG           0.12.11
+		GIT_SHALLOW       ON
+		UPDATE_COMMAND    ""
+		CONFIGURE_COMMAND ""
+		BUILD_IN_SOURCE   ON
+		BUILD_COMMAND     ${GD_CARGO} build --release --locked -p gst-plugin-gtk4
+		                  --features ${_gd_sink_features} --target-dir <BINARY_DIR>
+		INSTALL_COMMAND   ${CMAKE_COMMAND} -E copy <BINARY_DIR>/release/libgstgtk4.so ${_gd_sink}
+		BUILD_BYPRODUCTS  ${_gd_sink})
+	add_dependencies(gaindrive-player gtk4sink)
+	install(FILES ${_gd_sink} DESTINATION ${GD_PLUGIN_SUBDIR})
+endif()
 
 # ---- Installation -----------------------------------------------------------
 
@@ -177,7 +216,9 @@ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 # playbin is a plugin, and so is the HTTP source; nothing links them, so
 # shlibdeps cannot find them.
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "gstreamer1.0-plugins-base, gstreamer1.0-plugins-good")
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "gstreamer1.0-plugins-bad, gstreamer1.0-libav")
+# libav decodes what films mostly hold (HEVC, AC-3, DTS); gl has glsinkbin,
+# which spares the video sink a copy.
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "gstreamer1.0-plugins-bad, gstreamer1.0-libav, gstreamer1.0-gl")
 
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")

@@ -50,6 +50,20 @@ namespace {
 			-gtk-icon-size: 24px;
 			color: @gd_red;
 		}
+		.video { background-color: black; }
+		.video .caption {
+			color: white;
+			font-size: 1.6em;
+			background-color: alpha(black, 0.6);
+			padding: 4px 12px;
+			border-radius: 6px;
+		}
+		.video-controls {
+			padding: 10px 16px;
+			background-image: linear-gradient(to bottom, transparent, alpha(black, 0.7));
+		}
+		.video > revealer button, .video-controls button { color: white; }
+		.video > revealer button image { -gtk-icon-size: 32px; }
 	)";
 
 	// Credentials the server refuses: wrong user or password.
@@ -76,6 +90,7 @@ MainWindow::MainWindow()
 	  main_(Gtk::Orientation::HORIZONTAL),
 	  sidebar_(Gtk::Orientation::VERTICAL),
 	  queue_(playback_),
+	  video_(playback_),
 	  panes_(Gtk::Orientation::HORIZONTAL),
 	  artists_(covers_),
 	  playlists_(covers_),
@@ -146,7 +161,10 @@ MainWindow::MainWindow()
 	panes_.append(left_);
 	panes_.append(middle_);
 	panes_.append(tracks_);
-	main_.append(panes_);
+	content_.add(panes_, "panes");
+	content_.add(video_, "video");
+	content_.set_hexpand(true);
+	main_.append(content_);
 	main_.set_vexpand(true);
 	browse_.append(main_);
 	browse_.append(bar_);
@@ -202,6 +220,25 @@ MainWindow::MainWindow()
 		for(auto p: all_panes())
 			p->set_playing(s ? s->ref : ItemRef{});
 		});
+	playback_.signal_started.connect([this]() {
+		const Song *s = playback_.current();
+		if(s && s->is_video && !playback_.caster().active()) {
+			video_.show_film(*s, api_);
+			content_.set_visible_child("video");
+			video_.grab_focus();
+			}
+		else if(content_.get_visible_child_name()=="video")
+			close_video();
+		});
+	video_.signal_close.connect([this]() {
+		playback_.stop();
+		close_video();
+		});
+	video_.signal_fullscreen.connect([this]() {
+		if(is_fullscreen()) unfullscreen();
+		else                fullscreen();
+		});
+	property_fullscreened().signal_changed().connect(sigc::mem_fun(*this, &MainWindow::fullscreen_changed));
 	playback_.signal_error.connect([this](const std::string& e) {
 		notify("Cannot play this track: " + e);
 		});
@@ -303,6 +340,7 @@ void MainWindow::start_session(const Session& s)
 
 void MainWindow::end_session(const std::string& error)
 	{
+	close_video();
 	playback_.set_api(nullptr);
 	api_.reset();
 	covers_.set_api(nullptr);
@@ -408,7 +446,8 @@ void MainWindow::play(const std::vector<Song>& songs, size_t index)
 	{
 	if(index>=songs.size() || !api_) return;
 	const Song& song = songs[index];
-	if(song.duration<resume_min_seconds) {
+	// Every film, as on the web client; music only when it is long.
+	if(song.duration<resume_min_seconds && !song.is_video) {
 		playback_.play(songs, index);
 		return;
 		}
@@ -434,8 +473,9 @@ void MainWindow::play(const std::vector<Song>& songs, size_t index)
 				int button = dialog->choose_finish(res);
 				playback_.play(songs, index, button==1 ? pos : 0);
 				}
-			catch(const Glib::Error&) {
+			catch(const Glib::Error& e) {
 				// Dismissed: play nothing, as on the web client.
+				std::cout << stamp() << "Resume dialog: " << e.what() << std::endl;
 				}
 			});
 		});
@@ -453,6 +493,23 @@ void MainWindow::star(ListRow::Kind kind, const ItemRef& ref, bool on)
 		for(auto pane: all_panes())
 			pane->star_changed(kind, ref, on);
 		});
+	}
+
+void MainWindow::close_video()
+	{
+	if(is_fullscreen()) unfullscreen();
+	content_.set_visible_child("panes");
+	}
+
+void MainWindow::fullscreen_changed()
+	{
+	// Only a film takes the whole screen; anything else fullscreened by the
+	// window manager keeps its sidebar and player bar.
+	bool film = is_fullscreen() && content_.get_visible_child_name()=="video";
+	sidebar_.set_visible(!film);
+	bar_.set_visible(!film);
+	notice_.set_visible(!film);
+	video_.set_fullscreen(film);
 	}
 
 void MainWindow::failed(const ApiResult& r)

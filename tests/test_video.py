@@ -217,7 +217,8 @@ def test_offset_request_on_copyable_video_is_fragmented_mp4():
 # `playable` lets a client say it demuxes a container itself, so the server can
 # skip a remux it would otherwise pay.  The audio half of the same parameter is
 # covered by tests/test_playable.py.  What is worth testing here is
-# almost entirely the boundaries: that it never widens the codec test, never
+# almost entirely the boundaries: that a container alone never widens the
+# codec test (only "video/<codec>" plus "audio/<codec>" do), that it never
 # beats a constraint, never admits `vob`, and - the one with the worst blast
 # radius - never changes what the browse endpoints advertise, because that is
 # what a Cast receiver is told it is about to fetch.
@@ -330,6 +331,78 @@ def test_garbage_declaration_is_ignored():
                                {"Range": "bytes=0-1023"})
         assert status == 206, "MKV was not folded to mkv: HTTP " + str(status)
     print("PASS  a malformed declaration is ignored rather than fatal")
+
+
+def _foreign_codecs():
+    """A video browsers cannot decode, with both codec names advertised."""
+    return [v for v in _videos()
+            if v.get("nativeSeek") is False
+            and v.get("videoCodec")
+            and v.get("suffix") in DECLARABLE_SUFFIXES]
+
+
+def _codec_tokens(v):
+    t = [v["suffix"], "video/" + v["videoCodec"]]
+    if v.get("audioCodec"):
+        t.append("audio/" + v["audioCodec"])
+    return ",".join(t)
+
+
+def test_declared_codecs_are_served_untouched():
+    """A client that decodes the codecs itself gets the stored file."""
+    vs = _foreign_codecs()
+    if not vs:
+        print("SKIP  no non-browser-codec mkv/mov/avi in the library")
+        return
+    v = vs[0]
+    status, hdrs, _ = _raw("stream.view",
+                           {"id": v["id"], "playable": _codec_tokens(v)},
+                           {"Range": "bytes=0-1023"})
+    assert status == 206, f"expected 206, got {status}"
+    ctype = hdrs.get("Content-Type", "")
+    assert ctype == CONTAINER_MIMES[v["suffix"]], \
+        f"expected {CONTAINER_MIMES[v['suffix']]}, got {ctype!r}"
+    print(f"PASS  declared {v['videoCodec']} in .{v['suffix']} is untouched")
+
+
+def test_container_alone_does_not_admit_foreign_codecs():
+    """Without the codec tokens, the server's own codec test still rules."""
+    vs = _foreign_codecs()
+    if not vs:
+        print("SKIP  no non-browser-codec mkv/mov/avi in the library")
+        return
+    v = vs[0]
+    tokens = [v["suffix"], "video/" + v["videoCodec"]]
+    if v.get("audioCodec"):
+        # Video declared, audio not: still not enough.
+        cases = [v["suffix"], ",".join(tokens)]
+    else:
+        cases = [v["suffix"]]
+    for value in cases:
+        status, hdrs, _ = _raw("stream.view",
+                               {"id": v["id"], "playable": value},
+                               {"Range": "bytes=0-1023"})
+        assert status == 200, f"{value!r}: expected 200, got {status}"
+        assert hdrs.get("Content-Type") == "video/mp4", \
+            f"{value!r}: served as {hdrs.get('Content-Type')}"
+    print("PASS  an incomplete codec declaration still encodes")
+
+
+def test_declared_codecs_do_not_change_metadata():
+    """nativeSeek and castDirect describe every client, whatever one declared."""
+    vs = _foreign_codecs()
+    if not vs:
+        print("SKIP  no non-browser-codec mkv/mov/avi in the library")
+        return
+    v = vs[0]
+    plain = _json("getSong.view", {"id": v["id"]})["song"]
+    declared = _json("getSong.view",
+                     {"id": v["id"], "playable": _codec_tokens(v)})["song"]
+    for field in ("transcodedContentType", "transcodedSuffix", "nativeSeek",
+                  "castDirect"):
+        assert plain.get(field) == declared.get(field), \
+            f"{field} moved: {plain.get(field)!r} -> {declared.get(field)!r}"
+    print("PASS  browse metadata is unchanged by a codec declaration")
 
 
 # ---- audio only -------------------------------------------------------
@@ -872,6 +945,9 @@ TESTS = [
     test_vob_is_never_declarable,
     test_declared_container_still_honours_constraints,
     test_garbage_declaration_is_ignored,
+    test_declared_codecs_are_served_untouched,
+    test_container_alone_does_not_admit_foreign_codecs,
+    test_declared_codecs_do_not_change_metadata,
     test_audio_format_returns_the_soundtrack,
     test_audio_only_stream_is_seekable,
     test_audio_only_covers_the_whole_video,

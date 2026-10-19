@@ -995,7 +995,10 @@ void Streamer::serve_video(const httplib::Request& req, httplib::Response& res,
 	// for a file they play as it is; everything else they fetch through
 	// hls.m3u8.  What remains here beyond the direct file is for third-party
 	// Subsonic clients, which seek by asking again with timeOffset.
-	bool codecs_ok   = video_seeks_natively(song.video_codec, song.audio_codec);
+	// A client that declared these codecs decodes them however they arrive.
+	bool codecs_ok   = video_seeks_natively(song.video_codec, song.audio_codec)
+	                || video_codecs_declared(song.video_codec, song.audio_codec,
+	                                         playable);
 	bool constrained = !video.size.empty() || max_bitrate > 0
 	                || (!format.empty() && format != "raw");
 

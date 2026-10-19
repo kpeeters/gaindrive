@@ -2,14 +2,42 @@
 #include "stamp.hh"
 
 #include <gst/gst.h>
+#include <gtk/gtk.h>
 
 #include <iostream>
 
 namespace {
 	// GstPlayFlags lives in a plugin header, not the core API.
+	const guint flag_video       = 1<<0;
 	const guint flag_audio       = 1<<1;
 	const guint flag_soft_volume = 1<<4;
 	const guint flag_buffering   = 1<<8;
+	const guint flag_deinterlace = 1<<9;
+
+	// gtk4paintablesink, inside a glsinkbin when GTK draws with GL, which
+	// is how that sink's own examples set it up: the GL upload then happens
+	// in GStreamer's GL context rather than as a copy in ours.
+	GstElement *make_video_sink(GdkPaintable *& paintable)
+		{
+		GstElement *sink = gst_element_factory_make("gtk4paintablesink", nullptr);
+		if(!sink) {
+			std::cout << stamp() << "GStreamer has no gtk4paintablesink: films will play without picture" << std::endl;
+			return nullptr;
+			}
+		g_object_get(sink, "paintable", &paintable, nullptr);
+		GdkGLContext *gl = nullptr;
+		if(g_object_class_find_property(G_OBJECT_GET_CLASS(paintable), "gl-context"))
+			g_object_get(paintable, "gl-context", &gl, nullptr);
+		if(!gl) return sink;
+		g_object_unref(gl);
+		GstElement *bin = gst_element_factory_make("glsinkbin", nullptr);
+		if(!bin) {
+			std::cout << stamp() << "GStreamer has no glsinkbin; video without GL upload" << std::endl;
+			return sink;
+			}
+		g_object_set(bin, "sink", sink, nullptr);
+		return bin;
+		}
 }
 
 Player::Player()
@@ -23,9 +51,9 @@ Player::Player()
 		std::cout << stamp() << "GStreamer has no playbin: is gstreamer1.0-plugins-base installed?" << std::endl;
 		return;
 		}
-	// Audio only: a cover embedded in a file would otherwise surface as a
-	// video stream, and playbin would open a window for it.
 	g_object_set(playbin_, "flags", flag_audio | flag_soft_volume | flag_buffering, nullptr);
+	if(GstElement *vsink = make_video_sink(paintable_))
+		g_object_set(playbin_, "video-sink", vsink, nullptr);
 	g_signal_connect(playbin_, "about-to-finish", G_CALLBACK(&Player::about_to_finish), this);
 	g_signal_connect(playbin_, "source-setup", G_CALLBACK(&Player::source_setup), this);
 
@@ -40,9 +68,10 @@ Player::~Player()
 	gst_element_set_state(playbin_, GST_STATE_NULL);
 	g_source_remove(watch_);
 	gst_object_unref(playbin_);
+	if(paintable_) g_object_unref(paintable_);
 	}
 
-void Player::play_uri(const std::string& uri, double start)
+void Player::play_uri(const std::string& uri, double start, bool video)
 	{
 	if(!playbin_) {
 		signal_error.emit("GStreamer's playbin is not installed.");
@@ -54,7 +83,11 @@ void Player::play_uri(const std::string& uri, double start)
 	advance_pending_ = false;
 	}
 	gst_element_set_state(playbin_, GST_STATE_READY);
-	g_object_set(playbin_, "uri", uri.c_str(), nullptr);
+	// No text flag even for films: subtitles are drawn by the video view,
+	// from the server's WebVTT, the same way whichever stream is playing.
+	guint flags = flag_audio | flag_soft_volume | flag_buffering;
+	if(video && paintable_) flags |= flag_video | flag_deinterlace;
+	g_object_set(playbin_, "flags", flags, "uri", uri.c_str(), nullptr);
 	target_playing_ = true;
 	buffering_      = false;
 	pending_seek_   = start;
@@ -114,6 +147,11 @@ double Player::position() const
 	if(!playbin_ || !gst_element_query_position(playbin_, GST_FORMAT_TIME, &pos))
 		return 0;
 	return double(pos)/GST_SECOND;
+	}
+
+GdkPaintable *Player::paintable() const
+	{
+	return paintable_;
 	}
 
 bool Player::playing() const

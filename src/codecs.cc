@@ -97,7 +97,23 @@ bool video_direct_playable_for(std::string_view container,
 	if (video_direct_playable(container, video_codec, audio_codec)) return true;
 	if (!container_declarable(container))       return false;
 	if (client.find(container) == client.end()) return false;
-	return video_seeks_natively(video_codec, audio_codec);
+	return video_seeks_natively(video_codec, audio_codec)
+	    || video_codecs_declared(video_codec, audio_codec, client);
+	}
+
+bool video_codecs_declared(std::string_view video_codec,
+                           std::string_view audio_codec,
+                           const Playable& client)
+	{
+	if (video_codec.empty()) return false;
+	auto has = [&](std::string_view kind, std::string_view codec) {
+		std::string token(kind);
+		token += '/';
+		token += codec;
+		return client.find(token) != client.end();
+		};
+	return has("video", video_codec)
+	    && (audio_codec.empty() || has("audio", audio_codec));
 	}
 
 bool audio_declared(const AudioForm& form, const Playable& client)

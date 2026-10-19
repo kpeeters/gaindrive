@@ -37,6 +37,12 @@ ICONS = {
 	'cast-connected': ('cast_connected', False),
 	'volume-down':    ('volume_down',   False),
 	'volume-up':      ('volume_up',     False),
+	'replay-10':      ('replay_10',     False),
+	'forward-10':     ('forward_10',    False),
+	'chapters':       ('toc',           False),
+	'captions':       ('closed_caption', False),
+	'fullscreen':     ('fullscreen',    False),
+	'fullscreen-exit': ('fullscreen_exit', False),
 }
 
 def glyphsets():

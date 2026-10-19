@@ -44,6 +44,9 @@ class Playback {
 		bool        playing() const;
 		double      position() const;
 
+		// What a film is drawn on; see Player::paintable().
+		GdkPaintable *paintable() const;
+
 		Caster&     caster();
 		// Moves what is playing to a receiver, and back.
 		void        cast_to(size_t device);
@@ -55,6 +58,8 @@ class Playback {
 
 		// The current track, or the queue after it, changed.
 		sigc::signal<void()>                   signal_track;
+		// A track was started on purpose, rather than reached gaplessly.
+		sigc::signal<void()>                   signal_started;
 		sigc::signal<void(bool playing)>       signal_state;
 		sigc::signal<void(const std::string&)> signal_error;
 
@@ -69,6 +74,7 @@ class Playback {
 		bool tick();
 		void report(const char *state, double pos);
 		std::string stream_url(const Song& s, double offset=0, bool mp3=false) const;
+		std::string video_url(const Song& s, bool hls) const;
 		void        error(const std::string& e);
 
 		const AppSettings&         settings_;
@@ -85,7 +91,8 @@ class Playback {
 		// Where in the song the current stream begins: non-zero after a seek
 		// in a stream that could not seek, which re-requests from that point.
 		double                     local_offset_=0;
-		// The one retry as MP3 after an error has been spent on this track.
+		// The one retry after an error has been spent on this track: as MP3
+		// for music, as HLS for a film.
 		bool                       mp3_retried_=false;
 		// The queue entry handed to the player as the gapless successor, so a
 		// queue edit can tell whether it has to be replaced.

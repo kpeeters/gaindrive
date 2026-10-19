@@ -125,6 +125,12 @@ nlohmann::json song_entry_json(const MediaStore::ChildEntry& c)
 	// the stored file rather than as HLS.  Not derivable from nativeSeek and
 	// transcodedContentType, which answer for a browser: an AV1 film is
 	// direct for a browser and HLS for a receiver.
+	// gaindrive extension.  ffprobe's names for the stored codecs, so a client
+	// that decodes more than browsers do can declare them on stream.view (see
+	// video_codecs_declared()) and play the file as it stands.  Omitted while
+	// the scan has not probed the file.
+	if (is_video && !c.video_codec.empty()) s["videoCodec"] = c.video_codec;
+	if (is_video && !c.audio_codec.empty()) s["audioCodec"] = c.audio_codec;
 	if (is_video) s["castDirect"] = cast_tier_for(c.codec, c.video_codec,
 	                                              c.audio_codec)
 	                                == CastTier::Direct;
@@ -185,6 +191,10 @@ XMLElement* song_entry_xml(XMLDocument& doc,
 	if (is_video)
 		el->SetAttribute("nativeSeek",
 		                 video_seeks_natively(c.video_codec, c.audio_codec));
+	if (is_video && !c.video_codec.empty())
+		el->SetAttribute("videoCodec", c.video_codec.c_str());
+	if (is_video && !c.audio_codec.empty())
+		el->SetAttribute("audioCodec", c.audio_codec.c_str());
 	if (is_video)
 		el->SetAttribute("castDirect",
 		                 cast_tier_for(c.codec, c.video_codec, c.audio_codec)

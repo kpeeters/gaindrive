@@ -4,6 +4,7 @@
 #include "settings.hh"
 #include "stamp.hh"
 #include "uithread.hh"
+#include "videocodecs.hh"
 #include "workpool.hh"
 
 #include <glibmm/main.h>
@@ -166,7 +167,8 @@ void Playback::seek(double seconds)
 		caster_.seek(seconds);
 		return;
 		}
-	if(local_offset_==0 && player_.seekable()) {
+	// A film is either the stored file or HLS, and both seek.
+	if(s->is_video || (local_offset_==0 && player_.seekable())) {
 		player_.seek(seconds);
 		return;
 		}
@@ -205,6 +207,11 @@ const Song *Playback::current() const
 bool Playback::playing() const
 	{
 	return caster_.active() ? caster_.playing() : player_.playing();
+	}
+
+GdkPaintable *Playback::paintable() const
+	{
+	return player_.paintable();
 	}
 
 double Playback::position() const
@@ -259,6 +266,7 @@ void Playback::start(double offset)
 		update_next();
 		}
 	signal_track.emit();
+	signal_started.emit();
 	}
 
 void Playback::local_start(double offset)
@@ -267,18 +275,23 @@ void Playback::local_start(double offset)
 	// With a quality cap the stream may well be converted, and then it
 	// cannot seek: ask for one that starts at the offset instead.
 	local_offset_ = 0;
-	if(offset>0 && settings_.quality_cap>0) {
+	if(offset>0 && settings_.quality_cap>0 && !s->is_video) {
 		local_offset_ = std::floor(offset);
 		player_.play_uri(stream_url(*s, offset));
 		}
 	else
-		player_.play_uri(stream_url(*s), offset);
+		player_.play_uri(stream_url(*s), offset, s->is_video);
 	}
 
 void Playback::cast_start(double offset)
 	{
 	const Song *s = current();
 	if(!s || !api_) return;
+	if(s->is_video) {
+		signal_error.emit("Casting films is not supported yet.");
+		signal_state.emit(false);
+		return;
+		}
 	caster_.prepare(offset);
 	unsigned gen = ++cast_gen_;
 
@@ -364,6 +377,12 @@ void Playback::error(const std::string& e)
 	const Song *s = current();
 	// The web client's fallback: what GStreamer cannot decode, the server
 	// can convert. Once per track, from where it failed.
+	if(s && api_ && !mp3_retried_ && s->is_video) {
+		mp3_retried_ = true;
+		double at = position();
+		player_.play_uri(video_url(*s, true), at, true);
+		return;
+		}
 	if(s && api_ && !mp3_retried_) {
 		mp3_retried_ = true;
 		double at = std::floor(position());
@@ -383,7 +402,10 @@ void Playback::update_next()
 	// the moment it needs the answer it is on a streaming thread.
 	std::string id;
 	if(caster_.active()) return;
-	if(api_ && index_>=0 && index_+1<long(queue_.size()))
+	// Not around a film: the player's flags are set per stream, and a
+	// gapless switch would keep the previous one's.
+	if(api_ && index_>=0 && index_+1<long(queue_.size())
+	   && !queue_[size_t(index_)].is_video && !queue_[size_t(index_+1)].is_video)
 		id = queue_[size_t(index_+1)].ref.id;
 	if(id==next_id_) return;
 	next_id_ = id;
@@ -413,6 +435,13 @@ void Playback::ended()
 	if(!scrobbled_) {
 		scrobbled_ = true;
 		api_->call("scrobble", {{"id", current()->ref.id}, {"submission", "true"}}, [](const ApiResult&) {});
+		}
+	// Only a film ends with more queued: music goes on gaplessly.
+	if(index_+1<long(queue_.size())) {
+		report("stopped", current()->duration);
+		++index_;
+		start();
+		return;
 		}
 	report("stopped", current()->duration);
 	signal_state.emit(false);
@@ -458,6 +487,7 @@ void Playback::report_stopped_now()
 
 std::string Playback::stream_url(const Song& s, double offset, bool mp3) const
 	{
+	if(s.is_video) return video_url(s, mp3);
 	// No `pace`: unlike a Cast receiver, playbin reads steadily as it plays,
 	// so the connection never sits idle long enough for a proxy to cut it.
 	Params p = {{"id", s.ref.id}};
@@ -475,4 +505,27 @@ std::string Playback::stream_url(const Song& s, double offset, bool mp3) const
 	if(offset>0)
 		p.push_back({"timeOffset", std::to_string(long(offset))});
 	return api_->url("stream", p);
+	}
+
+std::string Playback::video_url(const Song& s, bool hls) const
+	{
+	// No quality cap: it is an audio bitrate, and the web client does not
+	// apply it to films either.
+	Params p = {{"id", s.ref.id}};
+	// The stored file whenever GStreamer decodes it, saying so, since the
+	// server otherwise only sends untouched what a browser decodes.
+	if(!hls && gst_plays(s.suffix, s.video_codec, s.audio_codec)) {
+		std::string declared = s.suffix + ",video/" + s.video_codec;
+		if(!s.audio_codec.empty())
+			declared += ",audio/" + s.audio_codec;
+		p.push_back({"playable", declared});
+		return api_->url("stream", p);
+		}
+	if(!hls && s.transcoded_suffix.empty())
+		return api_->url("stream", p);
+	// HLS seeks without the server encoding from the start, unlike a
+	// converted stream.view. Opus and FLAC soundtracks are copied rather
+	// than converted to AAC, as GStreamer plays both from MP4.
+	p.push_back({"audioCodecs", "opus,flac"});
+	return api_->url("hls", p);
 	}

@@ -8,6 +8,7 @@
 #include "serverconfig.hh"
 #include "settings.hh"
 #include "settingspage.hh"
+#include "videoview.hh"
 #include "workpool.hh"
 
 #include <gtkmm/applicationwindow.h>
@@ -49,6 +50,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void album_loaded(const Album& a);
 		void play(const std::vector<Song>& songs, size_t index);
 		void star(ListRow::Kind kind, const ItemRef& ref, bool on);
+		void close_video();
+		void fullscreen_changed();
 		std::vector<Pane*> all_panes();
 
 		// First, so that it is destroyed last: its threads are joined while
@@ -74,6 +77,9 @@ class MainWindow : public Gtk::ApplicationWindow {
 		Gtk::ScrolledWindow        queue_scroll_;
 		QueueView                  queue_;
 
+		// The panes, or a film in their place.
+		Gtk::Stack                 content_;
+		VideoView                  video_;
 		// Three columns, as on the web client: a section, what was picked in
 		// it, and an album's tracks.
 		Gtk::Box                   panes_;

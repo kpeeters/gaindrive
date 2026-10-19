@@ -215,10 +215,12 @@ using Playable = std::set<std::string, std::less<>>;
 // this answer, and two names cannot drift because there is no argument to
 // forget.
 //
-// **Only the container is widened.  video_seeks_natively() is untouched**, and
-// that is the whole safety argument: nativeSeek is identical either side of
-// this, so no advertised field becomes client-dependent.  Widening the *codec* pair could
-// not be done this way - nativeSeek is what a client picks its transport with,
+// **video_seeks_natively() itself is untouched**, and that is the whole safety
+// argument: nativeSeek is identical either side of this, so no advertised field
+// becomes client-dependent.  A client that decodes more than browsers do says
+// so with "video/<codec>" and "audio/<codec>" tokens (see
+// video_codecs_declared()), which widen the codec test for its own request
+// only; nativeSeek stays what every other client picks its transport with,
 // and what the Android app refuses to cast on.
 //
 // container_declarable() is re-checked here rather than trusted from whoever
@@ -228,6 +230,15 @@ bool video_direct_playable_for(std::string_view container,
                                std::string_view video_codec,
                                std::string_view audio_codec,
                                const Playable& client);
+
+// Whether this client declared it decodes both codecs of a video itself, as
+// "video/<codec>" and "audio/<codec>" in `playable`.  "video" and "audio" are
+// no container's name, so these cannot be mistaken for audio pairs.  Names
+// are ffprobe's, compared verbatim, like the audio pairs.  An empty audio
+// codec is a silent film and needs no declaration.
+bool video_codecs_declared(std::string_view video_codec,
+                           std::string_view audio_codec,
+                           const Playable& client);
 
 // The audio twin: whether this client can play this file as it sits on disk.
 //

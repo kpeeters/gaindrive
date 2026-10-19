@@ -68,6 +68,18 @@ rather than `third_party/` because it is embedded into the binary by
   `linux/data/icons/scalable/actions/gd-*-symbolic.svg`, written by
   `linux/data/icons/extract-icons.py` (fontTools, not needed at build time).
 
+The Linux player's package also ships one GStreamer plugin built from source
+at package time, because Ubuntu 24.04 does not package it:
+
+* gst-plugins-rs 0.12.11, the `gtk4` plugin (`gtk4paintablesink`) -
+  `libgstgtk4.so` under `lib/gaindrive-player/gstreamer-1.0/`
+  MPL-2.0 · Copyright the GStreamer project contributors
+  https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs
+  Fetched and built by `linux/CMakeLists.txt` (`GD_BUNDLE_GTK4SINK`); its
+  Rust crate dependencies are statically linked into it, under their own
+  (MIT / Apache-2.0) licences. MPL-2.0 is file-level copyleft and compatible
+  with GPLv3; the source is the tagged upstream release, unmodified.
+
 
 ## Server - system packages
 
