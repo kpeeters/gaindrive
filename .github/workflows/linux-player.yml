@@ -1,0 +1,190 @@
+name: linux-player
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  # Filtered on pull_request only, for the reason given in android.yml: a tag
+  # push can present an empty changed-file set and would skip the release.
+  # src/ and third_party/ are in the list because the player compiles the
+  # cast code and httplib from there.
+  pull_request:
+    paths:
+      - 'linux/**'
+      - 'src/**'
+      - 'third_party/**'
+      - 'graphics/**'
+      - 'VERSION'
+      - '.github/workflows/linux-player.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # One row per distribution and architecture. A distribution is a container
+  # image rather than the runner's own, so that adding Debian or Fedora is a
+  # new row and not a new job; glibc images run the JS actions fine (it is
+  # only musl that cannot, see build.yml).
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {distro: ubuntu24.04, image: 'ubuntu:24.04', debarch: amd64, runner: ubuntu-24.04}
+          - {distro: ubuntu24.04, image: 'ubuntu:24.04', debarch: arm64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      # Before checkout: without git in the image, actions/checkout falls back
+      # to a tarball and there is no repository to read anything from. cargo
+      # is for the bundled gtk4paintablesink; plugins-base carries the GL and
+      # video libraries that sink links.
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git ca-certificates \
+            file dpkg-dev cargo \
+            libgtkmm-4.0-dev libsecret-1-dev libssl-dev nlohmann-json3-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+
+      - uses: actions/checkout@v4
+
+      # `up` is the Debian upstream version, `v` the one in the file name. On
+      # master the `~` makes every build sort below the release it leads up
+      # to, and the run number makes each one an upgrade over the last; the
+      # file name keeps the VERSION-commit form the APK and server use, and no
+      # `~`, which release asset names do not reliably keep.
+      - id: ver
+        run: |
+          base=$(sed -n 's/^version=//p' VERSION)
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            up="${GITHUB_REF_NAME#v}"; v="$up"
+            [ "$up" = "$base" ] || {
+              echo "::error::tag $GITHUB_REF_NAME does not match VERSION ($base)"
+              exit 1; }
+          else
+            sha="${GITHUB_SHA::7}"
+            up="$base~git$GITHUB_RUN_NUMBER.$sha"; v="$base-$sha"
+          fi
+          echo "up=$up" >> "$GITHUB_OUTPUT"
+          echo "deb=gaindrive-player-$v-${{ matrix.distro }}-${{ matrix.debarch }}.deb" >> "$GITHUB_OUTPUT"
+
+      # The cargo build of the video sink is most of the run. Both directories
+      # are needed: the prefix holds ExternalProject's stamps, gst-plugins the
+      # library they vouch for, and restoring one without the other leaves a
+      # stamp claiming a file that is not there.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            build-linux/gtk4sink-prefix
+            build-linux/gst-plugins
+          key: gtk4sink-${{ matrix.distro }}-${{ matrix.debarch }}-${{ hashFiles('linux/CMakeLists.txt') }}
+
+      - name: Build
+        run: |
+          cmake -S linux -B build-linux -G Ninja
+          cmake --build build-linux
+
+      # The release field carries the distribution, so the same upstream
+      # version built for two distributions is two distinct packages.
+      - name: Package
+        working-directory: build-linux
+        run: |
+          cpack -G DEB \
+            -D CPACK_DEBIAN_PACKAGE_VERSION="${{ steps.ver.outputs.up }}" \
+            -D CPACK_DEBIAN_PACKAGE_RELEASE="1~${{ matrix.distro }}" \
+            -D CPACK_DEBIAN_FILE_NAME="${{ steps.ver.outputs.deb }}"
+          mv "${{ steps.ver.outputs.deb }}" ..
+          dpkg-deb -I "../${{ steps.ver.outputs.deb }}"
+
+      # An empty Depends means dpkg-shlibdeps did not run or found nothing,
+      # and the package would install anywhere and then fail to start.
+      - name: Check dependencies were computed
+        run: dpkg-deb -f "${{ steps.ver.outputs.deb }}" Depends | grep -q libgtkmm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.ver.outputs.deb }}
+          path: ${{ steps.ver.outputs.deb }}
+          if-no-files-found: error
+
+  # A fresh image, because the build image already has every runtime library
+  # through the -dev packages and would install anything. The player itself
+  # cannot be started (no display, no --version), so this checks what can go
+  # wrong without one: dependencies resolve, the binary links, and GStreamer
+  # loads the bundled sink.
+  install-test:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {distro: ubuntu24.04, image: 'ubuntu:24.04', debarch: amd64, runner: ubuntu-24.04}
+          - {distro: ubuntu24.04, image: 'ubuntu:24.04', debarch: arm64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gaindrive-player-*-${{ matrix.distro }}-${{ matrix.debarch }}.deb
+          merge-multiple: true
+          path: dist
+
+      - run: |
+          apt-get update
+          apt-get install -y ./dist/*.deb gstreamer1.0-tools
+          ! ldd /usr/bin/gaindrive-player | grep 'not found'
+          so=$(dpkg -L gaindrive-player | grep 'libgstgtk4\.so$')
+          GST_PLUGIN_PATH=$(dirname "$so") gst-inspect-1.0 gtk4
+
+  # Same as the APK in android.yml: build.yml creates the tagged release, so
+  # wait for it rather than racing it with a second create.
+  release:
+    needs: install-test
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {merge-multiple: true, path: dist}
+      - run: |
+          for _ in $(seq 1 60); do
+            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              >/dev/null 2>&1 && break
+            sleep 30
+          done
+          gh release upload "$GITHUB_REF_NAME" dist/*.deb --clobber \
+            --repo "$GITHUB_REPOSITORY"
+        env: {GH_TOKEN: '${{ github.token }}'}
+
+  # One job uploads every .deb, so stale-suffix only ever deletes previous
+  # builds and never a sibling architecture uploaded a moment ago.
+  latest:
+    needs: install-test
+    # Excludes pull_request too, where ref_name is `<n>/merge`.
+    if: github.ref_type == 'branch' && github.ref_name == 'master'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {merge-multiple: true, path: dist}
+      - uses: ./.github/actions/rolling-release
+        with:
+          assets: dist/*.deb
+          stale-suffix: .deb
+          token: ${{ github.token }}

@@ -83,20 +83,26 @@ foreach(icon ${GD_ICONS})
 	string(APPEND _gd_icon_xml "    <file>scalable/actions/${name}</file>\n")
 endforeach()
 string(REPLACE "." "/" _gd_res_path "${GD_APP_ID}")
+# The application icon too: on X11 a window that matches no installed desktop
+# file, such as a run from the build tree, shows the icon set_icon_name finds
+# in the theme, and the hicolor copy installed below is not there yet.
 file(CONFIGURE OUTPUT icons.gresource.xml CONTENT
 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <gresources>
   <gresource prefix=\"/${_gd_res_path}/icons\">
-${_gd_icon_xml}  </gresource>
+${_gd_icon_xml}    <file alias=\"scalable/apps/${GD_APP_ID}.svg\">gaindrive.svg</file>
+  </gresource>
 </gresources>
 ")
 add_custom_command(
 	OUTPUT  ${CMAKE_CURRENT_BINARY_DIR}/icons.c
 	COMMAND ${GD_GLIB_COMPILE_RESOURCES} --generate-source
 	        --sourcedir=${CMAKE_CURRENT_SOURCE_DIR}/data/icons
+	        --sourcedir=${GD_ROOT}/graphics
 	        --target=${CMAKE_CURRENT_BINARY_DIR}/icons.c
 	        ${CMAKE_CURRENT_BINARY_DIR}/icons.gresource.xml
-	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/icons.gresource.xml ${GD_ICONS})
+	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/icons.gresource.xml ${GD_ICONS}
+	        ${GD_ROOT}/graphics/gaindrive.svg)
 
 # ---- The player -------------------------------------------------------------
 
