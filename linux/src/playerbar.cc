@@ -1,4 +1,5 @@
 #include "playerbar.hh"
+#include "settings.hh"
 #include "castbutton.hh"
 #include "tunebutton.hh"
 #include "coverstore.hh"
@@ -64,8 +65,27 @@ PlayerBar::PlayerBar(CoverStore& covers, Playback& playback, AppSettings& settin
 	time_.add_css_class("dim-label");
 	row_.append(time_);
 	// Smaller than the transport buttons, which are what the bar is for.
-	for(Gtk::Widget *w: {(Gtk::Widget*)cast_.get(), (Gtk::Widget*)&info_button_, (Gtk::Widget*)tune_.get()})
+	for(Gtk::Widget *w: {(Gtk::Widget*)&audio_only_, (Gtk::Widget*)cast_.get(),
+	                     (Gtk::Widget*)&info_button_, (Gtk::Widget*)tune_.get()})
 		w->add_css_class("bar-extra");
+	// At hand rather than in the settings, as it is a choice per moment:
+	// watching, or listening with the screen elsewhere.
+	audio_only_.set_icon_name("gd-videocam-off-symbolic");
+	audio_only_.set_tooltip_text("Play videos as audio only");
+	audio_only_.add_css_class("flat");
+	audio_only_.set_valign(Gtk::Align::CENTER);
+	audio_only_.set_active(settings.video_audio_only);
+	if(settings.video_audio_only) audio_only_.add_css_class("audio-only");
+	audio_only_.signal_toggled().connect([this, &settings]() {
+		bool on = audio_only_.get_active();
+		if(on) audio_only_.add_css_class("audio-only");
+		else   audio_only_.remove_css_class("audio-only");
+		if(on==settings.video_audio_only) return;
+		settings.video_audio_only = on;
+		settings.save();
+		playback_.video_mode_changed();
+		});
+	row_.append(audio_only_);
 	row_.append(*cast_);
 	// Between the cast and equaliser buttons, as on the web client.
 	info_button_.set_icon_name("gd-info-symbolic");

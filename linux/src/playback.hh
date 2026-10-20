@@ -67,6 +67,11 @@ class Playback {
 		// A film is being cast and the receiver shows its picture, so it
 		// also draws the subtitles.
 		bool        cast_picture() const;
+		// A video played as one, rather than as its soundtrack alone.
+		bool        shows_picture(const Song& s) const;
+		// The audio-only setting changed: a video playing now is reloaded
+		// where it is, as the other kind.
+		void        video_mode_changed();
 
 		// The current film's subtitles: a 1-based track in getVideoInfo's
 		// order, or 0 for none. Sent to a receiver showing the picture, and

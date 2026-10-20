@@ -92,9 +92,12 @@ std::string plural(int n, const char *one, const char *many);
 // headings and items side by side.
 class ListRow : public Glib::Object {
 	public:
-		enum class Kind { heading, artist, album, song, playlist, setting, chapter };
+		// `extra` is a pane's own widget, given a row so it scrolls with
+		// the list.
+		enum class Kind { heading, artist, album, song, playlist, setting, chapter, extra };
 
 		static Glib::RefPtr<ListRow> heading(const std::string& text);
+		static Glib::RefPtr<ListRow> extra();
 		static Glib::RefPtr<ListRow> of(const Artist& a);
 		static Glib::RefPtr<ListRow> of(const Album& a);
 		static Glib::RefPtr<ListRow> of(const Song& s);

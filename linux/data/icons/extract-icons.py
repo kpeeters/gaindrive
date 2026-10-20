@@ -45,6 +45,7 @@ ICONS = {
 	'fullscreen-exit': ('fullscreen_exit', False),
 	'equalizer':      ('graphic_eq',    False),
 	'info':           ('info',          False),
+	'videocam-off':   ('videocam_off',  False),
 	'copy':           ('content_copy',  False),
 }
 

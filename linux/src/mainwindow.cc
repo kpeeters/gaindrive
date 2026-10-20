@@ -43,7 +43,9 @@ namespace {
 		.row-heading { font-weight: bold; padding: 12px 4px 4px 4px; opacity: 0.6; }
 		/* In the panes, flush with the row text below and in full colour. */
 		.pane .row-heading { padding-left: 0; opacity: 1; color: @gd_red; }
-		.pane listview > row { padding: 6px 10px; }
+		.pane listview > row { padding: 0; }
+		.pane-row { padding: 6px 10px; }
+		.pane-row.extra { padding: 0; }
 		.hero { margin: 12px; }
 		.cover { border-radius: 4px; }
 		.notice { padding: 6px 12px; background-color: alpha(@error_color, 0.2); }
@@ -68,6 +70,16 @@ namespace {
 		.player-row > button > image,
 		.player-row > menubutton > button image { -gtk-icon-size: 48px; }
 		.player-row > .bar-extra image { -gtk-icon-size: 32px; }
+		/* A checked (open or on) button keeps the flat look: the theme's
+		   dark fill would hide a red icon. Red says what is on. The theme's
+		   light text for that fill goes too, or a plain icon vanishes. */
+		.player-row > .bar-extra:checked,
+		.player-row > .bar-extra > button:checked {
+			background-color: transparent;
+			color: @theme_fg_color;
+		}
+		.player-row > .bar-extra:checked:hover,
+		.player-row > .bar-extra > button:checked:hover { background-color: alpha(currentColor, 0.07); }
 		.player-bar .casting image { color: @gd_red; }
 		.info-card .card-title { font-weight: bold; font-size: 1.15em; }
 		.info-card .card-section {
@@ -79,7 +91,7 @@ namespace {
 		.bottom-nav button { padding: 4px 0; }
 		.bottom-nav image { -gtk-icon-size: 24px; color: @gd_red; }
 		.bottom-nav label { font-size: 0.75em; }
-		.player-bar .eq-on image { color: @gd_red; }
+		.player-bar .eq-on image, .player-bar .audio-only image { color: @gd_red; }
 		.tune-panel, .info-card {
 			padding: 10px 12px;
 			background-color: @theme_bg_color;
@@ -349,8 +361,9 @@ MainWindow::MainWindow()
 	playback_.signal_started.connect([this]() {
 		const Song *s = playback_.current();
 		// While casting too: the controls, chapters and subtitles stay here,
-		// and a soundtrack-only receiver leaves the subtitles to us.
-		if(s && s->is_video) {
+		// and a soundtrack-only receiver leaves the subtitles to us. Not
+		// for a video played as audio only, which has nothing to show.
+		if(s && playback_.shows_picture(*s)) {
 			video_.show_film(*s, api_);
 			content_.set_visible_child("video");
 			video_.grab_focus();

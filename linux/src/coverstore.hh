@@ -96,6 +96,6 @@ class CoverImage : public Gtk::Image {
 		unsigned         tries_=0;
 		sigc::connection retry_;
 		Gtk::Widget     *scrolled_=nullptr;
-		sigc::connection scroll_watch_, size_watch_;
+		sigc::connection scroll_watch_, size_watch_, map_watch_;
 		guint            tick_=0;
 };

@@ -175,7 +175,7 @@ void Playback::seek(double seconds)
 		return;
 		}
 	// A film is either the stored file or HLS, and both seek.
-	if(s->is_video || (local_offset_==0 && player_.seekable())) {
+	if(shows_picture(*s) || (local_offset_==0 && player_.seekable())) {
 		player_.seek(seconds);
 		return;
 		}
@@ -294,15 +294,17 @@ void Playback::start(double offset)
 void Playback::local_start(double offset)
 	{
 	const Song *s = current();
-	// With a quality cap the stream may well be converted, and then it
-	// cannot seek: ask for one that starts at the offset instead.
+	// With a quality cap the stream may well be converted, and a video's
+	// soundtrack always is; then it cannot seek, so ask for one that starts
+	// at the offset instead.
 	local_offset_ = 0;
-	if(offset>0 && settings_.quality_cap>0 && !s->is_video) {
+	bool pipe = s->is_video ? !shows_picture(*s) : settings_.quality_cap>0;
+	if(offset>0 && pipe) {
 		local_offset_ = std::floor(offset);
 		player_.play_uri(stream_url(*s, offset));
 		}
 	else
-		player_.play_uri(stream_url(*s), offset, s->is_video);
+		player_.play_uri(stream_url(*s), offset, shows_picture(*s));
 	}
 
 const std::string& Playback::cast_sent() const
@@ -319,7 +321,7 @@ std::string Playback::local_url() const
 	{
 	const Song *s = current();
 	if(!s || !api_) return "";
-	if(s->is_video) return video_url(*s, mp3_retried_);
+	if(shows_picture(*s)) return video_url(*s, mp3_retried_);
 	return stream_url(*s, local_offset_, mp3_retried_);
 	}
 
@@ -327,6 +329,28 @@ bool Playback::cast_picture() const
 	{
 	const Song *s = current();
 	return caster_.active() && s && s->is_video && !cast_soundtrack_;
+	}
+
+bool Playback::shows_picture(const Song& s) const
+	{
+	return s.is_video && !settings_.video_audio_only;
+	}
+
+void Playback::video_mode_changed()
+	{
+	const Song *s = current();
+	if(!s || !s->is_video || !api_) return;
+	double at = position();
+	if(caster_.active())
+		cast_film(at);
+	else {
+		mp3_retried_ = false;
+		local_start(at);
+		next_id_.clear();
+		update_next();
+		}
+	// For the window, which shows the picture or puts it away.
+	signal_started.emit();
 	}
 
 void Playback::set_caption(int track)
@@ -427,7 +451,9 @@ void Playback::cast_film(double offset)
 	// Bit 0 of the receiver's `ca` record is video_out; one that does not
 	// say is taken to have a screen, as the server takes it. A WiiM has none.
 	int  ca      = caster_.device().capabilities;
-	bool picture = ca<0 || (ca & 1)!=0;
+	// A receiver with a screen gets the soundtrack too when the picture is
+	// not wanted.
+	bool picture = (ca<0 || (ca & 1)!=0) && shows_picture(*s);
 	cast_soundtrack_ = !picture;
 	caster_.prepare(offset);
 	unsigned gen = ++cast_gen_;
@@ -586,7 +612,7 @@ void Playback::error(const std::string& e)
 	const Song *s = current();
 	// The web client's fallback: what GStreamer cannot decode, the server
 	// can convert. Once per track, from where it failed.
-	if(s && api_ && !mp3_retried_ && s->is_video) {
+	if(s && api_ && !mp3_retried_ && shows_picture(*s)) {
 		mp3_retried_ = true;
 		double at = position();
 		player_.play_uri(video_url(*s, true), at, true);
@@ -614,7 +640,7 @@ void Playback::update_next()
 	// Not around a film: the player's flags are set per stream, and a
 	// gapless switch would keep the previous one's.
 	if(api_ && index_>=0 && index_+1<long(queue_.size())
-	   && !queue_[size_t(index_)].is_video && !queue_[size_t(index_+1)].is_video)
+	   && !shows_picture(queue_[size_t(index_)]) && !shows_picture(queue_[size_t(index_+1)]))
 		id = queue_[size_t(index_+1)].ref.id;
 	if(id==next_id_) return;
 	next_id_ = id;
@@ -696,11 +722,19 @@ void Playback::report_stopped_now()
 
 std::string Playback::stream_url(const Song& s, double offset, bool mp3) const
 	{
-	if(s.is_video) return video_url(s, mp3);
+	if(shows_picture(s)) return video_url(s, mp3);
 	// No `pace`: unlike a Cast receiver, playbin reads steadily as it plays,
 	// so the connection never sits idle long enough for a proxy to cut it.
 	Params p = {{"id", s.ref.id}};
-	if(settings_.quality_cap>0) {
+	if(s.is_video) {
+		// A format makes the server send the soundtrack alone. No
+		// `playable`, which would allow the film as stored; without a cap,
+		// Opus and no ceiling, so a soundtrack already in Opus is copied.
+		p.push_back({"format", mp3 ? "mp3" : settings_.quality_cap>0 ? settings_.format : "opus"});
+		if(settings_.quality_cap>0)
+			p.push_back({"maxBitRate", std::to_string(settings_.quality_cap)});
+		}
+	else if(settings_.quality_cap>0) {
 		p.push_back({"maxBitRate", std::to_string(settings_.quality_cap)});
 		p.push_back({"format", mp3 ? "mp3" : settings_.format});
 		// What may be sent as it stands. Lossy only, as on Android: a token

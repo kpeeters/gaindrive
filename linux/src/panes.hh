@@ -43,6 +43,10 @@ class RowWidget : public Gtk::Box {
 		enum class ListButton { none, add, remove };
 		void show_actions(bool star, bool starred, ListButton list, bool queue);
 		void set_playing(bool on);
+		// Shows the pane's own widget in place of the row's parts, taking
+		// it from whichever row had it; drop_extra gives it back.
+		void show_extra(Gtk::Widget& w);
+		void drop_extra();
 
 		// The row currently bound here.
 		Glib::RefPtr<ListRow> row;
@@ -56,6 +60,7 @@ class RowWidget : public Gtk::Box {
 	private:
 		Gtk::Label  heading_;
 		Gtk::Box    item_;
+		Gtk::Widget *extra_=nullptr;
 		CoverImage *cover_=nullptr;
 		Gtk::Label  lead_, title_, subtitle_, trail_;
 		Gtk::Box    text_;
@@ -181,7 +186,6 @@ class AlbumPane : public Pane {
 		AppSettings&               settings_;
 		Gtk::Button                sort_;
 		std::unique_ptr<InfoBlock> bio_;
-		Gtk::ScrolledWindow        bio_scroll_;
 		std::vector<Album>         albums_;
 		std::string                artist_id_;
 		bool                       category_=false;

@@ -50,7 +50,7 @@ class PlayerBar : public Gtk::Box {
 		Gtk::Box                    info_;
 		Gtk::Label                  title_, artist_;
 		Gtk::Button                 prev_, play_, next_;
-		Gtk::ToggleButton           info_button_;
+		Gtk::ToggleButton           info_button_, audio_only_;
 		Gtk::Scale                  seek_;
 		Gtk::Label                  time_;
 		std::unique_ptr<CastButton> cast_;

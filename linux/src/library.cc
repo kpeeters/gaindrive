@@ -137,20 +137,6 @@ AlbumPane::AlbumPane(CoverStore& covers, AppSettings& settings)
 		render();
 		});
 	header_.append(sort_);
-	// Above the list rather than scrolling with it: a list in a box binds
-	// every row at once, and an artist, or a category of radio shows, can
-	// have hundreds of albums, each with a cover to fetch.
-	// Its own scroller, so an expanded biography cannot push the albums
-	// out of the pane.
-	bio_scroll_.set_child(*bio_);
-	bio_scroll_.set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
-	bio_scroll_.set_propagate_natural_height(true);
-	bio_scroll_.set_max_content_height(320);
-	insert_child_after(bio_scroll_, header_);
-	bio_scroll_.set_visible(false);
-	bio_->property_visible().signal_changed().connect([this]() {
-		bio_scroll_.set_visible(bio_->get_visible());
-		});
 	}
 
 AlbumPane::~AlbumPane() = default;
@@ -219,6 +205,12 @@ void AlbumPane::render()
 		return a.year!=b.year ? a.year<b.year : n<0;
 		});
 	std::vector<Glib::RefPtr<ListRow>> rows;
+	// The biography as the list's first row, so it scrolls with the albums
+	// as on the web, however far it expands. Not in a box above the list:
+	// a list in a box binds every row at once, and an artist can have
+	// hundreds of albums, each with a cover to fetch.
+	if(!category_)
+		rows.push_back(ListRow::extra());
 	for(const auto& a: sorted)
 		rows.push_back(ListRow::of(a));
 	set_rows(rows);
@@ -226,6 +218,10 @@ void AlbumPane::render()
 
 void AlbumPane::bind(RowWidget& w, const ListRow& row)
 	{
+	if(row.kind==ListRow::Kind::extra) {
+		w.show_extra(*bio_);
+		return;
+		}
 	const auto& a = row.album;
 	std::string meta;
 	if(a.year)       meta = std::to_string(a.year);

@@ -320,6 +320,16 @@ void CoverImage::watch()
 		// that has not been given a size yet.
 		if(get_width()==0) return true;
 		tick_ = 0;
+		// Hidden, as the artist portrait is until the bio arrives, with
+		// the size it had for the previous artist: no scroll or resize need
+		// follow its showing, so wait for that instead.
+		if(!get_mapped()) {
+			map_watch_ = signal_map().connect([this]() {
+				map_watch_.disconnect();
+				watch();
+				});
+			return false;
+			}
 		scrolled_ = get_ancestor(GTK_TYPE_SCROLLED_WINDOW);
 		if(!scrolled_ || on_screen()) {
 			stop_watching();
@@ -343,6 +353,7 @@ void CoverImage::stop_watching()
 	{
 	scroll_watch_.disconnect();
 	size_watch_.disconnect();
+	map_watch_.disconnect();
 	// Not once GTK has destroyed the widget, as it does a list's rows before
 	// their C++ side goes; it has dropped the callback with it.
 	if(tick_ && gobj()) remove_tick_callback(tick_);

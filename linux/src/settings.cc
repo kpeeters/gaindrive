@@ -38,6 +38,8 @@ void AppSettings::load()
 		if(fmt==f.param) format = fmt;
 	const auto& co = jsub(j, "castOriginal");
 	cast_original = co.is_boolean() && co.get<bool>();
+	const auto& vao = jsub(j, "videoAudioOnly");
+	video_audio_only = vao.is_boolean() && vao.get<bool>();
 	const auto& sorts = jsub(j, "sortByName");
 	if(sorts.is_object())
 		for(const auto& [k, v]: sorts.items())
@@ -70,7 +72,8 @@ void AppSettings::save() const
 	{
 	write_config("settings.json", {
 		{"qualityCap", quality_cap}, {"transcodeFormat", format},
-		{"castOriginal", cast_original}, {"sortByName", sort_by_name},
+		{"castOriginal", cast_original}, {"videoAudioOnly", video_audio_only},
+		{"sortByName", sort_by_name},
 		{"eqOn", eq_on}, {"eqGains", eq_gains}, {"eqSlots", eq_slots},
 		{"wiimSlots", wiim_slots}
 		});

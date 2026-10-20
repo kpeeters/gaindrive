@@ -122,6 +122,11 @@ Glib::RefPtr<ListRow> ListRow::heading(const std::string& text)
 	return r;
 	}
 
+Glib::RefPtr<ListRow> ListRow::extra()
+	{
+	return Glib::make_refptr_for_instance<ListRow>(new ListRow(Kind::extra));
+	}
+
 Glib::RefPtr<ListRow> ListRow::of(const Artist& a)
 	{
 	auto r = Glib::make_refptr_for_instance<ListRow>(new ListRow(Kind::artist));

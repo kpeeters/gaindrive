@@ -14,6 +14,9 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 	  item_(Gtk::Orientation::HORIZONTAL, 10),
 	  text_(Gtk::Orientation::VERTICAL)
 	{
+	// The padding here rather than on the list's row, so that an extra row
+	// can do without.
+	add_css_class("pane-row");
 	heading_.set_xalign(0);
 	heading_.add_css_class("row-heading");
 	append(heading_);
@@ -59,11 +62,37 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 
 RowWidget::~RowWidget()
 	{
+	drop_extra();
 	if(registry) registry->erase(this);
+	}
+
+void RowWidget::show_extra(Gtk::Widget& w)
+	{
+	set_playing(false);
+	heading_.set_visible(false);
+	item_.set_visible(false);
+	if(extra_==&w) return;
+	drop_extra();
+	// A recycled row may still hold it, if GTK bound this one first.
+	if(auto other = dynamic_cast<RowWidget*>(w.get_parent()))
+		other->drop_extra();
+	extra_ = &w;
+	append(w);
+	// No padding of its own, so it takes no room while the widget hides.
+	add_css_class("extra");
+	}
+
+void RowWidget::drop_extra()
+	{
+	if(!extra_) return;
+	remove(*extra_);
+	extra_ = nullptr;
+	remove_css_class("extra");
 	}
 
 void RowWidget::show_heading(const std::string& text)
 	{
+	drop_extra();
 	set_playing(false);
 	heading_.set_text(text);
 	heading_.set_visible(true);
@@ -74,6 +103,7 @@ void RowWidget::show_item(const std::string& cover_id, const std::string& lead,
                           const std::string& title, const std::string& subtitle,
                           const std::string& trail)
 	{
+	drop_extra();
 	heading_.set_visible(false);
 	item_.set_visible(true);
 	show_actions(false, false, ListButton::none, false);
@@ -184,7 +214,7 @@ Pane::Pane(CoverStore& covers, int cover_px, bool boxed)
 		auto row = std::dynamic_pointer_cast<ListRow>(li->get_item());
 		auto w   = dynamic_cast<RowWidget*>(li->get_child());
 		if(!row || !w) return;
-		bool item = row->kind!=ListRow::Kind::heading;
+		bool item = row->kind!=ListRow::Kind::heading && row->kind!=ListRow::Kind::extra;
 		li->set_activatable(item);
 		li->set_selectable(item);
 		w->row = row;
@@ -192,8 +222,10 @@ Pane::Pane(CoverStore& covers, int cover_px, bool boxed)
 		w->set_playing(is_playing(*row));
 		});
 	factory->signal_unbind().connect([](const Glib::RefPtr<Gtk::ListItem>& li) {
-		if(auto w = dynamic_cast<RowWidget*>(li->get_child()))
+		if(auto w = dynamic_cast<RowWidget*>(li->get_child())) {
 			w->row.reset();
+			w->drop_extra();
+			}
 		});
 	list_.set_model(selection_);
 	list_.set_factory(factory);

@@ -3,7 +3,10 @@
 #include "coverstore.hh"
 #include "jsonread.hh"
 
+#include <gdkmm/frameclock.h>
 #include <glibmm/main.h>
+
+#include <algorithm>
 
 namespace {
 	const unsigned poll_seconds = 15;
@@ -11,10 +14,59 @@ namespace {
 	const int      clamp_lines  = 6;
 }
 
+HeightClip::HeightClip(Gtk::Widget& child)
+	: child_(child)
+	{
+	set_overflow(Gtk::Overflow::HIDDEN);
+	child_.set_parent(*this);
+	}
+
+HeightClip::~HeightClip()
+	{
+	child_.unparent();
+	}
+
+void HeightClip::set_height(int height)
+	{
+	height_ = height;
+	queue_resize();
+	}
+
+Gtk::SizeRequestMode HeightClip::get_request_mode_vfunc() const
+	{
+	return Gtk::SizeRequestMode::HEIGHT_FOR_WIDTH;
+	}
+
+void HeightClip::measure_vfunc(Gtk::Orientation orientation, int for_size, int& minimum, int& natural,
+                               int& minimum_baseline, int& natural_baseline) const
+	{
+	// Width never for a height: a wrapping label asked how wide it must be
+	// to fit the eased height answers with lines wider than the pane.
+	bool across = orientation==Gtk::Orientation::HORIZONTAL;
+	child_.measure(orientation, across ? -1 : for_size, minimum, natural,
+	               minimum_baseline, natural_baseline);
+	minimum_baseline = natural_baseline = -1;
+	// Nor the whole text on one line as the width it would like, which a
+	// list row would grant; it fills whatever width it is given anyway.
+	if(across) natural = minimum;
+	if(orientation==Gtk::Orientation::VERTICAL && height_>=0)
+		minimum = natural = height_;
+	}
+
+void HeightClip::size_allocate_vfunc(int width, int height, int)
+	{
+	// The child at its own height for this width; what is below the set
+	// height is clipped.
+	int min = 0, nat = 0, mb, nb;
+	child_.measure(Gtk::Orientation::VERTICAL, width, min, nat, mb, nb);
+	child_.size_allocate(Gtk::Allocation(0, 0, width, std::max(height, min)), -1);
+	}
+
 InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 	: Gtk::Box(Gtk::Orientation::HORIZONTAL, 12),
 	  body_(Gtk::Orientation::VERTICAL, 4),
 	  links_(Gtk::Orientation::HORIZONTAL, 0),
+	  clip_(text_),
 	  wiki_("", "Wikipedia"),
 	  allmusic_("", "AllMusic"),
 	  more_("more")
@@ -27,20 +79,27 @@ InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 		}
 	text_.set_wrap(true);
 	text_.set_xalign(0);
+	text_.set_yalign(0);
 	text_.set_selectable(true);
 	// Out of the focus chain: a selectable label selects all of itself when
 	// focus lands on it, as it did when a sliding strip hid the pane that
 	// had focus. Still selectable with the mouse.
 	text_.set_focusable(false);
-	text_.set_lines(clamp_lines);
-	text_.set_ellipsize(Pango::EllipsizeMode::END);
-	body_.append(text_);
+	set_clamped(true);
+	body_.append(clip_);
 	more_.add_css_class("flat");
 	more_.signal_clicked().connect([this]() {
 		bool expand = text_.get_lines()>0;
-		text_.set_lines(expand ? -1 : clamp_lines);
-		text_.set_ellipsize(expand ? Pango::EllipsizeMode::NONE : Pango::EllipsizeMode::END);
+		int from = clip_.get_height();
+		// The far end measured at the width the text has now.
+		set_clamped(!expand);
+		int min = 0, to = 0, mb, nb;
+		text_.measure(Gtk::Orientation::VERTICAL, clip_.get_width(), min, to, mb, nb);
+		// Collapsing keeps the whole text until the end, so it is not
+		// cut off before the space closes.
+		if(!expand) set_clamped(false);
 		more_.set_label(expand ? "less" : "more");
+		animate(from, to);
 		});
 	links_.append(wiki_);
 	links_.append(allmusic_);
@@ -58,6 +117,39 @@ InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 InfoBlock::~InfoBlock()
 	{
 	timer_.disconnect();
+	if(tick_ && gobj()) remove_tick_callback(tick_);
+	}
+
+void InfoBlock::set_clamped(bool clamped)
+	{
+	text_.set_lines(clamped ? clamp_lines : -1);
+	text_.set_ellipsize(clamped ? Pango::EllipsizeMode::END : Pango::EllipsizeMode::NONE);
+	}
+
+void InfoBlock::animate(int from, int to)
+	{
+	if(tick_) remove_tick_callback(tick_);
+	from_  = from;
+	to_    = to;
+	start_ = 0;
+	clip_.set_height(from);
+	tick_ = add_tick_callback([this](const Glib::RefPtr<Gdk::FrameClock>& clock) {
+		gint64 now = clock->get_frame_time();
+		if(!start_) start_ = now;
+		double t = std::min(1.0, (now-start_)/250000.0);
+		// Ease out, as GTK's own transitions do.
+		double e = 1 - (1-t)*(1-t)*(1-t);
+		if(t<1) {
+			clip_.set_height(int(from_ + (to_-from_)*e));
+			return true;
+			}
+		tick_ = 0;
+		// At rest the text decides the height again, so a resize of the
+		// pane rewraps it as usual.
+		if(more_.get_label()=="more") set_clamped(true);
+		clip_.set_height(-1);
+		return false;
+		});
 	}
 
 void InfoBlock::clear()
@@ -101,9 +193,12 @@ void InfoBlock::request()
 
 		if(!(tries_>0 && resolving && nothing)) {
 			text_.set_text(text);
-			text_.set_visible(!text.empty());
-			text_.set_lines(clamp_lines);
-			text_.set_ellipsize(Pango::EllipsizeMode::END);
+			clip_.set_visible(!text.empty());
+			// Collapsed at once: a new artist's text does not fold up.
+			if(tick_) remove_tick_callback(tick_);
+			tick_ = 0;
+			set_clamped(true);
+			clip_.set_height(-1);
 			more_.set_label("more");
 			// A guess at whether six lines hold it; a label cannot say.
 			more_.set_visible(text.size()>400);

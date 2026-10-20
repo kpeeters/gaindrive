@@ -15,6 +15,9 @@ struct AppSettings {
 	// A receiver fetches from the server itself, so the ceiling need not
 	// apply to it. Off by default, as on the other clients.
 	bool        cast_original=false;
+	// Videos fetched and played as their soundtrack alone, as the other
+	// clients' setting; here a toggle in the player bar.
+	bool        video_audio_only=false;
 	// Album order per section ("artists", "categories"): by name or by year.
 	std::map<std::string, bool> sort_by_name;
 	// The local equaliser, for this machine's output: on or off, the
