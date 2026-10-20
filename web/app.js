@@ -9808,6 +9808,16 @@ function renderSearchResults(res, gen) {
          name.textContent = artist.name;
          row.appendChild(name);
 
+         // As the library's artist rows show it. Only when sent: a server
+         // other than gaindrive may leave albumCount off a search hit.
+         if (artist.albumCount > 0) {
+            const count = document.createElement('span');
+            count.className = 'artist-albums';
+            count.textContent = artist.albumCount === 1
+               ? '1 album' : `${artist.albumCount} albums`;
+            row.appendChild(count);
+            }
+
          row.addEventListener('click', () => viewAlbums(artist.id, artist.name));
          frag.appendChild(row);
          }

@@ -90,7 +90,8 @@ fun ArtistRow(artist: Artist, onClick: () -> Unit, badges: List<String> = emptyL
 		ServerBadges(badges)
 		// Omitted rather than shown as zero, the same way an album row omits a
 		// track count it was not given. Not every listing carries one: the
-		// folder-browsing index does not count albums, and neither does search.
+		// folder-browsing index does not count albums, and another server's
+		// search may not.
 		if (artist.albumCount > 0) {
 			Text(
 				text = if (artist.albumCount == 1) "1 album" else "${artist.albumCount} albums",

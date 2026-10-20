@@ -91,8 +91,8 @@ struct ArtistRow: View {
 				.lineLimit(1)
 				.frame(maxWidth: .infinity, alignment: .leading)
 			ServerBadges(names: item.badges)
-			// Omitted rather than zero: search and the folder index do not
-			// count albums.
+			// Omitted rather than zero: the folder index does not count
+			// albums, and another server's search may not.
 			if item.artist.albumCount > 0 {
 				Text(albumCountText)
 					.font(.footnote)
