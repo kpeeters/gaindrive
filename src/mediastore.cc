@@ -285,8 +285,10 @@ static const std::string ALBUM_ARTIST_ID_SQL =
 // aggregate. albums.song_count and albums.duration are written by no scan path
 // at all -- there is one INSERT INTO albums and it names neither, and no UPDATE
 // touches them -- so both have always read 0, and a stored video_count would be
-// a third column waiting for a write that never comes. songs.album_id is
-// indexed, so this is one seek per listed album.
+// a third column waiting for a write that never comes. One index-only seek
+// per album, on songs(album_id, is_video) -- but per album SQLite *sorts*,
+// as result columns are computed before the sort, which is why an ordered
+// list needs an index for its ORDER BY to stop at the listed ones.
 static const std::string ALBUM_VIDEO_COUNT_SQL =
 	",      (SELECT COUNT(*) FROM songs sv"
 	"         WHERE sv.album_id = al.id AND sv.is_video = 1)";
@@ -942,7 +944,6 @@ void MediaStore::create_schema()
 			created             DATETIME DEFAULT CURRENT_TIMESTAMP,
 			last_scanned        DATETIME
 		);
-		CREATE INDEX IF NOT EXISTS idx_songs_album  ON songs(album_id);
 		CREATE INDEX IF NOT EXISTS idx_songs_folder ON songs(folder_id);
 		CREATE INDEX IF NOT EXISTS idx_songs_genre  ON songs(genre);
 
@@ -1451,6 +1452,25 @@ void MediaStore::create_schema()
 	// no genres" and no film in an existing library would ever get one.
 	try { db_music_.exec("ALTER TABLE video_meta ADD COLUMN genre TEXT"); }
 	catch (const SQLite::Exception&) {}
+
+	// Indexes for the queries behind Recents, here rather than beside their
+	// tables because songs.is_video may only just have been added above.
+	//   * albums(created, id): getAlbumList2 type=newest walks it backwards
+	//     and stops at `size`, instead of sorting every album, and computing
+	//     each one's video count and star, to keep twelve.
+	//   * songs(album_id, is_video): the video count from the index alone.
+	//     It serves everything idx_songs_album did, which is dropped.
+	//   * play_counts(user_id, last_played): getRecentSongs, likewise.
+	//   * stars(user_id, album_folder_path): the album-star join of every
+	//     album list, which the UNIQUE index can only narrow to the user.
+	db_music_.exec(
+		"CREATE INDEX IF NOT EXISTS idx_albums_created ON albums(created, id);"
+		"CREATE INDEX IF NOT EXISTS idx_songs_album_video ON songs(album_id, is_video);"
+		"DROP INDEX IF EXISTS idx_songs_album;"
+		"CREATE INDEX IF NOT EXISTS client.idx_play_counts_recent"
+		"  ON play_counts(user_id, last_played);"
+		"CREATE INDEX IF NOT EXISTS client.idx_stars_album"
+		"  ON stars(user_id, album_folder_path);");
 
 	// One-time: the hand-picked-cover flag used to be albums.cover_manual, in
 	// the music DB -- which a rebuild would have thrown away, taking with it

@@ -259,7 +259,10 @@ SearchPane::SearchPane(CoverStore& covers)
 	entry_.set_placeholder_text("Artists, albums, tracks");
 	entry_.set_margin_start(12);
 	entry_.set_margin_end(12);
+	// Clear of the header's rule, as far as it is in from the side.
+	entry_.set_margin_top(12);
 	entry_.set_margin_bottom(6);
+	entry_.add_css_class("pane-search");
 	// The web client's debounce.
 	entry_.set_search_delay(320);
 	entry_.signal_search_changed().connect(sigc::mem_fun(*this, &SearchPane::run));

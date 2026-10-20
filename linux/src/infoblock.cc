@@ -65,7 +65,7 @@ void HeightClip::size_allocate_vfunc(int width, int height, int)
 InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 	: Gtk::Box(Gtk::Orientation::HORIZONTAL, 12),
 	  body_(Gtk::Orientation::VERTICAL, 4),
-	  links_(Gtk::Orientation::HORIZONTAL, 0),
+	  links_(Gtk::Orientation::HORIZONTAL, 6),
 	  clip_(text_),
 	  wiki_("", "Wikipedia"),
 	  allmusic_("", "AllMusic"),
@@ -104,6 +104,7 @@ InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 		more_.set_label(expand ? "less" : "more");
 		animate(from, to);
 		});
+	links_.add_css_class("info-links");
 	links_.append(wiki_);
 	links_.append(allmusic_);
 	links_.append(more_);

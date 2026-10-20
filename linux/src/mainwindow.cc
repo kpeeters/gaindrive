@@ -46,6 +46,11 @@ namespace {
 		.pane listview > row { padding: 0; }
 		.pane-row { padding: 6px 10px; }
 		.pane-row.extra { padding: 0; }
+		/* Room around the text, which the theme sets tight to the icon. */
+		.pane-search { min-height: 36px; padding: 0 10px; }
+		.pane-search > image:first-child { margin-right: 8px; }
+		/* As far down as the bio is in from the left. */
+		.pane-row.extra > .info-block { margin-top: 12px; }
 		.hero { margin: 12px; }
 		.cover { border-radius: 4px; }
 		.notice { padding: 6px 12px; background-color: alpha(@error_color, 0.2); }
@@ -54,6 +59,23 @@ namespace {
 		.player-bar { padding: 8px 12px; border-top: 1px solid alpha(currentColor, 0.15); }
 		.pane-empty { padding: 12px; }
 		.info-block { margin: 0 12px 12px 12px; }
+		/* The external links as tinted pills, as iOS's small bordered
+		   buttons: the theme's link button pads plain text with the
+		   background, which reads as a gap rather than a button. */
+		.info-links { margin-top: 4px; }
+		.info-links button.link,
+		.info-links button.link:visited {
+			color: @gd_red;
+			background-color: alpha(@gd_red, 0.12);
+			border: none;
+			box-shadow: none;
+			border-radius: 999px;
+			padding: 2px 10px;
+			min-height: 0;
+			font-size: 0.85em;
+		}
+		.info-links button.link:hover { background-color: alpha(@gd_red, 0.2); }
+		.info-links button.link label { text-decoration: none; }
 		.liner-notes { margin: 12px; }
 		.row-action { min-width: 24px; min-height: 24px; padding: 2px; }
 		.row-action.starred { color: @accent_color; }
