@@ -51,6 +51,9 @@
      a) the OS prefers light AND no explicit class is set, OR
      b) <html class="light"> is set explicitly by the theme toggle.
    <html class="dark"> forces dark regardless of OS preference.
+   In both, --bg (the panes) is the view colour and --surface (sidebar,
+   player, cards) a step off it, as on iOS and the Linux player: lighter
+   than the panes in dark, grey against white panes in light.
    ── */
 
 :root {
@@ -73,8 +76,8 @@
 
 @media (prefers-color-scheme: light) {
    :root:not(.dark) {
-      --bg:       #f4f4f4;
-      --surface:  #ffffff;
+      --bg:       #ffffff;
+      --surface:  #f4f4f4;
       --border:   #ddd;
       --divider:  #bbb;
       --accent:   #a31623;
@@ -84,8 +87,8 @@
 }
 
 :root.light {
-   --bg:       #f4f4f4;
-   --surface:  #ffffff;
+   --bg:       #ffffff;
+   --surface:  #f4f4f4;
    --border:   #ddd;
    --divider:  #bbb;
    --accent:   #a31623;
