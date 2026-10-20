@@ -88,6 +88,9 @@ InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 	set_clamped(true);
 	body_.append(clip_);
 	more_.add_css_class("flat");
+	// At the right edge, as the web client's toggle, apart from the links.
+	more_.set_hexpand(true);
+	more_.set_halign(Gtk::Align::END);
 	more_.signal_clicked().connect([this]() {
 		bool expand = text_.get_lines()>0;
 		int from = clip_.get_height();

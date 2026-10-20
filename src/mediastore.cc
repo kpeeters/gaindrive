@@ -8182,7 +8182,12 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 
 	// Artists - folder-level, depth-1 children of the root.
 	std::string aq_sql =
-		"SELECT f.id, f.name"
+		"SELECT f.id, f.name,"
+		// Per hit, at most artist_count of them, through the two indexes
+		// on folders(parent_id) and albums(folder_id).
+		"       (SELECT COUNT(al.id) FROM folders af"
+		"          JOIN albums al ON al.folder_id = af.id"
+		"         WHERE af.parent_id = f.id) AS album_count"
 		" FROM folders f"
 		" WHERE f.parent_id IN (SELECT id FROM folders WHERE parent_id IS NULL)"
 		"   AND LOWER(f.name) LIKE LOWER(?) ESCAPE '\\'";
@@ -8201,6 +8206,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		e.title     = aq.getColumn(1).getString();
 		e.artist    = e.title;
 		e.parent_id = -1;
+		e.album_count = aq.getColumn(2).getInt();
 		result.artists.push_back(std::move(e));
 		}
 

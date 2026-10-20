@@ -266,6 +266,29 @@ MainWindow::MainWindow()
 		return true;
 		}, false);
 	browse_.add_controller(back_keys);
+	// The web client's view keys: Shift and the initial, and / for search.
+	// Bubbling, so a text field takes them as typing first; and not over a
+	// film, which they would leave playing out of sight.
+	auto view_keys = Gtk::EventControllerKey::create();
+	view_keys->signal_key_pressed().connect([this](guint keyval, guint, Gdk::ModifierType state) {
+		using M = Gdk::ModifierType;
+		if(!api_ || content_.get_visible_child_name()=="video") return false;
+		if((state & (M::CONTROL_MASK | M::ALT_MASK | M::SUPER_MASK))!=M(0)) return false;
+		bool shift = (state & M::SHIFT_MASK)==M::SHIFT_MASK;
+		int index = -1;
+		switch(gdk_keyval_to_lower(keyval)) {
+			case GDK_KEY_l:     if(shift) index = 0; break;
+			case GDK_KEY_p:     if(shift) index = 1; break;
+			case GDK_KEY_r:     if(shift) index = 2; break;
+			case GDK_KEY_s:     if(shift) index = 4; break;
+			case GDK_KEY_slash: index = 3; break;
+			}
+		if(index<0) return false;
+		nav_.select_row(*nav_.get_row_at_index(index));
+		if(index==3) search_.focus_entry();
+		return true;
+		}, false);
+	browse_.add_controller(view_keys);
 	auto back_button = Gtk::GestureClick::create();
 	back_button->set_button(8);
 	back_button->signal_pressed().connect([this](int, double, double) { back(); });

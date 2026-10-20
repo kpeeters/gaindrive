@@ -562,6 +562,9 @@ class MediaStore {
 			// Album hits from search() only: a film turns up there as an
 			// album, and this is what lets a client mark it as one.
 			int         video_count = 0;
+			// Artist hits from search() only, counted as get_artists()
+			// counts them, so a search row and the library list agree.
+			int         album_count = 0;
 			};
 
 		struct RecentSongEntry {

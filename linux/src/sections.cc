@@ -339,8 +339,10 @@ void SearchPane::bind(RowWidget& w, const ListRow& row)
 			break;
 		case ListRow::Kind::artist:
 			// The artist's portrait: getCoverArt takes the artist's own id.
+			// Only when known: a server other than gaindrive may not send
+			// albumCount with a search hit.
 			w.show_item(row.artist.ref.id, "", row.artist.name, "",
-			            plural(row.artist.album_count, "album", "albums"));
+			            row.artist.album_count>0 ? plural(row.artist.album_count, "album", "albums") : "");
 			break;
 		case ListRow::Kind::album:
 			bind_album_hit(w, row.album);

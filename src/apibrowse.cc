@@ -1463,7 +1463,8 @@ void GainDrive::routes_browse()
 			body = subsonic_ok_json([&sr, key](nlohmann::json& r) {
 				nlohmann::json artists = nlohmann::json::array();
 				for (auto& a : sr.artists)
-					artists.push_back({{"id", sid(a.id)}, {"name", a.title}});
+					artists.push_back({{"id", sid(a.id)}, {"name", a.title},
+					                   {"albumCount", a.album_count}});
 
 				nlohmann::json albums = nlohmann::json::array();
 				for (auto& c : sr.albums) {
@@ -1514,6 +1515,7 @@ void GainDrive::routes_browse()
 					auto* el = doc.NewElement("artist");
 					el->SetAttribute("id",   a.id);
 					el->SetAttribute("name", a.title.c_str());
+					el->SetAttribute("albumCount", a.album_count);
 					result->InsertEndChild(el);
 					}
 
