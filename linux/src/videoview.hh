@@ -58,6 +58,7 @@ class VideoView : public Gtk::Overlay {
 		void chapter_next();
 		void update_chapter();
 		bool tick();
+		void size_caption();
 		// Shows the controls and starts the clock that hides them again.
 		void poke();
 		bool hide_controls();
@@ -69,6 +70,8 @@ class VideoView : public Gtk::Overlay {
 		// Bumped per film, so an answer for the previous one is dropped.
 		unsigned                   gen_=0;
 		bool                       fullscreen_=false;
+		// Where the last motion event put the pointer.
+		double                     pointer_x_=-1, pointer_y_=-1;
 
 		Gtk::Picture   picture_;
 		Gtk::Label     missing_;
@@ -89,6 +92,8 @@ class VideoView : public Gtk::Overlay {
 		// getVideoInfo's caption ids, in menu order after "Off".
 		std::vector<std::string> caption_ids_;
 		std::vector<Cue>         cues_;
+		// The caption's size in pixels, last set from the view's height.
+		int                      caption_px_=0;
 
 		sigc::connection timer_, hide_;
 };

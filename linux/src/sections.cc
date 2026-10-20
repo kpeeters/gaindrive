@@ -380,6 +380,7 @@ void SettingsPane::load()
 	set_title("Settings");
 	set_rows({
 		ListRow::setting("playback", "Playback", settings_.quality_label()),
+		ListRow::setting("appearance", "Appearance", settings_.theme_label()),
 		ListRow::setting("servers",  "Servers",
 		                 servers_.empty() ? "None" : servers_.front().url),
 		ListRow::setting("about",    "About",    "GainDrive " GAINDRIVE_VERSION)

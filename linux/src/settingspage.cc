@@ -57,9 +57,22 @@ Gtk::Label& SettingsPage::add_label(const std::string& text, const char *css)
 void SettingsPage::show(const std::string& key, std::shared_ptr<ApiClient> api)
 	{
 	clear();
-	if(key=="playback")     show_playback();
-	else if(key=="servers") show_servers(api);
-	else                    show_about(api);
+	if(key=="playback")        show_playback();
+	else if(key=="appearance") show_appearance();
+	else if(key=="servers")    show_servers(api);
+	else                       show_about(api);
+	}
+
+Gtk::Box* SettingsPage::add_row(const char *label, Gtk::Widget& w)
+	{
+	auto box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+	auto l = Gtk::make_managed<Gtk::Label>(label);
+	l->set_xalign(0);
+	l->set_hexpand(true);
+	box->append(*l);
+	box->append(w);
+	content_.append(*box);
+	return box;
 	}
 
 void SettingsPage::show_playback()
@@ -83,18 +96,8 @@ void SettingsPage::show_playback()
 	auto format = Gtk::make_managed<Gtk::DropDown>(Gtk::StringList::create(fmts));
 	format->set_selected(fmt_selected);
 
-	auto row = [this](const char *label, Gtk::Widget& w) {
-		auto box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
-		auto l = Gtk::make_managed<Gtk::Label>(label);
-		l->set_xalign(0);
-		l->set_hexpand(true);
-		box->append(*l);
-		box->append(w);
-		content_.append(*box);
-		return box;
-		};
-	row("Quality", *quality);
-	auto format_row = row("Convert to", *format);
+	add_row("Quality", *quality);
+	auto format_row = add_row("Convert to", *format);
 	format_row->set_visible(settings_.quality_cap!=0);
 	add_label("A file that fits under the limit is sent as it is; anything else is "
 	          "converted. Takes effect on the next track.", "dim-label");
@@ -121,6 +124,47 @@ void SettingsPage::show_playback()
 		if(i<transcode_formats.size()) settings_.format = transcode_formats[i].param;
 		settings_.save();
 		signal_changed.emit();
+		});
+	}
+
+void SettingsPage::show_appearance()
+	{
+	title_.set_text("Appearance");
+
+	std::vector<Glib::ustring> theme_labels;
+	guint theme_selected = 0;
+	for(size_t i=0; i<themes.size(); ++i) {
+		theme_labels.push_back(themes[i].label);
+		if(settings_.theme==themes[i].param) theme_selected = guint(i);
+		}
+	auto theme = Gtk::make_managed<Gtk::DropDown>(Gtk::StringList::create(theme_labels));
+	theme->set_selected(theme_selected);
+	add_row("Theme", *theme);
+	add_label("Auto leaves it to the desktop's GTK settings.", "dim-label");
+
+	std::vector<Glib::ustring> size_labels;
+	guint size_selected = 0;
+	for(size_t i=0; i<subtitle_sizes.size(); ++i) {
+		size_labels.push_back(subtitle_sizes[i].label);
+		if(settings_.subtitle_size==subtitle_sizes[i].param) size_selected = guint(i);
+		}
+	auto size = Gtk::make_managed<Gtk::DropDown>(Gtk::StringList::create(size_labels));
+	size->set_selected(size_selected);
+	add_row("Subtitle size", *size);
+	add_label("Relative to the height of the picture, so subtitles grow with the "
+	          "window and in fullscreen.", "dim-label");
+
+	theme->property_selected().signal_changed().connect([this, theme]() {
+		guint i = theme->get_selected();
+		if(i<themes.size()) settings_.theme = themes[i].param;
+		settings_.save();
+		signal_theme.emit();
+		signal_changed.emit();
+		});
+	size->property_selected().signal_changed().connect([this, size]() {
+		guint i = size->get_selected();
+		if(i<subtitle_sizes.size()) settings_.subtitle_size = subtitle_sizes[i].param;
+		settings_.save();
 		});
 	}
 

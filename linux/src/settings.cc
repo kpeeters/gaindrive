@@ -13,6 +13,15 @@ const std::vector<TranscodeFormat> transcode_formats = {
 	{ "opus", "Opus" }, { "m4a", "AAC" }, { "mp3", "MP3" }
 };
 
+const std::vector<Choice> themes = {
+	{ "auto", "Auto" }, { "light", "Light" }, { "dark", "Dark" }
+};
+
+const std::vector<SubtitleSize> subtitle_sizes = {
+	{ "small", "Small", 0.035 }, { "medium", "Medium", 0.05 },
+	{ "large", "Large", 0.065 }, { "xlarge", "Extra large", 0.08 }
+};
+
 namespace {
 	// A local curve: whole dB within the faders' range, or empty when it is
 	// not a list of numbers at all.
@@ -40,6 +49,12 @@ void AppSettings::load()
 	cast_original = co.is_boolean() && co.get<bool>();
 	const auto& vao = jsub(j, "videoAudioOnly");
 	video_audio_only = vao.is_boolean() && vao.get<bool>();
+	auto th = jstr(j, "theme");
+	for(const auto& t: themes)
+		if(th==t.param) theme = th;
+	auto ss = jstr(j, "subtitleSize");
+	for(const auto& z: subtitle_sizes)
+		if(ss==z.param) subtitle_size = ss;
 	const auto& sorts = jsub(j, "sortByName");
 	if(sorts.is_object())
 		for(const auto& [k, v]: sorts.items())
@@ -73,6 +88,7 @@ void AppSettings::save() const
 	write_config("settings.json", {
 		{"qualityCap", quality_cap}, {"transcodeFormat", format},
 		{"castOriginal", cast_original}, {"videoAudioOnly", video_audio_only},
+		{"theme", theme}, {"subtitleSize", subtitle_size},
 		{"sortByName", sort_by_name},
 		{"eqOn", eq_on}, {"eqGains", eq_gains}, {"eqSlots", eq_slots},
 		{"wiimSlots", wiim_slots}
@@ -86,4 +102,18 @@ std::string AppSettings::quality_label() const
 	for(const auto& f: transcode_formats)
 		if(format==f.param) label = f.label;
 	return "Up to " + std::to_string(quality_cap) + " kbps, " + label + " when converted";
+	}
+
+std::string AppSettings::theme_label() const
+	{
+	for(const auto& t: themes)
+		if(theme==t.param) return t.label;
+	return theme;
+	}
+
+double AppSettings::subtitle_fraction() const
+	{
+	for(const auto& z: subtitle_sizes)
+		if(subtitle_size==z.param) return z.fraction;
+	return 0.05;
 	}

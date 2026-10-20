@@ -17,6 +17,7 @@
 #include <gtkmm/eventcontrollerkey.h>
 #include <gtkmm/gestureclick.h>
 #include <gtkmm/image.h>
+#include <gtkmm/settings.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -133,6 +134,7 @@ namespace {
 		.video { background-color: black; }
 		.video .caption {
 			color: white;
+			/* The subtitles' own size follows the picture; see VideoView. */
 			font-size: 1.6em;
 			background-color: alpha(black, 0.6);
 			padding: 4px 12px;
@@ -204,6 +206,10 @@ MainWindow::MainWindow()
 	provider->load_from_data(css);
 	Gtk::StyleProvider::add_provider_for_display(get_display(), provider,
 		GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+	gtk_dark_ = Gtk::Settings::get_default()->property_gtk_application_prefer_dark_theme();
+	dark_css_ = Gtk::CssProvider::create();
+	dark_css_->load_from_data("@define-color gd_red #c9202f;");
+	apply_theme();
 
 	set_title("GainDrive");
 	set_icon_name(GD_APP_ID);
@@ -376,6 +382,7 @@ MainWindow::MainWindow()
 	settings_page_.signal_changed.connect([this]() {
 		settings_pane_.load();
 		});
+	settings_page_.signal_theme.connect(sigc::mem_fun(*this, &MainWindow::apply_theme));
 	settings_page_.signal_remove_server.connect(sigc::mem_fun(*this, &MainWindow::remove_server));
 	// The info and equaliser cards share the corner: opening one closes the
 	// other.
@@ -939,6 +946,20 @@ void MainWindow::fullscreen_changed()
 	bar_.set_visible(!film);
 	notice_.set_visible(!film);
 	video_.set_fullscreen(film);
+	}
+
+void MainWindow::apply_theme()
+	{
+	bool dark = settings_.theme=="dark" || (settings_.theme=="auto" && gtk_dark_);
+	Gtk::Settings::get_default()->property_gtk_application_prefer_dark_theme() = dark;
+	if(dark==dark_css_on_) return;
+	dark_css_on_ = dark;
+	// Above the main sheet, so its @gd_red is the one looked up.
+	if(dark)
+		Gtk::StyleProvider::add_provider_for_display(get_display(), dark_css_,
+			GTK_STYLE_PROVIDER_PRIORITY_APPLICATION+1);
+	else
+		Gtk::StyleProvider::remove_provider_for_display(get_display(), dark_css_);
 	}
 
 void MainWindow::failed(const ApiResult& r)

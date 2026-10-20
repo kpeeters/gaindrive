@@ -53,6 +53,7 @@ class Playback {
 		GdkPaintable *paintable() const;
 
 		Caster&     caster();
+		const AppSettings& settings() const { return settings_; }
 		// Moves what is playing to a receiver, and back.
 		void        cast_to(size_t device);
 		void        stop_casting();

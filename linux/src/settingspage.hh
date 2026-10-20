@@ -25,11 +25,15 @@ class SettingsPage : public Gtk::Box {
 
 		// A setting changed, so summaries elsewhere are out of date.
 		sigc::signal<void()> signal_changed;
+		// The theme setting changed and wants applying.
+		sigc::signal<void()> signal_theme;
 		// The Remove button of a server, by its key.
 		sigc::signal<void(const std::string&)> signal_remove_server;
 
 	private:
 		void show_playback();
+		void show_appearance();
+		Gtk::Box* add_row(const char *label, Gtk::Widget& w);
 		void show_servers(std::shared_ptr<ApiClient> api);
 		void show_about(std::shared_ptr<ApiClient> api);
 		Gtk::Label& add_label(const std::string& text, const char *css=nullptr);

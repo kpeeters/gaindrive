@@ -32,6 +32,7 @@ struct ApiResult;
 struct Session;
 
 class Mpris;
+namespace Gtk { class CssProvider; }
 
 class MainWindow : public Gtk::ApplicationWindow {
 	public:
@@ -72,6 +73,7 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void go(int depth);
 		void update_back();
 		void fullscreen_changed();
+		void apply_theme();
 		std::vector<Pane*> all_panes();
 
 		// First, so that it is destroyed last: its threads are joined while
@@ -140,6 +142,11 @@ class MainWindow : public Gtk::ApplicationWindow {
 		std::string                expect_album_;
 		// While restore_view() runs, before its restores are queued.
 		bool                       restoring_view_=false;
+		// GTK's own dark preference at startup, which "auto" goes back to.
+		bool                       gtk_dark_=false;
+		// The web's dark-theme accent, on the display while the theme is dark.
+		Glib::RefPtr<Gtk::CssProvider> dark_css_;
+		bool                       dark_css_on_=false;
 		// Last, so it goes first, before what it reports on.
 		std::unique_ptr<Mpris>     mpris_;
 };

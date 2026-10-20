@@ -3,15 +3,18 @@
 #include "jsonread.hh"
 #include "model.hh"
 #include "playback.hh"
+#include "settings.hh"
 #include "stamp.hh"
 
 #include <gdk/gdkkeysyms.h>
 #include <glibmm/main.h>
+#include <pangomm/attrlist.h>
 #include <gtkmm/eventcontrollerkey.h>
 #include <gtkmm/eventcontrollermotion.h>
 #include <gtkmm/gestureclick.h>
 #include <gtkmm/scrolledwindow.h>
 
+#include <algorithm>
 #include <iostream>
 #include <sstream>
 
@@ -23,6 +26,8 @@ namespace {
 	const double   restart_after = 3;
 	// A seek lands a little before its target; still that chapter.
 	const double   chapter_slack = 0.25;
+	// Below this the smallest setting in a small window is unreadable.
+	const int      caption_min_px = 14;
 
 	// "01:02:03.456" or "02:03.456", in seconds; -1 when it is neither.
 	double vtt_time(const std::string& s)
@@ -218,7 +223,15 @@ VideoView::VideoView(Playback& playback)
 		});
 
 	auto motion = Gtk::EventControllerMotion::create();
-	motion->signal_motion().connect([this](double, double) { poke(); });
+	// Hiding the controls and the cursor changes what is under the pointer,
+	// and GTK answers that with a motion event at the same spot; only a
+	// pointer that really moved brings them back.
+	motion->signal_motion().connect([this](double x, double y) {
+		if(x==pointer_x_ && y==pointer_y_) return;
+		pointer_x_ = x;
+		pointer_y_ = y;
+		poke();
+		});
 	add_controller(motion);
 	auto click = Gtk::GestureClick::create();
 	click->signal_pressed().connect([this](int n, double, double) {
@@ -421,6 +434,7 @@ bool VideoView::tick()
 		caption_.set_visible(false);
 		return true;
 		}
+	size_caption();
 	double pos = playback_.position();
 	const Cue *now = nullptr;
 	for(const auto& c: cues_)
@@ -432,6 +446,20 @@ bool VideoView::tick()
 		caption_.set_text(now->text);
 	caption_.set_visible(now!=nullptr);
 	return true;
+	}
+
+void VideoView::size_caption()
+	{
+	// Polled from tick() rather than on a resize, which GTK 4 has no signal
+	// for; it also picks up a change in the settings.
+	int px = std::max(caption_min_px,
+		int(get_height()*playback_.settings().subtitle_fraction()));
+	if(px==caption_px_) return;
+	caption_px_ = px;
+	Pango::AttrList attrs;
+	auto size = Pango::Attribute::create_attr_size_absolute(px*PANGO_SCALE);
+	attrs.insert(size);
+	caption_.set_attributes(attrs);
 	}
 
 void VideoView::poke()
