@@ -25,6 +25,7 @@ inputs:
       being uploaded now. Needed only where the asset name carries a version -
       `--clobber` replaces a name, so a versioned name would otherwise leave
       every past build behind. Assets with a stable name need nothing here.
+      Several suffixes go space-separated.
     required: false
     default: ''
   token:
@@ -69,13 +70,13 @@ runs:
         keep=""
         for f in "$@"; do keep="$keep $(basename "$f")"; done
 
-        if [ -n "$STALE_SUFFIX" ]; then
+        for s in $STALE_SUFFIX; do
           gh release view latest --repo "$R" --json assets \
-            --jq ".assets[].name | select(endswith(\"$STALE_SUFFIX\"))" \
+            --jq ".assets[].name | select(endswith(\"$s\"))" \
           | while read -r a; do
               case " $keep " in *" $a "*) continue;; esac
               gh release delete-asset latest "$a" --repo "$R" --yes
             done
-        fi
+        done
 
         gh release upload latest "$@" --clobber --repo "$R"

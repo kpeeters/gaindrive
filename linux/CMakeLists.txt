@@ -152,6 +152,8 @@ target_link_libraries(gaindrive-player PRIVATE gdshared PkgConfig::GTKMM PkgConf
 # gtk4paintablesink, from gst-plugins-rs, hands decoded frames to GTK without a
 # copy. Ubuntu 24.04 does not package it, so it is built here and shipped in
 # our package, in a directory of our own that main.cc points GStreamer at.
+# Newer distributions do package it; build there with this option OFF and the
+# package depends on theirs instead.
 # 0.12 is the series built against GStreamer 1.24, and --locked keeps its
 # dependencies at versions 24.04's Rust 1.75 compiles. Needs cargo and network.
 option(GD_BUNDLE_GTK4SINK "Build and ship gtk4paintablesink" ON)
@@ -245,6 +247,11 @@ set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 set(CPACK_RPM_PACKAGE_REQUIRES "gstreamer1-plugins-base, gstreamer1-plugins-good")
+# Like playbin, the distribution's video sink is a plugin nothing links.
+if(NOT GD_BUNDLE_GTK4SINK)
+	string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", gstreamer1.0-gtk4")
+	string(APPEND CPACK_RPM_PACKAGE_REQUIRES ", gstreamer1-plugin-gtk4")
+endif()
 # Directories owned by the filesystem and hicolor-icon-theme packages; listing
 # them in our rpm makes it conflict with those on install.
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION

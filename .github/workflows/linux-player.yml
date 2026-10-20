@@ -23,16 +23,24 @@ permissions:
 
 jobs:
   # One row per distribution and architecture. A distribution is a container
-  # image rather than the runner's own, so that adding Debian or Fedora is a
-  # new row and not a new job; glibc images run the JS actions fine (it is
-  # only musl that cannot, see build.yml).
+  # image rather than the runner's own, so that adding one is a new row and
+  # not a new job; glibc images run the JS actions fine (it is only musl that
+  # cannot, see build.yml). `arch` is only a file name label, in the spelling
+  # of the package format. `sink: distro` rows depend on the distribution's
+  # gtk4paintablesink instead of building and shipping one.
   package:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {distro: ubuntu24.04, image: 'ubuntu:24.04', debarch: amd64, runner: ubuntu-24.04}
-          - {distro: ubuntu24.04, image: 'ubuntu:24.04', debarch: arm64, runner: ubuntu-24.04-arm}
+          - {distro: ubuntu24.04, image: 'ubuntu:24.04', fmt: deb, sink: bundled, arch: amd64, runner: ubuntu-24.04}
+          - {distro: ubuntu24.04, image: 'ubuntu:24.04', fmt: deb, sink: bundled, arch: arm64, runner: ubuntu-24.04-arm}
+          - {distro: ubuntu26.04, image: 'ubuntu:26.04', fmt: deb, sink: distro, arch: amd64, runner: ubuntu-24.04}
+          - {distro: ubuntu26.04, image: 'ubuntu:26.04', fmt: deb, sink: distro, arch: arm64, runner: ubuntu-24.04-arm}
+          - {distro: debian13, image: 'debian:13', fmt: deb, sink: distro, arch: amd64, runner: ubuntu-24.04}
+          - {distro: debian13, image: 'debian:13', fmt: deb, sink: distro, arch: arm64, runner: ubuntu-24.04-arm}
+          - {distro: fedora44, image: 'fedora:44', fmt: rpm, sink: distro, arch: x86_64, runner: ubuntu-24.04}
+          - {distro: fedora44, image: 'fedora:44', fmt: rpm, sink: distro, arch: aarch64, runner: ubuntu-24.04-arm}
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.image }}
     defaults:
@@ -47,16 +55,26 @@ jobs:
       # video libraries that sink links.
       - name: Install dependencies
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git ca-certificates \
-            file dpkg-dev cargo \
-            libgtkmm-4.0-dev libsecret-1-dev libssl-dev nlohmann-json3-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+          if [ "${{ matrix.fmt }}" = deb ]; then
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              build-essential cmake ninja-build pkg-config git ca-certificates \
+              file dpkg-dev \
+              libgtkmm-4.0-dev libsecret-1-dev libssl-dev nlohmann-json3-dev \
+              libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+            [ "${{ matrix.sink }}" = distro ] ||
+              apt-get install -y --no-install-recommends cargo
+          else
+            dnf install -y \
+              gcc-c++ cmake ninja-build pkgconf-pkg-config git-core rpm-build \
+              gtkmm4.0-devel libsecret-devel openssl-devel json-devel \
+              gstreamer1-devel gstreamer1-plugins-base-devel
+            [ "${{ matrix.sink }}" = distro ] || dnf install -y cargo
+          fi
 
       - uses: actions/checkout@v4
 
-      # `up` is the Debian upstream version, `v` the one in the file name. On
+      # `up` is the upstream version, `v` the one in the file name. On
       # master the `~` makes every build sort below the release it leads up
       # to, and the run number makes each one an upgrade over the last; the
       # file name keeps the VERSION-commit form the APK and server use, and no
@@ -74,60 +92,88 @@ jobs:
             up="$base~git$GITHUB_RUN_NUMBER.$sha"; v="$base-$sha"
           fi
           echo "up=$up" >> "$GITHUB_OUTPUT"
-          echo "deb=gaindrive-player-$v-${{ matrix.distro }}-${{ matrix.debarch }}.deb" >> "$GITHUB_OUTPUT"
+          echo "pkg=gaindrive-player-$v-${{ matrix.distro }}-${{ matrix.arch }}.${{ matrix.fmt }}" >> "$GITHUB_OUTPUT"
 
       # The cargo build of the video sink is most of the run. Both directories
       # are needed: the prefix holds ExternalProject's stamps, gst-plugins the
       # library they vouch for, and restoring one without the other leaves a
       # stamp claiming a file that is not there.
       - uses: actions/cache@v4
+        if: matrix.sink == 'bundled'
         with:
           path: |
             build-linux/gtk4sink-prefix
             build-linux/gst-plugins
-          key: gtk4sink-${{ matrix.distro }}-${{ matrix.debarch }}-${{ hashFiles('linux/CMakeLists.txt') }}
+          key: gtk4sink-${{ matrix.distro }}-${{ matrix.arch }}-${{ hashFiles('linux/CMakeLists.txt') }}
 
       - name: Build
         run: |
-          cmake -S linux -B build-linux -G Ninja
+          cmake -S linux -B build-linux -G Ninja \
+            -DGD_BUNDLE_GTK4SINK=${{ matrix.sink == 'bundled' && 'ON' || 'OFF' }}
           cmake --build build-linux
 
       # The release field carries the distribution, so the same upstream
       # version built for two distributions is two distinct packages.
       - name: Package
         working-directory: build-linux
+        env:
+          UP: ${{ steps.ver.outputs.up }}
+          REL: 1~${{ matrix.distro }}
+          PKG: ${{ steps.ver.outputs.pkg }}
         run: |
-          cpack -G DEB \
-            -D CPACK_DEBIAN_PACKAGE_VERSION="${{ steps.ver.outputs.up }}" \
-            -D CPACK_DEBIAN_PACKAGE_RELEASE="1~${{ matrix.distro }}" \
-            -D CPACK_DEBIAN_FILE_NAME="${{ steps.ver.outputs.deb }}"
-          mv "${{ steps.ver.outputs.deb }}" ..
-          dpkg-deb -I "../${{ steps.ver.outputs.deb }}"
+          if [ "${{ matrix.fmt }}" = deb ]; then
+            cpack -G DEB \
+              -D CPACK_DEBIAN_PACKAGE_VERSION="$UP" \
+              -D CPACK_DEBIAN_PACKAGE_RELEASE="$REL" \
+              -D CPACK_DEBIAN_FILE_NAME="$PKG"
+            mv "$PKG" ..
+            dpkg-deb -I "../$PKG"
+          else
+            cpack -G RPM \
+              -D CPACK_RPM_PACKAGE_VERSION="$UP" \
+              -D CPACK_RPM_PACKAGE_RELEASE="$REL" \
+              -D CPACK_RPM_FILE_NAME="$PKG"
+            mv "$PKG" ..
+            rpm -qpi "../$PKG"
+          fi
 
-      # An empty Depends means dpkg-shlibdeps did not run or found nothing,
-      # and the package would install anywhere and then fail to start.
+      # No library dependencies means dpkg-shlibdeps or rpm's find-requires
+      # did not run or found nothing, and the package would install anywhere
+      # and then fail to start.
       - name: Check dependencies were computed
-        run: dpkg-deb -f "${{ steps.ver.outputs.deb }}" Depends | grep -q libgtkmm
+        env: {PKG: '${{ steps.ver.outputs.pkg }}'}
+        run: |
+          if [ "${{ matrix.fmt }}" = deb ]; then
+            dpkg-deb -f "$PKG" Depends | grep -q libgtkmm
+          else
+            rpm -qpR "$PKG" | grep -q libgtkmm
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.ver.outputs.deb }}
-          path: ${{ steps.ver.outputs.deb }}
+          name: ${{ steps.ver.outputs.pkg }}
+          path: ${{ steps.ver.outputs.pkg }}
           if-no-files-found: error
 
   # A fresh image, because the build image already has every runtime library
   # through the -dev packages and would install anything. The player itself
   # cannot be started (no display, no --version), so this checks what can go
   # wrong without one: dependencies resolve, the binary links, and GStreamer
-  # loads the bundled sink.
+  # loads the video sink, bundled or the distribution's.
   install-test:
     needs: package
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {distro: ubuntu24.04, image: 'ubuntu:24.04', debarch: amd64, runner: ubuntu-24.04}
-          - {distro: ubuntu24.04, image: 'ubuntu:24.04', debarch: arm64, runner: ubuntu-24.04-arm}
+          - {distro: ubuntu24.04, image: 'ubuntu:24.04', fmt: deb, sink: bundled, arch: amd64, runner: ubuntu-24.04}
+          - {distro: ubuntu24.04, image: 'ubuntu:24.04', fmt: deb, sink: bundled, arch: arm64, runner: ubuntu-24.04-arm}
+          - {distro: ubuntu26.04, image: 'ubuntu:26.04', fmt: deb, sink: distro, arch: amd64, runner: ubuntu-24.04}
+          - {distro: ubuntu26.04, image: 'ubuntu:26.04', fmt: deb, sink: distro, arch: arm64, runner: ubuntu-24.04-arm}
+          - {distro: debian13, image: 'debian:13', fmt: deb, sink: distro, arch: amd64, runner: ubuntu-24.04}
+          - {distro: debian13, image: 'debian:13', fmt: deb, sink: distro, arch: arm64, runner: ubuntu-24.04-arm}
+          - {distro: fedora44, image: 'fedora:44', fmt: rpm, sink: distro, arch: x86_64, runner: ubuntu-24.04}
+          - {distro: fedora44, image: 'fedora:44', fmt: rpm, sink: distro, arch: aarch64, runner: ubuntu-24.04-arm}
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.image }}
     defaults:
@@ -138,16 +184,27 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: gaindrive-player-*-${{ matrix.distro }}-${{ matrix.debarch }}.deb
+          pattern: gaindrive-player-*-${{ matrix.distro }}-${{ matrix.arch }}.${{ matrix.fmt }}
           merge-multiple: true
           path: dist
 
+      # ldd by path, because Fedora's base image may not carry it. The check
+      # is an `if` because bash -e ignores a failing `!` pipeline.
       - run: |
-          apt-get update
-          apt-get install -y ./dist/*.deb gstreamer1.0-tools
-          ! ldd /usr/bin/gaindrive-player | grep 'not found'
-          so=$(dpkg -L gaindrive-player | grep 'libgstgtk4\.so$')
-          GST_PLUGIN_PATH=$(dirname "$so") gst-inspect-1.0 gtk4
+          if [ "${{ matrix.fmt }}" = deb ]; then
+            apt-get update
+            apt-get install -y ./dist/*.deb gstreamer1.0-tools
+            files=$(dpkg -L gaindrive-player)
+          else
+            dnf install -y ./dist/*.rpm gstreamer1 /usr/bin/ldd
+            files=$(rpm -ql gaindrive-player)
+          fi
+          if ldd /usr/bin/gaindrive-player | grep 'not found'; then exit 1; fi
+          if [ "${{ matrix.sink }}" = bundled ]; then
+            so=$(grep 'libgstgtk4\.so$' <<< "$files")
+            export GST_PLUGIN_PATH=$(dirname "$so")
+          fi
+          gst-inspect-1.0 gtk4
 
   # Same as the APK in android.yml: build.yml creates the tagged release, so
   # wait for it rather than racing it with a second create.
@@ -166,11 +223,11 @@ jobs:
               >/dev/null 2>&1 && break
             sleep 30
           done
-          gh release upload "$GITHUB_REF_NAME" dist/*.deb --clobber \
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber \
             --repo "$GITHUB_REPOSITORY"
         env: {GH_TOKEN: '${{ github.token }}'}
 
-  # One job uploads every .deb, so stale-suffix only ever deletes previous
+  # One job uploads every package, so stale-suffix only ever deletes previous
   # builds and never a sibling architecture uploaded a moment ago.
   latest:
     needs: install-test
@@ -185,6 +242,6 @@ jobs:
         with: {merge-multiple: true, path: dist}
       - uses: ./.github/actions/rolling-release
         with:
-          assets: dist/*.deb
-          stale-suffix: .deb
+          assets: dist/*
+          stale-suffix: .deb .rpm
           token: ${{ github.token }}
