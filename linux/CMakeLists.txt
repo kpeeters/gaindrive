@@ -202,6 +202,13 @@ install(FILES ${GD_ROOT}/graphics/gaindrive.svg
 	DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
 	RENAME ${GD_APP_ID}.svg)
 
+# Reverses an install made straight from this build directory, such as one
+# into ~/.local for trying a build with its desktop file and icon in place.
+add_custom_target(uninstall
+	COMMAND ${CMAKE_COMMAND} -DGD_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+	        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/uninstall.cmake
+	COMMENT "Removing the files listed in install_manifest.txt")
+
 # ---- Packaging --------------------------------------------------------------
 
 set(CPACK_PACKAGE_NAME gaindrive-player)
