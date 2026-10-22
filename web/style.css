@@ -1422,15 +1422,20 @@ input.chapter-time.bad { border-color: #e06c6c; }
       biography used to render as one blob however it was inserted.  The server
       keeps \n through clean_prose() for this. */
    white-space: pre-line;
-   display: -webkit-box;
-   -webkit-line-clamp: 5;
-   -webkit-box-orient: vertical;
+   /* Five lines, as a height rather than line-clamp, because makeExpandable()
+      animates it and line-clamp cannot be.  The cut-off is shown by fading
+      the last line instead of line-clamp's ellipsis. */
+   max-height: 5lh;
    overflow: hidden;
+   transition: max-height 250ms ease;
 }
 
-.artist-bio-text.expanded {
-   display: block;
-   overflow: visible;
+.artist-bio-text.clamped {
+   cursor: pointer;
+}
+
+.artist-bio-text.clamped:not(.expanded) {
+   mask-image: linear-gradient(to bottom, #000 calc(100% - 1lh), transparent);
 }
 
 

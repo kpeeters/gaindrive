@@ -3729,6 +3729,48 @@ async function viewPlaylistTracks(playlistId, playlistName) {
       });
 }
 
+// The 'more'/'less' toggle for provider prose (artist bio, album notes).
+// Neither line-clamp nor max-height: none can be transitioned, so the text is
+// animated between its collapsed limit and its measured full height, and only
+// released to none once there, so that it still reflows on a resize.
+function makeExpandable(textEl, toggle) {
+   toggle.textContent = 'more';
+   toggle.addEventListener('click', () => {
+      const expanding = textEl.classList.toggle('expanded');
+      toggle.textContent = expanding ? 'less' : 'more';
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+         textEl.style.maxHeight = expanding ? 'none' : '';
+         return;
+         }
+      if (expanding) {
+         textEl.style.maxHeight = textEl.scrollHeight + 'px';
+         }
+      else {
+         // Collapsing starts from none, which has no height to run from,
+         // so pin the current one and flush before letting go.
+         textEl.style.maxHeight = textEl.scrollHeight + 'px';
+         void textEl.offsetHeight;
+         textEl.style.maxHeight = '';
+         }
+      });
+   // The text is a bigger target than the toggle.  A click that ends a text
+   // selection is left alone, or copying a sentence would fold the bio.
+   textEl.addEventListener('click', () => {
+      if (toggle.hidden || !window.getSelection().isCollapsed) return;
+      toggle.click();
+      });
+   textEl.addEventListener('transitionend', e => {
+      if (e.propertyName === 'max-height' && textEl.classList.contains('expanded'))
+         textEl.style.maxHeight = 'none';
+      });
+   // Only text that overflows gets a toggle and the faded last line; a
+   // short bio would otherwise fade a line that is not cut off.
+   requestAnimationFrame(() => {
+      if (textEl.scrollHeight <= textEl.clientHeight) toggle.hidden = true;
+      else textEl.classList.add('clamped');
+      });
+}
+
 // isCategory says this level-1 folder is a section of a categories root -
 // Film, Series - rather than a performer. Such a folder has no biography and
 // no portrait by construction: is_category_folder() on the server refuses the
@@ -4160,16 +4202,8 @@ async function viewAlbums(artistId, artistName, isCategory = false,
                }
             const toggle = document.createElement('span');
             toggle.className = 'bio-toggle';
-            toggle.textContent = 'more';
-            toggle.addEventListener('click', () => {
-               const expanded = bioP.classList.toggle('expanded');
-               toggle.textContent = expanded ? 'less' : 'more';
-               });
+            makeExpandable(bioP, toggle);
             linksRow.appendChild(toggle);
-            // Hide the toggle if the text fits without clamping.
-            requestAnimationFrame(() => {
-               if (bioP.scrollHeight <= bioP.clientHeight) toggle.hidden = true;
-               });
             body.appendChild(linksRow);
             block.appendChild(body);
             }
@@ -9972,7 +10006,7 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
          let notesP = null;
          if (notes) {
             notesP = document.createElement('p');
-            notesP.className = 'artist-bio-text';   // reuse same clamp style
+            notesP.className = 'artist-bio-text';   // reuse the bio's collapse style
             notesP.textContent = notes;
             block.appendChild(notesP);
             }
@@ -10001,15 +10035,8 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
          if (notesP) {
             const toggle = document.createElement('span');
             toggle.className = 'bio-toggle';
-            toggle.textContent = 'more';
-            toggle.addEventListener('click', () => {
-               const expanded = notesP.classList.toggle('expanded');
-               toggle.textContent = expanded ? 'less' : 'more';
-               });
+            makeExpandable(notesP, toggle);
             linksRow.appendChild(toggle);
-            requestAnimationFrame(() => {
-               if (notesP.scrollHeight <= notesP.clientHeight) toggle.hidden = true;
-               });
             }
          if (linksRow.children.length > 0) block.appendChild(linksRow);
 
