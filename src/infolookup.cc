@@ -1540,64 +1540,113 @@ static MediaStore::CachedAlbumInfo resolve_album_info(int id,
 	// a Discogs *master*, which many albums never got; the Discogs links
 	// MusicBrainz does have are mostly on the individual releases, so those
 	// are tried when the master gave nothing.
-	if (!info.mbid.empty() && info.notes.empty()) {
-		std::string token = store.get_setting("discogs_token");
-		// Capped because each page costs a Discogs request and a second, and
-		// releases of one album mostly carry the same notes or none.
-		constexpr size_t MAX_DISCOGS_PAGES = 3;
-		auto try_pages = [&](const std::vector<std::string>& pages) {
-			for (size_t i = 0; i < pages.size() && i < MAX_DISCOGS_PAGES
-			                   && info.notes.empty(); ++i) {
-				std::string path, num;
-				if (!(num = discogs_id(pages[i], "/master/")).empty())
-					path = "/masters/" + num;
-				else if (!(num = discogs_id(pages[i], "/release/")).empty())
-					path = "/releases/" + num;
-				else
-					continue;
-				auto rd = discogs_get(path, token);
-				if (!rd || rd->status != 200) {
-					std::cout << stamp() << "getAlbumInfo [" << title
-					          << "] Discogs " << path << " failed"
-					          << (rd ? " HTTP " + std::to_string(rd->status)
-					                : " (no response)")
-					          << std::endl;
-					continue;
-					}
-				auto jd = nlohmann::json::parse(rd->body, nullptr, false);
-				info.notes = clean_prose(discogs_plain(jstr(jd, "notes")),
-				                         MAX_PROSE_BYTES);
-				if (!info.notes.empty())
-					info.discogs_url = pages[i];
-				std::cout << stamp() << "getAlbumInfo [" << title
-				          << "] Discogs " << path << ": notes="
-				          << info.notes.size() << " chars" << std::endl;
-				}
-			};
-
-		if (token.empty()) {
+	std::string token;
+	if (info.notes.empty()) {
+		token = store.get_setting("discogs_token");
+		if (token.empty())
 			std::cout << stamp() << "getAlbumInfo [" << title
 			          << "] no Wikipedia notes; Discogs skipped, no token"
 			             " configured" << std::endl;
-			}
-		else {
-			if (!rg_discogs.empty())
-				try_pages({ rg_discogs });
-			if (info.notes.empty()) {
-				std::vector<std::string> pages;
-				for (const auto& rel_obj : release_list())
-					for (const auto& rel : jsub(rel_obj, "relations")) {
-						if (jstr(rel, "type") != "discogs") continue;
-						std::string u = clean_url(jstr(jsub(rel, "url"), "resource"));
-						if (!u.empty() && std::find(pages.begin(), pages.end(), u)
-						                  == pages.end())
-							pages.push_back(u);
-						}
+		}
+	// Capped because each page costs a Discogs request and a second, and
+	// releases of one album mostly carry the same notes or none.
+	constexpr size_t MAX_DISCOGS_PAGES = 3;
+	auto try_pages = [&](const std::vector<std::string>& pages) {
+		for (size_t i = 0; i < pages.size() && i < MAX_DISCOGS_PAGES
+		                   && info.notes.empty(); ++i) {
+			std::string path, num;
+			if (!(num = discogs_id(pages[i], "/master/")).empty())
+				path = "/masters/" + num;
+			else if (!(num = discogs_id(pages[i], "/release/")).empty())
+				path = "/releases/" + num;
+			else
+				continue;
+			auto rd = discogs_get(path, token);
+			if (!rd || rd->status != 200) {
 				std::cout << stamp() << "getAlbumInfo [" << title
-				          << "] " << pages.size()
-				          << " Discogs page(s) on the releases" << std::endl;
-				try_pages(pages);
+				          << "] Discogs " << path << " failed"
+				          << (rd ? " HTTP " + std::to_string(rd->status)
+				                : " (no response)")
+				          << std::endl;
+				continue;
 				}
+			auto jd = nlohmann::json::parse(rd->body, nullptr, false);
+			info.notes = clean_prose(discogs_plain(jstr(jd, "notes")),
+			                         MAX_PROSE_BYTES);
+			if (!info.notes.empty())
+				info.discogs_url = pages[i];
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] Discogs " << path << ": notes="
+			          << info.notes.size() << " chars" << std::endl;
+			}
+		};
+
+	if (!info.mbid.empty() && info.notes.empty() && !token.empty()) {
+		if (!rg_discogs.empty())
+			try_pages({ rg_discogs });
+		if (info.notes.empty()) {
+			std::vector<std::string> pages;
+			for (const auto& rel_obj : release_list())
+				for (const auto& rel : jsub(rel_obj, "relations")) {
+					if (jstr(rel, "type") != "discogs") continue;
+					std::string u = clean_url(jstr(jsub(rel, "url"), "resource"));
+					if (!u.empty() && std::find(pages.begin(), pages.end(), u)
+					                  == pages.end())
+						pages.push_back(u);
+					}
+			std::cout << stamp() << "getAlbumInfo [" << title
+			          << "] " << pages.size()
+			          << " Discogs page(s) on the releases" << std::endl;
+			try_pages(pages);
+			}
+		}
+
+	// Step 4b - Discogs' own search, for the albums MusicBrainz links nowhere
+	// or does not know at all. Discogs holds far more obscure pressings than
+	// MusicBrainz links to. The search is fuzzy, so a hit counts only when
+	// its artist and title key the same as ours, as in step 2d: no
+	// description is better than somebody else's.
+	if (info.notes.empty() && !token.empty() && !provider_key(artist).empty()) {
+		std::set<std::string> want;
+		for (const std::string& t : { title, strip_album_decoration(title), rg_title })
+			if (!t.empty()) want.insert(provider_key(t));
+		const std::string want_artist = provider_key(artist);
+		for (const char* type : { "master", "release" }) {
+			if (!info.notes.empty()) break;
+			auto rs = discogs_get(std::string("/database/search?type=") + type
+			                      + "&artist=" + url_encode(artist)
+			                      + "&release_title=" + url_encode(title)
+			                      + "&per_page=10", token);
+			if (!rs || rs->status != 200) {
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] Discogs " << type << " search failed"
+				          << (rs ? " HTTP " + std::to_string(rs->status)
+				                : " (no response)")
+				          << std::endl;
+				continue;
+				}
+			auto js = nlohmann::json::parse(rs->body, nullptr, false);
+			std::vector<std::string> pages;
+			for (const auto& r : jsub(js, "results")) {
+				// "Artist - Title", where Discogs tells same-named artists
+				// apart with a " (2)" on the name.
+				std::string full = jstr(r, "title"), uri = jstr(r, "uri");
+				auto dash = full.find(" - ");
+				std::string a = dash == std::string::npos ? "" : full.substr(0, dash);
+				std::string t = dash == std::string::npos ? "" : full.substr(dash + 3);
+				auto paren = a.rfind(" (");
+				if (paren != std::string::npos && a.back() == ')'
+				    && std::all_of(a.begin() + paren + 2, a.end() - 1, [](char c) {
+				          return std::isdigit(static_cast<unsigned char>(c)); }))
+					a.erase(paren);
+				bool ok = !uri.empty() && provider_key(a) == want_artist
+				          && want.count(provider_key(t));
+				std::cout << stamp() << "getAlbumInfo [" << title
+				          << "] Discogs " << type << " search: [" << full << "] "
+				          << (ok ? "taken" : "rejected") << std::endl;
+				if (ok) pages.push_back("https://www.discogs.com" + uri);
+				}
+			try_pages(pages);
 			}
 		}
 
