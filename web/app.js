@@ -543,8 +543,10 @@ function audioOnlyFormat() {
       ? 'opus' : 'mp3';
 }
 
-// Build a subsonic API URL. Extra params can be passed as an object.
+// Build a subsonic API URL. Extra params can be passed as an object, or as a
+// list of [key, value] pairs when a key repeats, as setFolderTags' tagId does.
 function apiUrl(endpoint, extra = {}) {
+   const pairs = Array.isArray(extra) ? extra : [];
    const server = serverBase();
    const p = new URLSearchParams({
       ...authParams(),
@@ -557,8 +559,9 @@ function apiUrl(endpoint, extra = {}) {
       // cache nothing.
       castController: controllerId(),
       f: 'json',
-      ...extra,
+      ...(Array.isArray(extra) ? {} : extra),
    });
+   for (const [k, v] of pairs) p.append(k, v);
    return `${server}/rest/${endpoint}.view?${p}`;
 }
 
@@ -1230,6 +1233,8 @@ async function viewSettings() {
 
    addRow('playback', 'Playback', playbackSummary());
    const userSummary   = admin ? addRow('users',  'Users',  '') : null;
+   const tagSummary    = admin ? addRow('tags',   'Tags',   '') : null;
+   addRow('mytags', 'My tags', 'What you see of the library');
    const serverSummary = admin ? addRow('server', 'Server', '') : null;
    const statusSummary = admin ? addRow('status', 'Server status', '') : null;
    addRow('appearance', 'Appearance', themeSummary());
@@ -1246,6 +1251,12 @@ async function viewSettings() {
          const n   = arr.length === 1 ? '1 user' : `${arr.length} users`;
          userSummary.textContent = off ? `${n}, ${off} disabled` : n;
          }).catch(e => console.error('[settings] getUsers', e));
+
+      apiCall('getTags').then(sr => {
+         if (renderStale(gen)) return;
+         const n = asList(sr.tags?.tag).filter(t => !t.owner).length;
+         tagSummary.textContent = n === 1 ? '1 tag' : `${n} tags`;
+         }).catch(e => console.error('[settings] getTags', e));
 
       apiCall('getServerSettings').then(sr => {
          if (renderStale(gen)) return;
@@ -1299,6 +1310,8 @@ async function showSettingsCategory(cat) {
    const admin = !!currentUser?.adminRole;
    if (cat === 'playback')             return viewSettingsPlayback();
    if (cat === 'users'      && admin)  return viewSettingsUsers();
+   if (cat === 'tags'       && admin)  return viewSettingsTags();
+   if (cat === 'mytags')               return viewSettingsMyTags();
    if (cat === 'server'     && admin)  return viewSettingsServer();
    if (cat === 'status'     && admin)  return viewSettingsStatus();
    if (cat === 'appearance')           return viewSettingsAppearance();
@@ -1554,6 +1567,7 @@ async function viewSettingsUsers() {
             if (u.adminRole)  badges.appendChild(makeBadge('Admin',    'badge-admin'));
             if (u.uploadRole) badges.appendChild(makeBadge('Upload',   'badge-upload'));
             if (u.castRole)   badges.appendChild(makeBadge('Cast',     'badge-cast'));
+            if (u.blockUntagged) badges.appendChild(makeBadge('Tagged only', 'badge-tagged'));
             if (u.disabled)   badges.appendChild(makeBadge('Disabled', 'badge-disabled'));
             row.appendChild(badges);
 
@@ -1576,6 +1590,405 @@ async function viewSettingsUsers() {
 
    // Expose so viewUserEdit can trigger a refresh after save.
    pane._refreshUsers = refreshUsers;
+   }
+
+// ── Settings: Tags ───────────────────────────────────────────────────────────
+//
+// Tags sit on artist and category folders and decide who sees what. An admin
+// tag has a state per account, which is the tag's default until set; a user's
+// own tag only ever affects that user. Hidden-by-choice folders drop out of
+// lists but still play from a playlist; blocked ones are gone altogether.
+
+const TAG_STATES = [
+   ['blocked',    'Blocked'],
+   ['shown',      'Shown'],
+   ['choice_on',  'Shown, can hide'],
+   ['choice_off', 'Hidden, can show'],
+   ];
+
+function tagStateLabel(s) {
+   return TAG_STATES.find(([v]) => v === s)?.[1] ?? s;
+   }
+
+// The server leaves out an empty list, and an older one may hand a lone item
+// as an object.
+function asList(x) {
+   return x == null ? [] : Array.isArray(x) ? x : [x];
+   }
+
+// A tag's folders as the names a person knows them by, not their paths.
+function tagFolderNames(t) {
+   const names = asList(t.folder).map(f => f.path.slice(f.path.indexOf('/') + 1));
+   return names.length ? names.join(', ') : 'Not on any artist or category yet.';
+   }
+
+function tagHint(sec, text) {
+   const p = document.createElement('p');
+   p.className   = 'admin-hint';
+   p.textContent = text;
+   sec.appendChild(p);
+   return p;
+   }
+
+function tagButton(row, text, onClick) {
+   const b = document.createElement('button');
+   b.textContent = text;
+   b.className   = 'upload-btn';
+   b.addEventListener('click', onClick);
+   row.appendChild(b);
+   return b;
+   }
+
+function tagTextInput(row, value, placeholder) {
+   const el = document.createElement('input');
+   el.type        = 'text';
+   el.className   = 'token-input';
+   el.value       = value ?? '';
+   el.placeholder = placeholder ?? '';
+   row.appendChild(el);
+   return el;
+   }
+
+function tagCheckRow(sec, text, checked, disabled, onChange) {
+   const row = document.createElement('div');
+   row.className = 'form-row';
+   const label = document.createElement('label');
+   const box = document.createElement('input');
+   box.type     = 'checkbox';
+   box.checked  = checked;
+   box.disabled = disabled;
+   box.addEventListener('change', () => onChange(box));
+   label.appendChild(box);
+   label.appendChild(document.createTextNode(text));
+   row.appendChild(label);
+   sec.appendChild(row);
+   return box;
+   }
+
+async function viewSettingsTags() {
+   const {pane, gen} = settingsPane('tags', 'Tags');
+   const top = settingsSection(pane);
+   tagHint(top,
+      'Each tag has a state for every account. Blocked hides the tagged '
+      + 'artists and categories completely; Shown keeps them in view. The two '
+      + '"can" states are a default the account may switch itself, under '
+      + 'Settings, My tags. A personal tag is made for each account and put '
+      + 'on what they move out of their uploads.');
+
+   const newRow = document.createElement('div');
+   newRow.className = 'token-row';
+   const newName = tagTextInput(newRow, '', 'New tag');
+   const newDef  = document.createElement('select');
+   for (const [v, text] of TAG_STATES) newDef.add(new Option(text, v));
+   newDef.value = 'choice_off';
+   newRow.appendChild(newDef);
+   top.appendChild(newRow);
+   const status = document.createElement('p');
+   status.className = 'upload-status';
+
+   const body = document.createElement('div');
+   pane.appendChild(body);
+
+   // Every change re-reads the lot: a new default changes the label of every
+   // cell left at it, and the server is the one that knows what stuck.
+   const act = async (fn) => {
+      status.textContent = '';
+      try { await fn(); }
+      catch (e) { status.textContent = `Error: ${e.message}`; }
+      await refresh();
+      };
+
+   tagButton(newRow, 'Create', () => {
+      const name = newName.value.trim();
+      if (!name) return;
+      act(async () => {
+         await apiCall('createTag', {name, defaultState: newDef.value});
+         newName.value = '';
+         });
+      });
+   top.appendChild(status);
+
+   async function refresh() {
+      let tags, cells, users;
+      try {
+         const [st, su] = await Promise.all([apiCall('getTags'), apiCall('getUsers')]);
+         tags  = asList(st.tags?.tag);
+         cells = asList(st.tags?.cell);
+         users = asList(su.users?.user);
+         }
+      catch (e) {
+         status.textContent = `Error loading tags: ${e.message}`;
+         return;
+         }
+      if (renderStale(gen)) return;
+      body.innerHTML = '';
+
+      for (const t of tags.filter(t => !t.owner)) {
+         const sec = settingsSection(body, t.name);
+         if (t.personalOf) {
+            sec.firstChild.appendChild(document.createTextNode(' '));
+            sec.firstChild.appendChild(makeBadge(`Personal: ${t.personalOf}`, 'badge-tagged'));
+            }
+         tagHint(sec, tagFolderNames(t));
+
+         const nameRow = document.createElement('div');
+         nameRow.className = 'token-row';
+         const nameIn = tagTextInput(nameRow, t.name);
+         tagButton(nameRow, 'Rename', () => {
+            const name = nameIn.value.trim();
+            if (name && name !== t.name)
+               act(() => apiCall('updateTag', {id: t.id, name}));
+            });
+         if (!t.personalOf)
+            tagButton(nameRow, 'Delete', () => showConfirm(
+               `Delete the tag “${t.name}”? The artists and categories it is on `
+               + 'stay; only the tag goes.',
+               () => act(() => apiCall('deleteTag', {id: t.id})),
+               {title: 'Delete tag', yes: 'Delete'}));
+         sec.appendChild(nameRow);
+
+         settingsSelect(sec, 'Default', TAG_STATES, t.defaultState,
+            v => act(() => apiCall('updateTag', {id: t.id, defaultState: v})));
+         for (const u of users) {
+            const cell = cells.find(c => c.tagId === t.id && c.username === u.username);
+            settingsSelect(sec, u.username,
+               [['', `Default (${tagStateLabel(t.defaultState)})`], ...TAG_STATES],
+               cell?.state ?? '',
+               v => act(() => apiCall('setUserTag',
+                                      {username: u.username, tagId: t.id, state: v})));
+            }
+         }
+
+      // Users' own tags: the admin sees them only to promote one, when others
+      // want what somebody built for themselves.
+      const own = tags.filter(t => t.owner);
+      if (own.length) {
+         const sec = settingsSection(body, "Accounts' own tags");
+         tagHint(sec, 'These affect only their owner. Promoting one makes it a '
+                      + 'tag like those above, starting from the default chosen.');
+         for (const t of own) {
+            const row = document.createElement('div');
+            row.className = 'token-row';
+            const label = document.createElement('span');
+            label.className   = 'tag-own-label';
+            label.textContent = `${t.name} (${t.owner})`;
+            label.title       = tagFolderNames(t);
+            row.appendChild(label);
+            const def = document.createElement('select');
+            for (const [v, text] of TAG_STATES) def.add(new Option(text, v));
+            def.value = 'choice_off';
+            row.appendChild(def);
+            tagButton(row, 'Promote',
+               () => act(() => apiCall('promoteTag', {id: t.id, defaultState: def.value})));
+            sec.appendChild(row);
+            }
+         }
+      }
+
+   renderSlideTo(gen, 1);
+   await refresh();
+   }
+
+// ── Settings: My tags ────────────────────────────────────────────────────────
+
+async function viewSettingsMyTags() {
+   const {pane, gen} = settingsPane('mytags', 'My tags');
+   const top = settingsSection(pane);
+   tagHint(top,
+      'Untick a tag to hide its artists and categories from your lists; they '
+      + 'still play from a playlist. Your own tags are yours alone: put them on '
+      + 'an artist or category from its page.');
+
+   const newRow = document.createElement('div');
+   newRow.className = 'token-row';
+   const newName = tagTextInput(newRow, '', 'New tag, e.g. "Not for me"');
+   const status = document.createElement('p');
+   status.className = 'upload-status';
+   const body = document.createElement('div');
+   pane.appendChild(body);
+
+   const act = async (fn) => {
+      status.textContent = '';
+      try { await fn(); }
+      catch (e) { status.textContent = `Error: ${e.message}`; }
+      await refresh();
+      };
+   tagButton(newRow, 'Create', () => {
+      const name = newName.value.trim();
+      if (!name) return;
+      act(async () => {
+         await apiCall('createMyTag', {name});
+         newName.value = '';
+         });
+      });
+   top.appendChild(newRow);
+   top.appendChild(status);
+
+   const onState = s => s === 'shown' || s === 'choice_on';
+
+   async function refresh() {
+      let tags;
+      try { tags = asList((await apiCall('getMyTags')).myTags?.tag); }
+      catch (e) {
+         status.textContent = `Error loading tags: ${e.message}`;
+         return;
+         }
+      if (renderStale(gen)) return;
+      body.innerHTML = '';
+
+      const lib = tags.filter(t => !t.own);
+      if (lib.length) {
+         const sec = settingsSection(body, 'Library tags');
+         for (const t of lib) {
+            tagCheckRow(sec, t.switchable ? t.name : `${t.name} (set by admin)`,
+               onState(t.state), !t.switchable,
+               box => act(() => apiCall('setTagChoice', {tagId: t.id, on: box.checked})));
+            tagHint(sec, tagFolderNames(t));
+            }
+         }
+
+      const mine = tags.filter(t => t.own);
+      if (mine.length) {
+         const sec = settingsSection(body, 'Your own tags');
+         for (const t of mine) {
+            tagCheckRow(sec, t.name, onState(t.state), false,
+               box => act(() => apiCall('setTagChoice', {tagId: t.id, on: box.checked})));
+            tagHint(sec, tagFolderNames(t));
+            const row = document.createElement('div');
+            row.className = 'token-row';
+            const nameIn = tagTextInput(row, t.name);
+            tagButton(row, 'Rename', () => {
+               const name = nameIn.value.trim();
+               if (name && name !== t.name)
+                  act(() => apiCall('renameMyTag', {id: t.id, name}));
+               });
+            tagButton(row, 'Delete', () => showConfirm(
+               `Delete your tag “${t.name}”? What it hid comes back.`,
+               () => act(() => apiCall('deleteMyTag', {id: t.id})),
+               {title: 'Delete tag', yes: 'Delete'}));
+            sec.appendChild(row);
+            }
+         }
+      }
+
+   renderSlideTo(gen, 1);
+   await refresh();
+   }
+
+// ── Tagging one artist or category ───────────────────────────────────────────
+//
+// The dialog behind the tag button on an artist or category page. Every tick
+// is sent at once; there is nothing to confirm. An admin also gets the admin
+// tags, which go as one set because setFolderTags replaces them.
+
+let _tagsChanged = null;
+
+async function showFolderTagsDialog(folderId, folderName, isCategory) {
+   const admin  = !!currentUser?.adminRole;
+   const modal  = document.getElementById('tags-modal');
+   const body   = document.getElementById('tags-modal-body');
+   const status = document.getElementById('tags-modal-status');
+   document.getElementById('tags-modal-title').textContent = `Tags on ${folderName}`;
+   status.textContent = '';
+   body.innerHTML = '';
+   let changed = false;
+   _tagsChanged = () => {
+      if (changed) dropHiddenArtistRow(folderId, isCategory);
+      };
+   document.getElementById('tags-done-btn').onclick = _closeTagsDialog;
+   modal.classList.remove('hidden');
+
+   const onFolder = t => asList(t.folder).some(f => String(f.id) === String(folderId));
+   const fail = e => { status.textContent = `Error: ${e.message}`; };
+
+   async function fill() {
+      let mine, all = [];
+      try {
+         const [m, a] = await Promise.all([apiCall('getMyTags'),
+                                           admin ? apiCall('getTags') : null]);
+         mine = asList(m.myTags?.tag).filter(t => t.own);
+         if (a) all = asList(a.tags?.tag).filter(t => !t.owner);
+         }
+      catch (e) { fail(e); return; }
+      body.innerHTML = '';
+
+      const own = document.createElement('div');
+      own.className = 'tags-modal-group';
+      const h = document.createElement('h4');
+      h.textContent = 'Your tags';
+      own.appendChild(h);
+      for (const t of mine)
+         tagCheckRow(own, t.name, onFolder(t), false, async box => {
+            try {
+               await apiCall('setMyFolderTag', {id: folderId, tagId: t.id, on: box.checked});
+               changed = true;
+               }
+            catch (e) { box.checked = !box.checked; fail(e); }
+            });
+      const newRow = document.createElement('div');
+      newRow.className = 'token-row';
+      const newName = tagTextInput(newRow, '', 'New tag');
+      tagButton(newRow, 'Add', async () => {
+         const name = newName.value.trim();
+         if (!name) return;
+         try {
+            const r = await apiCall('createMyTag', {name});
+            await apiCall('setMyFolderTag', {id: folderId, tagId: r.tag.id, on: true});
+            changed = true;
+            }
+         catch (e) { fail(e); return; }
+         fill();
+         });
+      own.appendChild(newRow);
+      body.appendChild(own);
+
+      if (!admin) return;
+      const lib = document.createElement('div');
+      lib.className = 'tags-modal-group';
+      const h2 = document.createElement('h4');
+      h2.textContent = 'Library tags';
+      lib.appendChild(h2);
+      const boxes = [];
+      for (const t of all) {
+         const box = tagCheckRow(lib, t.name, onFolder(t), false, async () => {
+            const ids = boxes.filter(b => b.box.checked).map(b => ['tagId', b.id]);
+            try {
+               await apiCall('setFolderTags', [['id', folderId], ...ids]);
+               changed = true;
+               }
+            catch (e) { box.checked = !box.checked; fail(e); }
+            });
+         boxes.push({box, id: t.id});
+         }
+      if (!all.length) tagHint(lib, 'None yet; make them under Settings, Tags.');
+      body.appendChild(lib);
+      }
+   await fill();
+   }
+
+function _closeTagsDialog() {
+   document.getElementById('tags-modal').classList.add('hidden');
+   const cb = _tagsChanged;
+   _tagsChanged = null;
+   if (cb) cb();
+   }
+
+// A tag change can take the folder out of this account's lists. The page
+// itself stays, since it was opened by id, but its row in the library list
+// beside it should not outlive the change.
+async function dropHiddenArtistRow(folderId, isCategory) {
+   if (!paneHolds('pane-artists', 'artists')) return;
+   try {
+      const r = await apiCall('getArtists',
+                              {contentType: isCategory ? 'categories' : 'artists'});
+      const ids = new Set(asList(r.artists?.index)
+         .flatMap(i => asList(i.artist)).map(a => String(a.id)));
+      if (ids.has(String(folderId))) return;
+      document.querySelectorAll('#pane-artists .artist-row').forEach(row => {
+         if (row.dataset.id === String(folderId)) row.remove();
+         });
+      }
+   catch (e) { console.error('[tags] getArtists', e); }
    }
 
 // ── Settings: Server ─────────────────────────────────────────────────────────
@@ -1975,6 +2388,11 @@ async function viewUserEdit(user, refreshFn) {
    const fAdmin      = addField('Admin',          checkInput(user?.adminRole));
    const fUpload     = addField('Upload allowed', checkInput(user?.uploadRole));
    const fCast      = addField('Cast on server network allowed',   checkInput(user?.castRole));
+   // Tags decide who sees which artists and categories; this makes a folder
+   // nobody tagged for this account invisible to it, which is what a child's
+   // account wants. Ignored for admins.
+   const fUntagged  = addField('Hide artists and categories with no admin tag',
+                               checkInput(user?.blockUntagged));
    const isSelf = !isNew && user.username === creds.load().user;
    const fDisabled   = addField('Disabled',       checkInput(user?.disabled));
    if (isSelf) {
@@ -2030,6 +2448,7 @@ async function viewUserEdit(user, refreshFn) {
          params.set('adminRole',   fAdmin.checked   ? 'true' : 'false');
          params.set('uploadRole',  fUpload.checked  ? 'true' : 'false');
          params.set('castRole',    fCast.checked    ? 'true' : 'false');
+         params.set('blockUntagged', fUntagged.checked ? 'true' : 'false');
          params.set('disabled',    fDisabled.checked ? 'true' : 'false');
 
          if (isNew) {
@@ -3383,6 +3802,16 @@ async function viewAlbums(artistId, artistName, isCategory = false,
    // Admin only, as on the album header: force= re-asks the providers over a
    // cache the whole server shares.
    if (!isCategory && currentUser?.adminRole) header.appendChild(refreshBtn);
+   // Not on uploads, where tags do not apply: that space is its owner's.
+   if (!fromUploads) {
+      const tagBtn = document.createElement('button');
+      tagBtn.className   = 'refresh-btn mi';
+      tagBtn.title       = 'Tags';
+      tagBtn.textContent = 'sell';
+      tagBtn.addEventListener('click',
+         () => showFolderTagsDialog(artistId, artistName, isCategory));
+      header.appendChild(tagBtn);
+      }
    pane.appendChild(header);
 
    // Placeholder filled asynchronously once getArtistInfo2 responds.
@@ -10800,6 +11229,7 @@ function keyDismissModal(modal) {
    switch (modal.id) {
       case 'cover-art-modal': _closeCoverArtDialog(); return;
       case 'promote-modal':   _closePromoteDialog();  return;
+      case 'tags-modal':      _closeTagsDialog();     return;
       case 'cover-lightbox':  closeLightbox();        return;
       case 'confirm-modal':   _confirmYes = _confirmNo = null; break;
       }

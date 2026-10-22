@@ -2256,6 +2256,37 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* Labels sit tight against the control they name rather than taking the box's
    full 0.75rem gap, which would read as four unrelated rows. */
+/* Tags on an artist: a long list scrolls inside the box, the Done button
+   stays in view. */
+#tags-modal .modal-box {
+   max-width: min(28rem, calc(100vw - 2rem));
+   max-height: calc(100vh - 4rem);
+   box-sizing: border-box;
+}
+
+#tags-modal-body {
+   overflow-y: auto;
+   display: flex;
+   flex-direction: column;
+   gap: 0.75rem;
+}
+
+.tags-modal-group {
+   display: flex;
+   flex-direction: column;
+   gap: 0.4rem;
+}
+
+.tags-modal-group h4 {
+   margin: 0;
+   font-size: 0.85rem;
+   color: var(--text-dim);
+}
+
+.tags-modal-group .token-row .token-input {
+   min-width: 0;
+}
+
 #promote-modal label {
    font-size: 0.85rem;
    color: var(--text-dim);
@@ -3684,6 +3715,17 @@ input.chapter-time.bad { border-color: #e06c6c; }
 .badge-upload   { background: color-mix(in srgb, var(--accent) 60%, #4caf50); }
 .badge-cast     { background: color-mix(in srgb, var(--accent) 60%, #2196f3); }
 .badge-disabled { background: var(--text-dim); }
+.badge-tagged   { background: color-mix(in srgb, var(--accent) 60%, #9c27b0); }
+
+/* An account's own tag in the admin's list: the name takes the room, the
+   default and Promote stay at their natural width. */
+.tag-own-label {
+   flex: 1;
+   min-width: 0;
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+   }
 
 /* ── User edit form ─────────────────────────────────── */
 
