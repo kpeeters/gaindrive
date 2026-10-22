@@ -21,7 +21,7 @@ bool is_video_ext(std::string_view ext)
 
 bool container_declarable(std::string_view ext)
 	{
-	return is_video_ext(ext) && ext != "vob";
+	return is_video_ext(ext) && ext != "vob" && ext != "m2ts";
 	}
 
 AudioForm implied_audio_form(std::string_view ext)

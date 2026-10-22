@@ -57,7 +57,13 @@ std::map<int, std::vector<std::filesystem::path>> dvd_titlesets(
 std::vector<std::filesystem::path> dvd_parts_for(
 	const std::filesystem::path& first_vob);
 
-// The ffmpeg input specifier for a VOB: "concat:a|b|c" when the titleset is
-// split across parts, the plain path otherwise. ffmpeg's concat protocol
-// implements seeking across the joined files, so -ss keeps working.
-std::string dvd_input(const std::filesystem::path& first_vob);
+// The ffmpeg input specifier for a video row: "concat:a|b|c" for a DVD
+// titleset split across parts or a Blu-ray playlist (see bluray.hh), the
+// plain path otherwise. ffmpeg's concat protocol implements seeking across
+// the joined files, so -ss keeps working.
+std::string disc_input(const std::filesystem::path& path);
+
+// A real media file to hand ffprobe for a stream listing or chapters.  A
+// Blu-ray row's path is an .mpls playlist that ffprobe cannot open, so this
+// is its first clip; every other path comes back unchanged.
+std::string disc_probe_path(const std::filesystem::path& path);

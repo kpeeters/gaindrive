@@ -91,7 +91,7 @@ std::vector<std::string> front(const Streamer::SongInfo& song, double start,
 	// video - 1.6 s of silence on an XviD/AC3 test file.
 	if (start > 0) append(a, { "-ss", secs(start) });
 	if (copyts) a.push_back("-copyts");
-	append(a, { "-i", dvd_input(song.path),
+	append(a, { "-i", disc_input(song.path),
 	            "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1" });
 	return a;
 	}

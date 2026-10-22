@@ -1,4 +1,5 @@
 #include "dvd.hh"
+#include "bluray.hh"
 
 #include <cctype>
 #include <algorithm>
@@ -65,14 +66,21 @@ std::vector<std::filesystem::path> dvd_parts_for(
 	return it->second;
 	}
 
-std::string dvd_input(const std::filesystem::path& first_vob)
+std::string disc_input(const std::filesystem::path& path)
 	{
-	auto parts = dvd_parts_for(first_vob);
-	if (parts.size() < 2) return first_vob.string();
+	auto parts = bd_is_playlist(path) ? bd_parts_for(path) : dvd_parts_for(path);
+	if (parts.size() < 2) return disc_probe_path(path);
 	std::string s = "concat:";
 	for (size_t i = 0; i < parts.size(); ++i) {
 		if (i) s += '|';
 		s += parts[i].string();
 		}
 	return s;
+	}
+
+std::string disc_probe_path(const std::filesystem::path& path)
+	{
+	if (!bd_is_playlist(path)) return path.string();
+	auto parts = bd_parts_for(path);
+	return parts.empty() ? path.string() : parts.front().string();
 	}

@@ -78,7 +78,7 @@ class VideoArt
 		// caller just has no cover, exactly as before.  Never throws.
 		//
 		// ffmpeg_input differs from `path` only for a DVD titleset, where the
-		// caller passes dvd_input(first_vob) so the whole concat: list is read
+		// caller passes disc_input(first_vob) so the whole concat: list is read
 		// rather than the first 1 GB fragment.
 		std::optional<VideoArtResult> generate(
 			const std::string& path,

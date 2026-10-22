@@ -119,7 +119,7 @@ static int soundtrack_kbps(const Streamer::SongInfo& song)
 	std::vector<std::string> args = {
 		"ffprobe", "-v", "quiet", "-select_streams", "a:0",
 		"-show_entries", "stream=bit_rate:stream_tags=BPS,BPS-eng",
-		"-of", "default=nw=1:nk=1", song.path };
+		"-of", "default=nw=1:nk=1", disc_probe_path(song.path) };
 	reproc::process proc;
 	reproc::options opts;
 	opts.redirect.err.type = reproc::redirect::type::discard;
@@ -878,9 +878,9 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 	// A DVD titleset is split across 1 GB VOBs that are one continuous stream,
 	// so its soundtrack is the concatenated list rather than the first part -
 	// otherwise the extracted audio reports and stops after twenty minutes.
-	// dvd_input() returns the plain path for everything else, so this is a
+	// disc_input() returns the plain path for everything else, so this is a
 	// no-op for audio files.
-	args.push_back(song.is_video ? dvd_input(song.path) : song.path);
+	args.push_back(song.is_video ? disc_input(song.path) : song.path);
 	// Drop attached pictures (m4a album art is exposed as a video stream)
 	// and source metadata.  Without -vn, ffmpeg copies embedded JPEG/PNG
 	// art into the mp3's ID3v2 tag at the *start* of the stream - Firefox
@@ -1020,11 +1020,11 @@ std::vector<std::string> Streamer::video_ffmpeg_argv(
 		}
 	a.push_back("-i");
 	// A DVD titleset is split across 1 GB VOBs that are one continuous stream,
-	// so the input is a concat: list rather than a single file.  dvd_input()
+	// so the input is a concat: list rather than a single file.  disc_input()
 	// returns the plain path for everything else, including a stray .vob that
 	// is not part of a titleset.  ffmpeg's concat protocol seeks across the
 	// joined files, so the -ss above still lands where it should.
-	a.push_back(dvd_input(song.path));
+	a.push_back(disc_input(song.path));
 	// First video and first audio stream only.  The trailing '?' makes the
 	// audio mapping optional so a silent video still produces output instead
 	// of ffmpeg exiting with "Stream map matches no streams".  Subtitles are

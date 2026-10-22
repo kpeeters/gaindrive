@@ -67,7 +67,7 @@ struct VideoTarget
 	std::string_view mime;
 	};
 
-inline constexpr std::array<VideoTarget, 10> VIDEO_TARGETS = {{
+inline constexpr std::array<VideoTarget, 11> VIDEO_TARGETS = {{
 	{ "mkv",  "video/x-matroska" },
 	{ "mp4",  "video/mp4"        },
 	{ "m4v",  "video/mp4"        },
@@ -78,6 +78,7 @@ inline constexpr std::array<VideoTarget, 10> VIDEO_TARGETS = {{
 	{ "webm", "video/webm"       },
 	{ "wmv",  "video/x-ms-asf"   },
 	{ "vob",  "video/mpeg"       },
+	{ "m2ts", "video/mp2t"       },
 	}};
 
 std::optional<VideoTarget> video_target_for(std::string_view ext);
@@ -86,13 +87,14 @@ bool is_video_ext(std::string_view ext);
 
 // A container a *client* may declare it demuxes for itself - see
 // video_direct_playable_for() below.  Every video container qualifies except
-// vob, and that exclusion is not caution.
+// vob and m2ts, and that exclusion is not caution.
 //
 // A DVD titleset's songs.path names only the *first* VOB of a set that is one
-// continuous stream split at 1 GB boundaries; dvd_input() is what hands ffmpeg
+// continuous stream split at 1 GB boundaries; disc_input() is what hands ffmpeg
 // the concat: list of the rest.  Served untouched, that is twenty minutes of a
 // two-hour film - and nothing anywhere reports an error, because what goes out
-// is a valid program stream that simply ends.
+// is a valid program stream that simply ends.  A Blu-ray row is worse: its
+// songs.path is an .mpls playlist, a few kB of no video at all.
 bool container_declarable(std::string_view ext);
 
 // What an audio file *is*: the container it is muxed in and the codec inside
@@ -192,8 +194,8 @@ bool video_direct_playable(std::string_view container,
 // container, never by the caller:
 //
 //  * a bare container -- "I handle this; apply your normal codec rules".  Every
-//    video container except vob, and the four audio containers whose codec the
-//    extension already settles.
+//    video container except vob and m2ts, and the four audio containers whose
+//    codec the extension already settles.
 //  * a "container/codec" pair, for the audio containers that hold more than one
 //    codec.  The server cannot know what is inside one of those and must not
 //    guess what the client decodes, so the client spells out both halves.

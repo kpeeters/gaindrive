@@ -193,6 +193,21 @@ example is `music/Artist/Album/01-track.mp3`.
   together on playback, since a DVD splits one continuous stream across 1 GB
   files.
 
+* Blu-ray rip (in a **category** or **artist** root):
+  ```
+      Category/
+	     Name/
+		    BDMV/
+			   PLAYLIST/00800.mpls
+			   STREAM/00055.m2ts
+		    CERTIFICATE/
+   ```
+  A folder containing `BDMV` is recognised as a Blu-ray rip and becomes one
+  track: the main title, which is the longest playlist whose clips are all
+  present. Extras and alternate cuts are not listed. Everything outside
+  `BDMV/PLAYLIST` and `BDMV/STREAM` (`CERTIFICATE`, a ripper's `.miniso`)
+  is ignored.
+
 * A single item, with no folder of its own - one documentary, one home video,
   one clip. There is often nothing to put in a subdirectory:
   ```

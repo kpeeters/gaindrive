@@ -734,6 +734,7 @@ add_executable(gaindrive
 	src/chapters.cc
 	src/untrusted.cc
 	src/dvd.cc
+	src/bluray.cc
 	src/jsonread.cc
 	src/parallel.cc
 	src/proc.cc

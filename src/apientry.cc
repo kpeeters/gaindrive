@@ -280,10 +280,10 @@ std::string sane_video_size(const std::string& s)
 // Two token shapes, and the split is by *medium* rather than by anything about
 // the file:
 //
-//  * bare - a video container (every VIDEO_TARGETS name but vob). Video is a
-//    container-only declaration by design: the server keeps its own codec test,
-//    so declaring `mkv` widens which containers may be served untouched and
-//    nothing else.
+//  * bare - a video container (every VIDEO_TARGETS name but vob and m2ts).
+//    Video is a container-only declaration by design: the server keeps its own
+//    codec test, so declaring `mkv` widens which containers may be served
+//    untouched and nothing else.
 //  * `container/codec` - audio, always. Both halves are compared against what
 //    the scan observed and stored, so there is no bare audio form: `mp3` and
 //    `mpeg/mp3` would be two spellings of one thing, which is the class of bug

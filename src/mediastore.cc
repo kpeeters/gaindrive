@@ -34,6 +34,7 @@
 #include <reproc++/reproc.hpp>
 #include <reproc++/drain.hpp>
 
+#include "bluray.hh"
 #include "codecs.hh"
 #include "dvd.hh"
 #include "parallel.hh"
@@ -148,7 +149,7 @@ static const std::set<std::string> AUDIO_EXTENSIONS = {
 // that table is the serving side.
 static const std::set<std::string> VIDEO_EXTENSIONS = {
 	".mkv", ".mp4", ".m4v", ".avi", ".mpg", ".mpeg", ".mov", ".webm", ".wmv",
-	".vob"
+	".vob", ".m2ts"
 	};
 
 // Candidate cover art filenames in priority order.  Add more here as needed.
@@ -2705,7 +2706,7 @@ static std::string make_video_art_songs(
 			// concat: list is the input - seeking into the first part alone
 			// would land inside a 1 GB fragment rather than inside the film.
 			std::string input;
-			if (!sdat.parts.empty()) input = dvd_input(sdat.parts.front());
+			if (!sdat.parts.empty()) input = disc_input(sdat.path);
 
 			auto result = art.generate(sdat.path, input);
 			if (!result) {
@@ -3668,6 +3669,43 @@ static AlbumReadData read_album_dir(const fs::path& album_dir)
 			for (auto& v : vobs) sdat.parts.push_back(v.string());
 			adat.songs.push_back(std::move(sdat));
 			}
+		return adat;
+		}
+
+	// A Blu-ray rip is one track, the main title, for the same reason;
+	// see bluray.hh.  songs.path is the .mpls, which is what tells the
+	// streamer to play the clip list rather than a file.
+	if (auto bdmv = bd_bdmv_dir(album_dir); !bdmv.empty()) {
+		auto mpls  = bd_main_playlist(bdmv);
+		auto clips = mpls.empty() ? std::vector<fs::path>{}
+		                          : bd_parts_for(mpls);
+		if (clips.empty()) {
+			std::cout << stamp() << "scan: no playable title in " << bdmv
+			          << std::endl;
+			return adat;
+			}
+		SongReadData sdat;
+		sdat.path        = mpls.string();
+		sdat.folder_path = adat.path;   // the album, not BDMV/PLAYLIST
+		sdat.mtime       = mtime_of(mpls);
+		sdat.codec       = "m2ts";
+		sdat.is_video    = true;
+		sdat.disc_number = 0;
+		sdat.title       = adat.title;
+		sdat.track_nr    = 1;
+		std::error_code fec;
+		for (auto& c : clips) {
+			sdat.file_size += static_cast<int64_t>(fs::file_size(c, fec));
+			sdat.mtime      = std::max(sdat.mtime, mtime_of(c));
+			sdat.parts.push_back(c.string());
+			}
+		// Keyed on the .mpls like everything else about the row, so the
+		// chapter editor reads back what it wrote.
+		auto side = read_sidecar_chapters(mpls);
+		sdat.chapters         = std::move(side.chapters);
+		sdat.sidecar_present  = side.present;
+		sdat.sidecar_readable = side.readable;
+		adat.songs.push_back(std::move(sdat));
 		return adat;
 		}
 
@@ -6696,7 +6734,8 @@ MediaStore::VideoChapters MediaStore::get_chapters(int song_id)
 	if (!song->is_video) return vc;
 
 	std::vector<std::string> args = {
-		"ffprobe", "-v", "quiet", "-print_format", "json", "-show_chapters", abs
+		"ffprobe", "-v", "quiet", "-print_format", "json", "-show_chapters",
+		disc_probe_path(abs)
 		};
 	reproc::process proc;
 	reproc::options opts;
@@ -6866,7 +6905,8 @@ std::string MediaStore::get_captions_vtt(int song_id, int stream_index)
 	if (it != captions_cache_.end()) return it->second;
 	}
 
-	std::string source = abs;
+	// The whole title, not just the first VOB or clip of a disc rip.
+	std::string source = disc_input(abs);
 	if (stream_index < 0) {
 		source = sidecar_captions(abs);
 		if (source.empty()) return {};
@@ -6939,7 +6979,8 @@ MediaStore::VideoStreams MediaStore::get_video_streams(int song_id)
 		}
 
 	std::vector<std::string> args = {
-		"ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", abs
+		"ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams",
+		disc_probe_path(abs)
 		};
 	reproc::process proc;
 	reproc::options opts;
