@@ -12,6 +12,7 @@
 #include <memory>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 #include <string>
@@ -560,6 +561,65 @@ void Streamer::serve(const httplib::Request& req, httplib::Response& res,
 	                 pace, pace_lead, std::move(get_position), est_length);
 	}
 
+// The byte range [first, second) of a FLAC SEEKTABLE block whose points carry
+// no usable byte offsets, or nullopt.  Some taggers write a template table -
+// right sample numbers, stream_offset 0 on every point - and never fill it in.
+// A decoder that trusts it maps every seek to the first audio frame while its
+// clock reports the target, which is "seek restarts at 0, bar looks fine" on
+// a WiiM.  With no table at all the same receiver bisects by Range and lands
+// where it should, so serve_direct() sends this block as PADDING instead.
+static std::optional<std::pair<int64_t, int64_t>>
+broken_seektable(const std::string& path)
+	{
+	std::ifstream f(path, std::ios::binary);
+	if (!f) return std::nullopt;
+	auto u8 = [](const unsigned char* p, int n) {
+		uint64_t v = 0;
+		for (int i = 0; i < n; i++) v = (v << 8) | p[i];
+		return v;
+		};
+	unsigned char h[10];
+	int64_t pos = 0;
+	// An ID3v2 tag in front of fLaC is not allowed by the spec, but common.
+	if (f.read(reinterpret_cast<char*>(h), 10) && std::memcmp(h, "ID3", 3) == 0) {
+		pos = 10 + ((h[6] & 0x7f) << 21 | (h[7] & 0x7f) << 14
+		          | (h[8] & 0x7f) << 7  | (h[9] & 0x7f));
+		if (h[5] & 0x10) pos += 10;
+		}
+	f.clear();
+	f.seekg(pos);
+	if (!f.read(reinterpret_cast<char*>(h), 4) || std::memcmp(h, "fLaC", 4) != 0)
+		return std::nullopt;
+	pos += 4;
+	for (bool last = false; !last; ) {
+		if (!f.read(reinterpret_cast<char*>(h), 4)) return std::nullopt;
+		last = h[0] & 0x80;
+		const int64_t len = static_cast<int64_t>(u8(h + 1, 3));
+		if ((h[0] & 0x7f) == 3) {
+			std::vector<unsigned char> body(static_cast<size_t>(len));
+			if (!f.read(reinterpret_cast<char*>(body.data()), len)) return std::nullopt;
+			uint64_t prev_sample = 0, prev_off = 0;
+			bool     have_prev   = false;
+			for (int64_t i = 0; i + 18 <= len; i += 18) {
+				const uint64_t sample = u8(body.data() + i, 8);
+				const uint64_t off    = u8(body.data() + i + 8, 8);
+				if (sample == UINT64_MAX) continue;   // placeholder
+				// Two points more than a maximal frame (65535 samples) apart
+				// cannot share a frame, so their offsets must differ.
+				if (have_prev && sample > prev_sample + 65535 && off <= prev_off)
+					return std::make_pair(pos, pos + 4 + len);
+				prev_sample = sample;
+				prev_off    = off;
+				have_prev   = true;
+				}
+			return std::nullopt;
+			}
+		pos += 4 + len;
+		f.seekg(pos);
+		}
+	return std::nullopt;
+	}
+
 void Streamer::serve_raw(const httplib::Request& req, httplib::Response& res,
                          const SongInfo& song)
 	{
@@ -567,13 +627,14 @@ void Streamer::serve_raw(const httplib::Request& req, httplib::Response& res,
 	// query string asks for.  The throttle exists to keep a *playback*
 	// connection alive; download.view is defined as the original media data,
 	// and a paced download of a forty-minute FLAC would take forty minutes.
-	serve_direct(req, res, song, false, TARGET_BUF, {});
+	serve_direct(req, res, song, false, TARGET_BUF, {}, {}, true);
 	}
 
 void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
                             const SongInfo& song, bool pace, float pace_lead,
                             std::function<float()> get_position,
-                            std::shared_ptr<const TranscodeCache::Entry> keepalive)
+                            std::shared_ptr<const TranscodeCache::Entry> keepalive,
+                            bool as_stored)
 	{
 	// Delivery rate.  Three cases, and the third is the one that bit.
 	//
@@ -647,12 +708,22 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 		          << " lead=" << pace_lead << "s"
 		          << (get_position ? " position-driven" : " wall-clock")
 		          << std::endl;
+	// Same length as the block it replaces, so every byte offset, Range and
+	// Content-Length stays what it is for the file on disk.
+	std::optional<std::pair<int64_t, int64_t>> blank;
+	if (!as_stored && song.codec == "flac") {
+		blank = broken_seektable(song.path);
+		if (blank)
+			std::cout << stamp(who) << "stream: FLAC seektable has no usable "
+			          << "offsets; sent as padding so the client seeks by Range"
+			          << std::endl;
+		}
 	// httplib parses the Range header and calls our provider with the correct
 	// offset/length when a known content-length is supplied.
 	res.set_content_provider(
 		static_cast<size_t>(song.file_size),
 		std::string(codec_to_mime(song.codec)),
-		[path = song.path, who, bytes_per_sec, prebuf_bytes, pace, pace_lead,
+		[path = song.path, who, bytes_per_sec, prebuf_bytes, pace, pace_lead, blank,
 		 get_position = std::move(get_position), keepalive = std::move(keepalive)]
 		(size_t offset, size_t length, httplib::DataSink& sink) {
 			std::ifstream f(path, std::ios::binary);
@@ -666,9 +737,19 @@ void Streamer::serve_direct(const httplib::Request& req, httplib::Response& res,
 				if (get_position && get_position() < CAST_POS_BUFFERING) return false;
 				auto to_read = static_cast<std::streamsize>(
 				    std::min(remaining, sizeof(buf)));
+				const auto at = static_cast<int64_t>(offset + length - remaining);
 				f.read(buf, to_read);
 				auto n = static_cast<size_t>(f.gcount());
 				if (n == 0) break;
+				if (blank) {
+					const int64_t lo = std::max(blank->first, at);
+					const int64_t hi = std::min(blank->second, at + static_cast<int64_t>(n));
+					for (int64_t i = lo; i < hi; i++) {
+						char& c = buf[i - at];
+						if (i == blank->first)    c = static_cast<char>((c & 0x80) | 1);
+						else if (i >= blank->first + 4) c = 0;
+						}
+					}
 
 				for (size_t woff = 0; woff < n; ) {
 					if (get_position && get_position() < CAST_POS_BUFFERING) return false;

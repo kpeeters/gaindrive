@@ -155,11 +155,14 @@ class Streamer {
 		// otherwise unused - the throttle and range handling are untouched.
 		// pace_lead is the throttle's target lead in seconds -- how far ahead
 		// of the playback position (reported or estimated) the sender stays.
+		// as_stored sends the file byte for byte, for download.view; otherwise
+		// a FLAC's unusable seektable is sent as padding.
 		static void serve_direct(const httplib::Request& req, httplib::Response& res,
 		                         const SongInfo& song, bool pace, float pace_lead,
 		                         std::function<float()> get_position,
 		                         std::shared_ptr<const TranscodeCache::Entry>
-		                             keepalive = {});
+		                             keepalive = {},
+		                         bool as_stored = false);
 
 		// Builds the ffmpeg command line for one progressive video stream, a
 		// copy or a re-encode to fragmented MP4 on stdout.
