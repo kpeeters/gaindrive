@@ -23,15 +23,15 @@ static std::string trim(const std::string& s)
 
 // Tags on level-1 folders, which decide who sees what; see visibility.hh.
 //
-// Admin only. JSON only, like getServerSettings: the web client's Settings
-// pane is the one reader, and these are gaindrive extensions no third-party
-// client knows to ask for. A folder is named by its folder id, which is what a
+// The first half is the admin's, the second every user's own. JSON only,
+// like getServerSettings: these are gaindrive extensions no third-party client
+// knows to ask for, and gaindrive's own clients all speak JSON. A folder is named by its folder id, which is what a
 // client has in hand, and reported back with its path as well, since a tag can
 // outlive the folder it was put on.
 void GainDrive::routes_tags()
 	{
-	// Every handler below opens the same way. Answers false having already
-	// written the refusal.
+	// Every admin handler below opens the same way. Answers false having
+	// already written the refusal.
 	auto admin_only = [this](const httplib::Request& req, httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return false;
 		auto ui = store_.get_user(req.get_param_value("u"));
@@ -186,6 +186,105 @@ void GainDrive::routes_tags()
 		if (!store_.set_user_tag(req.get_param_value("username"),
 		                         to_int(req.get_param_value("tagId"), -1), state)) {
 			err(res, 70, "User or admin tag not found.");
+			return;
+			}
+		ok(res);
+		});
+
+	// ---- Every user, on their own tags and cells ----------------------
+
+	// getMyTags - the admin tags not blocked for me, with my cell, and my
+	// own tags with their switch. `switchable` says whether setTagChoice
+	// will take it.
+	server_.Get("/rest/getMyTags.view", [this](const httplib::Request& req,
+	                                           httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		auto tags = store_.list_my_tags(req.get_param_value("u"));
+		nlohmann::json arr = nlohmann::json::array();
+		for (const auto& t : tags) {
+			nlohmann::json folders = nlohmann::json::array();
+			for (const auto& p : t.folders) {
+				nlohmann::json f = {{"path", p}};
+				if (auto id = store_.folder_id_by_path(p)) f["id"] = sid(*id);
+				folders.push_back(std::move(f));
+				}
+			arr.push_back({{"id", t.id}, {"name", t.name}, {"own", t.own},
+			               {"state", t.state}, {"switchable", t.switchable},
+			               {"folder", folders}});
+			}
+		res.set_content(subsonic_ok_json([&](nlohmann::json& r) {
+			r["myTags"] = {{"tag", arr}};
+			}), "application/json");
+		});
+
+	// createMyTag(name) - starts out switched on, so it hides nothing yet.
+	server_.Get("/rest/createMyTag.view", [this, err](const httplib::Request& req,
+	                                                  httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		const std::string name = trim(req.get_param_value("name"));
+		if (name.empty()) { err(res, 10, "Required parameter missing: name."); return; }
+		auto id = store_.create_my_tag(req.get_param_value("u"), name);
+		if (!id) { err(res, 0, "You already have a tag of that name."); return; }
+		res.set_content(subsonic_ok_json([&](nlohmann::json& r) {
+			r["tag"] = {{"id", *id}};
+			}), "application/json");
+		});
+
+	// renameMyTag(id, name)
+	server_.Get("/rest/renameMyTag.view", [this, err, ok](const httplib::Request& req,
+	                                                      httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		const std::string name = trim(req.get_param_value("name"));
+		if (name.empty()) { err(res, 10, "Required parameter missing: name."); return; }
+		if (!store_.rename_my_tag(req.get_param_value("u"),
+		                          to_int(req.get_param_value("id"), -1), name)) {
+			err(res, 70, "Tag not found, or you already have one of that name.");
+			return;
+			}
+		ok(res);
+		});
+
+	// deleteMyTag(id)
+	server_.Get("/rest/deleteMyTag.view", [this, err, ok](const httplib::Request& req,
+	                                                      httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		if (!store_.delete_my_tag(req.get_param_value("u"),
+		                          to_int(req.get_param_value("id"), -1))) {
+			err(res, 70, "Tag not found.");
+			return;
+			}
+		ok(res);
+		});
+
+	// setMyFolderTag(id, tagId, on) - one of my tags on, or off, one level-1
+	// folder (by folder id). A folder hidden from me outright answers like a
+	// missing one.
+	server_.Get("/rest/setMyFolderTag.view", [this, err, ok](const httplib::Request& req,
+	                                                         httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		const std::string path = store_.get_folder_path(to_int(req.get_param_value("id"), -1));
+		if (path.empty() || !store_.set_my_folder_tag(req.get_param_value("u"), path,
+		                                              to_int(req.get_param_value("tagId"), -1),
+		                                              req.get_param_value("on") != "false")) {
+			err(res, 70, "Tag or artist/category folder not found.");
+			return;
+			}
+		ok(res);
+		});
+
+	// setTagChoice(tagId, on) - my own tag's switch, or my cell of an admin
+	// tag that leaves me the choice.
+	server_.Get("/rest/setTagChoice.view", [this, err, ok](const httplib::Request& req,
+	                                                       httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		const std::string on = req.get_param_value("on");
+		if (on != "true" && on != "false") {
+			err(res, 10, "on must be true or false.");
+			return;
+			}
+		if (!store_.set_tag_choice(req.get_param_value("u"),
+		                           to_int(req.get_param_value("tagId"), -1), on == "true")) {
+			err(res, 70, "Tag not found, or not yours to switch.");
 			return;
 			}
 		ok(res);

@@ -179,31 +179,36 @@ Visibility::State Visibility::state_locked(const User* u,
 	return soft ? State::soft : State::visible;
 	}
 
-// gd_visible(user_id, path). A NULL path answers 0 rather than 1: a listing
-// that loses rows to a LEFT JOIN miss is a visible bug, one that gains them is
-// a leak.
-static void sql_gd_visible(sqlite3_context* ctx, int, sqlite3_value** argv)
+// gd_visible(user_id, path) and gd_readable(user_id, path). A NULL path
+// answers 0 rather than 1: a listing that loses rows to a LEFT JOIN miss is a
+// visible bug, one that gains them is a leak.
+template<bool readable>
+static void sql_visible(sqlite3_context* ctx, int, sqlite3_value** argv)
 	{
+	const char* fn = readable ? "gd_readable" : "gd_visible";
 	try {
 		auto* self = static_cast<const Visibility*>(sqlite3_user_data(ctx));
 		const unsigned char* p = sqlite3_value_text(argv[1]);
 		if (!p) { sqlite3_result_int(ctx, 0); return; }
 		const auto st = self->state(sqlite3_value_int(argv[0]),
 		                            reinterpret_cast<const char*>(p));
-		sqlite3_result_int(ctx, st == Visibility::State::visible ? 1 : 0);
+		const bool ok = readable ? st != Visibility::State::hard
+		                         : st == Visibility::State::visible;
+		sqlite3_result_int(ctx, ok ? 1 : 0);
 		}
 	catch (const std::exception& e) {
-		std::cout << stamp() << "gd_visible: " << e.what() << std::endl;
-		sqlite3_result_error(ctx, "gd_visible failed", -1);
+		std::cout << stamp() << fn << ": " << e.what() << std::endl;
+		sqlite3_result_error(ctx, "visibility check failed", -1);
 		}
 	catch (...) {
-		std::cout << stamp() << "gd_visible: unknown exception" << std::endl;
-		sqlite3_result_error(ctx, "gd_visible failed", -1);
+		std::cout << stamp() << fn << ": unknown exception" << std::endl;
+		sqlite3_result_error(ctx, "visibility check failed", -1);
 		}
 	}
 
 void Visibility::install(SQLite::Database& db)
 	{
 	// Not deterministic: the answer changes whenever reload() runs.
-	db.createFunction("gd_visible", 2, false, this, &sql_gd_visible);
+	db.createFunction("gd_visible",  2, false, this, &sql_visible<false>);
+	db.createFunction("gd_readable", 2, false, this, &sql_visible<true>);
 	}

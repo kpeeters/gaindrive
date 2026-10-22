@@ -38,9 +38,11 @@ class Visibility {
 		// them; nothing here depends on the scan.
 		void reload(SQLite::Database& db, const std::string& uploads_root);
 
-		// Registers gd_visible(user_id, path) on the connection: 1 when
-		// state() is `visible`, 0 when it is soft or hard. `this` must
-		// outlive the connection.
+		// Registers gd_visible(user_id, path) on the connection, 1 when
+		// state() is `visible`, for listings; and gd_readable(user_id, path),
+		// 1 unless it is `hard`, for lists the user built themselves
+		// (playlists, play queue, bookmarks). `this` must outlive the
+		// connection.
 		void install(SQLite::Database& db);
 
 		State state(const std::string& username, const std::string& rel_path) const;

@@ -5000,6 +5000,12 @@ std::string MediaStore::visible_to(const std::string& viewer, const char* col) c
 	return " AND " + visible_clause(viewer, col);
 	}
 
+std::string MediaStore::readable_to(const std::string& viewer, const char* col) const
+	{
+	return " AND gd_readable(" + std::to_string(visibility_->user_id(viewer)) + ", "
+	       + col + ")";
+	}
+
 void MediaStore::ensure_personal_tag_locked(int user_id, const std::string& username)
 	{
 	// Named after the account, unless an admin tag of that name was made
@@ -5248,6 +5254,234 @@ bool MediaStore::set_user_tag(const std::string& username, int tag_id,
 		}
 	reload_visibility_locked();
 	return true;
+	}
+
+// The account's id and admin flag, or nullopt. Caller holds db_mutex_.
+static std::optional<std::pair<int, bool>> user_row(SQLite::Database& db,
+                                                    const std::string& username)
+	{
+	SQLite::Statement q(db, "SELECT id, is_admin FROM client.users WHERE username = ?");
+	q.bind(1, username);
+	if (!q.executeStep()) return std::nullopt;
+	return std::make_pair(q.getColumn(0).getInt(), q.getColumn(1).getInt() != 0);
+	}
+
+// True when `tag_id` is a user tag owned by `user_id`. Caller holds db_mutex_.
+static bool owns_tag(SQLite::Database& db, int user_id, int tag_id)
+	{
+	SQLite::Statement q(db, "SELECT 1 FROM client.tags WHERE id = ? AND owner_id = ?");
+	q.bind(1, tag_id);
+	q.bind(2, user_id);
+	return q.executeStep();
+	}
+
+std::vector<MediaStore::MyTag> MediaStore::list_my_tags(const std::string& username)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	std::vector<MyTag> result;
+	auto u = user_row(db_music_, username);
+	if (!u) return result;
+	const auto [uid, is_admin] = *u;
+
+	std::unordered_map<int, size_t> at;
+	{
+	SQLite::Statement q(db_music_,
+		"SELECT t.id, t.name, t.owner_id IS NOT NULL,"
+		"       COALESCE(ut.state, t.default_state, 'choice_on')"
+		" FROM client.tags t"
+		" LEFT JOIN client.user_tags ut ON ut.tag_id = t.id AND ut.user_id = ?"
+		" WHERE t.owner_id IS NULL OR t.owner_id = ?"
+		" ORDER BY t.owner_id IS NOT NULL, t.name");
+	q.bind(1, uid);
+	q.bind(2, uid);
+	while (q.executeStep()) {
+		MyTag t;
+		t.id    = q.getColumn(0).getInt();
+		t.name  = q.getColumn(1).getString();
+		t.own   = q.getColumn(2).getInt() != 0;
+		t.state = q.getColumn(3).getString();
+		// A blocked tag does not exist for the user, its name included; an
+		// admin is never blocked, so sees it as the cell it is.
+		if (t.state == "blocked" && !is_admin) continue;
+		t.switchable = t.state == "choice_on" || t.state == "choice_off";
+		at[t.id] = result.size();
+		result.push_back(std::move(t));
+		}
+	}
+	SQLite::Statement q(db_music_,
+		"SELECT tag_id, path FROM client.folder_tags ORDER BY path COLLATE NOCASE");
+	while (q.executeStep()) {
+		auto it = at.find(q.getColumn(0).getInt());
+		if (it == at.end()) continue;
+		std::string path = q.getColumn(1).getString();
+		if (visibility_->state(uid, path) == Visibility::State::hard) continue;
+		result[it->second].folders.push_back(std::move(path));
+		}
+	return result;
+	}
+
+std::optional<int> MediaStore::create_my_tag(const std::string& username,
+                                             const std::string& name)
+	{
+	if (name.empty()) return std::nullopt;
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	auto u = user_row(db_music_, username);
+	if (!u) return std::nullopt;
+	int id = 0;
+	try {
+		SQLite::Transaction txn(db_music_);
+		SQLite::Statement ins(db_music_,
+			"INSERT INTO client.tags (name, owner_id, default_state) VALUES (?, ?, NULL)");
+		ins.bind(1, name);
+		ins.bind(2, u->first);
+		ins.exec();
+		id = (int)db_music_.getLastInsertRowid();
+		// The switch: on, so that tagging a folder hides nothing until the
+		// user decides what the tag is for.
+		SQLite::Statement cell(db_music_,
+			"INSERT INTO client.user_tags (user_id, tag_id, state) VALUES (?, ?, 'choice_on')");
+		cell.bind(1, u->first);
+		cell.bind(2, id);
+		cell.exec();
+		txn.commit();
+		}
+	catch (const SQLite::Exception& e) {
+		// The unique index: they already have a tag of that name.
+		std::cout << stamp() << "create_my_tag " << username << " " << name << ": "
+		          << e.what() << std::endl;
+		return std::nullopt;
+		}
+	reload_visibility_locked();
+	return id;
+	}
+
+bool MediaStore::rename_my_tag(const std::string& username, int tag_id,
+                               const std::string& name)
+	{
+	if (name.empty()) return false;
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	auto u = user_row(db_music_, username);
+	if (!u) return false;
+	bool changed = false;
+	try {
+		SQLite::Statement upd(db_music_,
+			"UPDATE client.tags SET name = ? WHERE id = ? AND owner_id = ?");
+		upd.bind(1, name);
+		upd.bind(2, tag_id);
+		upd.bind(3, u->first);
+		upd.exec();
+		changed = db_music_.getChanges() > 0;
+		}
+	catch (const SQLite::Exception& e) {
+		std::cout << stamp() << "rename_my_tag " << tag_id << ": " << e.what() << std::endl;
+		return false;
+		}
+	return changed;
+	}
+
+bool MediaStore::delete_my_tag(const std::string& username, int tag_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	auto u = user_row(db_music_, username);
+	if (!u) return false;
+	SQLite::Statement del(db_music_, "DELETE FROM client.tags WHERE id = ? AND owner_id = ?");
+	del.bind(1, tag_id);
+	del.bind(2, u->first);
+	del.exec();
+	const bool changed = db_music_.getChanges() > 0;
+	reload_visibility_locked();
+	return changed;
+	}
+
+bool MediaStore::set_my_folder_tag(const std::string& username, const std::string& path,
+                                   int tag_id, bool on)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	auto u = user_row(db_music_, username);
+	if (!u || !owns_tag(db_music_, u->first, tag_id)) return false;
+	if (on) {
+		if (!uploads_prefix_.empty() && path.compare(0, uploads_prefix_.size(), uploads_prefix_) == 0)
+			return false;
+		if (!is_level1_folder_locked(path)) return false;
+		// Soft-hidden is fine: that is where a "dislike" tag gets put back
+		// on. Hard-hidden would confirm the folder exists.
+		if (visibility_->state(u->first, path) == Visibility::State::hard) return false;
+		SQLite::Statement ins(db_music_,
+			"INSERT OR IGNORE INTO client.folder_tags (path, tag_id) VALUES (?, ?)");
+		ins.bind(1, path);
+		ins.bind(2, tag_id);
+		ins.exec();
+		}
+	else {
+		SQLite::Statement del(db_music_,
+			"DELETE FROM client.folder_tags WHERE path = ? AND tag_id = ?");
+		del.bind(1, path);
+		del.bind(2, tag_id);
+		del.exec();
+		}
+	reload_visibility_locked();
+	return true;
+	}
+
+bool MediaStore::set_tag_choice(const std::string& username, int tag_id, bool on)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	auto u = user_row(db_music_, username);
+	if (!u) return false;
+	SQLite::Statement q(db_music_,
+		"SELECT COALESCE(ut.state, t.default_state, 'choice_on')"
+		" FROM client.tags t"
+		" LEFT JOIN client.user_tags ut ON ut.tag_id = t.id AND ut.user_id = ?"
+		" WHERE t.id = ? AND (t.owner_id IS NULL OR t.owner_id = ?)");
+	q.bind(1, u->first);
+	q.bind(2, tag_id);
+	q.bind(3, u->first);
+	if (!q.executeStep()) return false;
+	const std::string cur = q.getColumn(0).getString();
+	if (cur != "choice_on" && cur != "choice_off") return false;
+	SQLite::Statement ins(db_music_,
+		"INSERT OR REPLACE INTO client.user_tags (user_id, tag_id, state) VALUES (?, ?, ?)");
+	ins.bind(1, u->first);
+	ins.bind(2, tag_id);
+	ins.bind(3, on ? "choice_on" : "choice_off");
+	ins.exec();
+	reload_visibility_locked();
+	return true;
+	}
+
+void MediaStore::seed_folder_tags(const std::string& new_path, const std::string& from_path,
+                                  const std::string& uploader)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	try {
+		// Tags kept from a folder that was here before are what it gets
+		// back; see forget_prefix().
+		SQLite::Statement has(db_music_, "SELECT 1 FROM client.folder_tags WHERE path = ?");
+		has.bind(1, new_path);
+		if (has.executeStep()) return;
+
+		if (!uploader.empty()) {
+			SQLite::Statement ins(db_music_,
+				"INSERT OR IGNORE INTO client.folder_tags (path, tag_id)"
+				" SELECT ?, personal_tag_id FROM client.users"
+				" WHERE username = ? AND personal_tag_id IS NOT NULL");
+			ins.bind(1, new_path);
+			ins.bind(2, uploader);
+			ins.exec();
+			}
+		else {
+			SQLite::Statement ins(db_music_,
+				"INSERT OR IGNORE INTO client.folder_tags (path, tag_id)"
+				" SELECT ?, tag_id FROM client.folder_tags WHERE path = ?");
+			ins.bind(1, new_path);
+			ins.bind(2, from_path);
+			ins.exec();
+			}
+		}
+	catch (const SQLite::Exception& e) {
+		std::cout << stamp() << "seed_folder_tags " << new_path << ": " << e.what() << std::endl;
+		}
+	reload_visibility_locked();
 	}
 
 // The `p=enc:HEXHEX` spelling of a password, decoded, or the string
@@ -7535,6 +7769,7 @@ std::optional<MediaStore::PlayQueue> MediaStore::get_play_queue(
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
 		" WHERE u.username = ?"
+		+ readable_to(username, "s.path") +
 		" ORDER BY pq.position");
 	q.bind(1, username);
 
@@ -8764,6 +8999,7 @@ std::vector<MediaStore::BookmarkInfo> MediaStore::get_bookmarks(
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
 		" WHERE u.username = ?"
+		+ readable_to(username, "s.path") +
 		" ORDER BY b.created");
 	q.bind(1, username);
 
@@ -8830,19 +9066,29 @@ bool MediaStore::update_playlist(int playlist_id, const std::string& username,
 	if (!own.executeStep()) return false;
 
 	// Read surviving song_paths in position order, then drop requested indices.
+	// An index counts the entries get_playlist() showed the owner, which
+	// leaves out songs missing from the library and hard-hidden ones; those
+	// stay where they are, so counting them would remove the wrong song.
 	SQLite::Statement sel(db_music_,
-		"SELECT song_path FROM client.playlist_songs WHERE playlist_id = ? ORDER BY position");
+		"SELECT ps.song_path, s.id IS NOT NULL" + readable_to(username, "ps.song_path") +
+		" FROM client.playlist_songs ps LEFT JOIN songs s ON s.path = ps.song_path"
+		" WHERE ps.playlist_id = ? ORDER BY ps.position");
 	sel.bind(1, playlist_id);
 	std::vector<std::string> kept;
-	while (sel.executeStep())
+	std::vector<size_t>      shown;   // index into kept, per visible entry
+	while (sel.executeStep()) {
+		if (sel.getColumn(1).getInt() != 0) shown.push_back(kept.size());
 		kept.push_back(sel.getColumn(0).getString());
+		}
 
 	// Remove in descending index order to avoid shifting.
 	std::vector<int> sorted_remove = indices_to_remove;
 	std::sort(sorted_remove.rbegin(), sorted_remove.rend());
+	sorted_remove.erase(std::unique(sorted_remove.begin(), sorted_remove.end()),
+	                    sorted_remove.end());
 	for (int idx : sorted_remove)
-		if (idx >= 0 && idx < (int)kept.size())
-			kept.erase(kept.begin() + idx);
+		if (idx >= 0 && idx < (int)shown.size())
+			kept.erase(kept.begin() + shown[idx]);
 
 	for (const auto& sp : song_paths_to_add)
 		kept.push_back(sp);
@@ -8985,6 +9231,9 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
 		+ star_join +
 		" WHERE ps.playlist_id = ?"
+		// Someone else's public playlist keeps the entries soft-hidden for
+		// this user, which is what makes sharing one worth anything.
+		+ (username.empty() ? std::string() : readable_to(username, "s.path")) +
 		" ORDER BY ps.position";
 
 	SQLite::Statement sq(db_music_, pl_sql);

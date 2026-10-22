@@ -828,6 +828,12 @@ void GainDrive::routes_edit()
 		// Creating the destination is what makes "type a name that is not in
 		// the list" the way to add an artist or a category, with no separate
 		// operation for it.
+		const bool new_level1 =
+			std::count(new_parent_dir.begin(), new_parent_dir.end(), '/') == 1
+			&& !(!uploads_root_name_.empty()
+			     && new_parent_dir.compare(0, uploads_root_name_.size() + 1,
+			                               uploads_root_name_ + "/") == 0)
+			&& !fs::exists(store_.abs_path(new_parent_dir), sec);
 		fs::create_directories(store_.abs_path(new_parent_dir), ec);
 
 		fs::rename(abs_src, abs_target, ec);
@@ -839,6 +845,17 @@ void GainDrive::routes_edit()
 			}
 
 		std::cout << stamp(client_addr(req)) << "Move: " << old_rel << " → " << new_rel << std::endl;
+
+		// A new artist or category starts out with tags, or block_untagged
+		// would hide it from the very accounts that saw it a moment ago. An
+		// upload carries its uploader's personal tag; a library album carries
+		// the tags of the folder it came from.
+		if (new_level1) {
+			const bool from_upload = !uploads_root_name_.empty()
+			                         && parts[0] == uploads_root_name_;
+			store_.seed_folder_tags(new_parent_dir, parts[0] + "/" + parts[1],
+			                        from_upload ? parts[1] : std::string());
+			}
 
 		// Carry the DB across with the directory.  Without this the rescan
 		// below deletes the old folder and inserts the new one cold, and every

@@ -220,6 +220,43 @@ class MediaStore {
 		bool set_user_tag(const std::string& username, int tag_id,
 		                  const std::string& state);
 
+		// What one user sees of the tags: the admin tags not blocked for
+		// them, and their own. Folders that are hard-hidden for them are left
+		// out, so a tag cannot name what the user may not see.
+		struct MyTag {
+			int         id = 0;
+			std::string name;
+			bool        own        = false;  // a user tag, theirs
+			std::string state;               // their cell, or their switch
+			bool        switchable = false;  // choice_on or choice_off
+			std::vector<std::string> folders;
+			};
+		std::vector<MyTag> list_my_tags(const std::string& username);
+
+		// A user's own tags. All answer false (nullopt) for a tag that is not
+		// theirs, and for a name they already use.
+		std::optional<int> create_my_tag(const std::string& username,
+		                                 const std::string& name);
+		bool rename_my_tag(const std::string& username, int tag_id,
+		                   const std::string& name);
+		bool delete_my_tag(const std::string& username, int tag_id);
+		// Puts one of the user's own tags on, or takes it off, a level-1
+		// folder they can read. Not under the uploads root, where tags do
+		// not apply.
+		bool set_my_folder_tag(const std::string& username, const std::string& path,
+		                       int tag_id, bool on);
+		// Flips the user's own tag, or their cell of an admin tag when that
+		// is choice_on or choice_off; blocked and shown are the admin's.
+		bool set_tag_choice(const std::string& username, int tag_id, bool on);
+
+		// The tags a level-1 folder made by moveAlbum starts out with: the
+		// uploader's personal tag when `uploader` is set, else every tag on
+		// `from_path`, users' own included, so that moving an artist album
+		// by album changes nobody's view. Does nothing when `new_path`
+		// already has tags.
+		void seed_folder_tags(const std::string& new_path, const std::string& from_path,
+		                      const std::string& uploader);
+
 		// ---- Library browsing ----
 
 		// type is "artists" or "categories"; the uploads root never appears.
@@ -1213,6 +1250,9 @@ class MediaStore {
 		// hand-counted bind indices stay as they are.
 		std::string visible_clause(const std::string& viewer, const char* col) const;
 		std::string visible_to(const std::string& viewer, const char* col) const;
+		// " AND gd_readable(<id>, col)": drops only what is hard-hidden, for
+		// lists the user filled themselves.
+		std::string readable_to(const std::string& viewer, const char* col) const;
 
 		// Re-reads the tag tables into visibility_. Caller holds db_mutex_.
 		void reload_visibility_locked();
