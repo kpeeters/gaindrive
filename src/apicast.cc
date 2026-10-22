@@ -105,7 +105,7 @@ void GainDrive::routes_cast()
 		// else's.
 		auto song = store_.get_song_entry(song_id);
 		if (!song) { err(70, "Song not found."); return; }
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          song->path, use_json)) return;
 
 		const std::string token = mint_stream_grant(req.get_param_value("u"),
@@ -751,7 +751,7 @@ void GainDrive::routes_cast()
 		// stream.view - more so: the cast token it mints is then accepted by
 		// stream.view with no account and no bitrate cap at all, so skipping
 		// the check here skips it everywhere downstream.
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          song->path, use_json)) return;
 
 		auto to_it = req.params.find("timeOffset");

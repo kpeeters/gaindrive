@@ -614,7 +614,7 @@ void GainDrive::routes_edit()
 		const std::string uname = req.get_param_value("u");
 		auto ui = store_.get_user(uname);
 		if (!(ui && ui->is_admin)) {
-			if (!item_read_allowed(req, store_, uploads_root_name_, old_rel)) {
+			if (!item_read_allowed(req, store_, old_rel)) {
 				err(70, "Item not found."); return;
 				}
 			const bool own_upload = !uploads_root_name_.empty()

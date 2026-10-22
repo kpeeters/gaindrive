@@ -704,6 +704,7 @@ add_executable(gaindrive
 	src/apiweb.cc
 	src/countingpool.cc
 	src/apisystem.cc
+	src/apitags.cc
 	src/apibrowse.cc
 	src/apiplaylist.cc
 	src/apistream.cc
@@ -713,6 +714,7 @@ add_executable(gaindrive
 	src/apifetch.cc
 	src/apifallback.cc
 	src/mediastore.cc
+	src/visibility.cc
 	src/streamer.cc
 	src/transcodecache.cc
 	src/hls.cc

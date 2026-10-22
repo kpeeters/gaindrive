@@ -302,7 +302,8 @@ void GainDrive::routes_system()
 					{"jukeboxRole",       false},
 					{"shareRole",         false},
 					{"disabled",          ui->disabled},
-					{"castRole",          ui->cast_allowed}
+					{"castRole",          ui->cast_allowed},
+					{"blockUntagged",     ui->block_untagged}
 					};
 				});
 		else
@@ -324,6 +325,7 @@ void GainDrive::routes_system()
 				u->SetAttribute("shareRole",         false);
 				u->SetAttribute("disabled",          ui->disabled);
 				u->SetAttribute("castRole",          ui->cast_allowed);
+				u->SetAttribute("blockUntagged",     ui->block_untagged);
 				root->InsertEndChild(u);
 				});
 		res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -365,7 +367,8 @@ void GainDrive::routes_system()
 						{"jukeboxRole",       false},
 						{"shareRole",         false},
 						{"disabled",          u.disabled},
-				{"castRole",          u.cast_allowed}
+						{"castRole",          u.cast_allowed},
+						{"blockUntagged",     u.block_untagged}
 						});
 				r["users"] = {{"user", arr}};
 				});
@@ -390,6 +393,7 @@ void GainDrive::routes_system()
 					ue->SetAttribute("shareRole",         false);
 					ue->SetAttribute("disabled",          u.disabled);
 					ue->SetAttribute("castRole",          u.cast_allowed);
+					ue->SetAttribute("blockUntagged",     u.block_untagged);
 					us->InsertEndChild(ue);
 					}
 				root->InsertEndChild(us);
@@ -431,12 +435,14 @@ void GainDrive::routes_system()
 		bool upload_allowed = (qp("uploadRole") == "true");
 		bool disabled       = (qp("disabled")   == "true");
 		bool cast_allowed   = (qp("castRole")   == "true");
+		bool block_untagged = (qp("blockUntagged") == "true");
 
 		if (!store_.add_user(username, password, is_admin)) {
 			err(0, "User already exists.");
 			return;
 			}
-		store_.update_user(username, "", qp("email"), is_admin, upload_allowed, disabled, cast_allowed);
+		store_.update_user(username, "", qp("email"), is_admin, upload_allowed, disabled,
+		                   cast_allowed, block_untagged);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -470,6 +476,8 @@ void GainDrive::routes_system()
 		bool upload_allowed = qp("uploadRole").empty() ? existing->upload_allowed : (qp("uploadRole") == "true");
 		bool disabled       = qp("disabled").empty()   ? existing->disabled       : (qp("disabled")   == "true");
 		bool cast_allowed   = qp("castRole").empty()   ? existing->cast_allowed   : (qp("castRole")   == "true");
+		bool block_untagged = qp("blockUntagged").empty() ? existing->block_untagged
+		                                                  : (qp("blockUntagged") == "true");
 		std::string email   = qp("email").empty()       ? existing->email          : qp("email");
 		// enc: decoded before storing, as in createUser.
 		auto pw_dec = MediaStore::decode_enc_password(qp("password"));
@@ -480,7 +488,8 @@ void GainDrive::routes_system()
 		if (username == qp("u") && disabled)
 			{ err(0, "You cannot disable your own account."); return; }
 
-		store_.update_user(username, pw, email, is_admin, upload_allowed, disabled, cast_allowed);
+		store_.update_user(username, pw, email, is_admin, upload_allowed, disabled,
+		                   cast_allowed, block_untagged);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		res.set_content(body, use_json ? "application/json" : "application/xml");
@@ -520,7 +529,7 @@ void GainDrive::routes_system()
 
 		store_.update_user(target, password, existing->email, existing->is_admin,
 		                   existing->upload_allowed, existing->disabled,
-		                   existing->cast_allowed);
+		                   existing->cast_allowed, existing->block_untagged);
 
 		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
 		res.set_content(body, use_json ? "application/json" : "application/xml");

@@ -47,14 +47,13 @@ bool check_item_write_perm(const httplib::Request& req, httplib::Response& res,
                            const std::string& uploads_root_name,
                            const std::string& rel_path, bool use_json);
 
-// The same question for reading. Anything outside the uploads root is shared
-// and readable; inside it, only the owner and an admin may look.
+// The same question for reading: false when the item is hard-hidden from this
+// account (see visibility.hh), which covers other people's uploads as well as
+// a folder an admin tag blocks. Soft-hidden items stay readable by id.
 bool item_read_allowed(const httplib::Request& req, MediaStore& store,
-                       const std::string& uploads_root_name,
                        const std::string& rel_path);
 bool check_item_read_perm(const httplib::Request& req, httplib::Response& res,
                           MediaStore& store,
-                          const std::string& uploads_root_name,
                           const std::string& rel_path, bool use_json);
 
 // Resolves the `personal` parameter to what get_artist_dirs() wants.

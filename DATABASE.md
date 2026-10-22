@@ -624,7 +624,70 @@ CREATE TABLE users (
     -- unused max_bitrate column here. The limit
     -- is now the player's own maxBitRate.
     created       DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_access   DATETIME
+    last_access   DATETIME,
+    -- Hide every level-1 folder that no admin
+    -- tag lets this user see. Ignored for
+    -- admins.
+    block_untagged  INTEGER DEFAULT 0,
+    -- The [username] admin tag, made with the
+    -- account and put on its uploads once
+    -- they reach the library.
+    personal_tag_id INTEGER REFERENCES tags(id)
+                      ON DELETE SET NULL
+);
+
+-- Who sees which level-1 folder (an artist or
+-- a category). The rules are in visibility.hh;
+-- every listing and every read by id ask it.
+--
+-- An admin tag has no owner. Each user has a
+-- cell for it: their user_tags row, or else
+-- default_state. A cell is one of
+--   blocked     hidden, and fixed
+--   shown       visible, and fixed
+--   choice_on   visible, user may switch off
+--   choice_off  hidden, user may switch on
+-- A user tag belongs to owner_id alone and is
+-- invisible to everyone else; its only cell is
+-- the owner's switch, on unless set.
+CREATE TABLE tags (
+    id            INTEGER PRIMARY KEY,
+    name          TEXT NOT NULL COLLATE NOCASE,
+    owner_id      INTEGER REFERENCES users(id)
+                    ON DELETE CASCADE,
+    default_state TEXT   -- NULL for a user tag
+);
+-- Unique among admin tags, and per owner among
+-- user tags. A plain UNIQUE(owner_id, name)
+-- would let two admin tags share a name,
+-- because NULLs never collide.
+CREATE UNIQUE INDEX tags_admin_name
+    ON tags(name) WHERE owner_id IS NULL;
+CREATE UNIQUE INDEX tags_user_name
+    ON tags(owner_id, name)
+    WHERE owner_id IS NOT NULL;
+
+-- path is "<root>/<folder>", level 1 only. It
+-- follows a moved folder, but is deliberately
+-- kept when the folder disappears, so that a
+-- drive unmounted for a while comes back with
+-- its tags.
+CREATE TABLE folder_tags (
+    path   TEXT NOT NULL,
+    tag_id INTEGER NOT NULL REFERENCES tags(id)
+             ON DELETE CASCADE,
+    PRIMARY KEY (path, tag_id)
+);
+
+-- The cells that have been set. A missing row
+-- is the tag's default_state.
+CREATE TABLE user_tags (
+    user_id INTEGER NOT NULL REFERENCES users(id)
+              ON DELETE CASCADE,
+    tag_id  INTEGER NOT NULL REFERENCES tags(id)
+              ON DELETE CASCADE,
+    state   TEXT NOT NULL,
+    PRIMARY KEY (user_id, tag_id)
 );
 
 -- All references to music-library rows are by

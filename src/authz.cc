@@ -3,6 +3,7 @@
 #include "netaddr.hh"
 #include "textutil.hh"
 #include "stamp.hh"
+#include "visibility.hh"
 
 #include <chrono>
 #include <cstring>
@@ -314,42 +315,33 @@ bool check_item_write_perm(const httplib::Request& req,
 	}
 
 // Returns true if the authenticated user may *read* the item stored at
-// `rel_path`. Everything in a library root is shared and readable; the uploads
-// root is personal, so only its owner and an admin may reach it.
+// `rel_path`, which is anything not hard-hidden from them: other people's
+// uploads, and folders an admin tag blocks or block_untagged leaves out.
 //
-// This exists because the uploads root is kept out of *browsing* - see
-// not_uploads() and the skips in get_music_folders()/music_folder_by_id() -
-// but every id-addressed read went straight to `WHERE id = ?`. So the listing
-// hid another user's batch while stream, download, getCoverArt and
-// getMusicDirectory all served it to anyone who tried the number. Filtering
-// here rather than in each query keeps the twelve ChildEntry queries untouched,
-// which is the same trade getVideos made for is_video.
+// This exists because browsing and reading by id are two doors. The listings
+// hide what they should through gd_visible(), but every id-addressed read went
+// straight to `WHERE id = ?`, so a listing that hid another user's batch did
+// not stop stream, download, getCoverArt or getMusicDirectory serving it to
+// anyone who tried the number. Both doors now ask Visibility::state(), which
+// keeps the twelve ChildEntry queries untouched, the same trade getVideos made
+// for is_video.
 bool item_read_allowed(const httplib::Request& req, MediaStore& store,
-                       const std::string& uploads_root_name,
                        const std::string& rel_path)
 	{
-	if (uploads_root_name.empty() || rel_path.empty()) return true;
-
-	std::vector<std::string> parts;
-	for (const auto& c : std::filesystem::path(rel_path))
-		parts.push_back(c.string());
-	if (parts.empty() || parts[0] != uploads_root_name) return true;
-
-	const std::string uname = req.get_param_value("u");
-	auto info = store.get_user(uname);
-	if (info && info->is_admin) return true;
-	return parts.size() >= 2 && !uname.empty() && parts[1] == uname;
+	if (rel_path.empty()) return true;
+	return store.visibility().state(req.get_param_value("u"), rel_path)
+	       != Visibility::State::hard;
 	}
 
 bool check_item_read_perm(const httplib::Request& req,
                            httplib::Response& res, MediaStore& store,
-                           const std::string& uploads_root_name,
                            const std::string& rel_path, bool use_json)
 	{
-	if (item_read_allowed(req, store, uploads_root_name, rel_path)) return true;
+	if (item_read_allowed(req, store, rel_path)) return true;
 
 	// Deliberately the same shape of answer a missing item gets, so this does
-	// not become an oracle for which ids exist in somebody else's uploads.
+	// not become an oracle for which ids exist in somebody else's uploads, or
+	// behind a tag.
 	const char* msg = "Not found.";
 	res.set_content(use_json ? subsonic_error_json(70, msg)
 	                        : subsonic_error(70, msg),

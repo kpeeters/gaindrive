@@ -78,6 +78,7 @@ GainDrive::GainDrive(const std::string& db_path,
 
 	routes_web();
 	routes_system();
+	routes_tags();
 	routes_browse();
 	routes_playlist();
 	routes_stream();

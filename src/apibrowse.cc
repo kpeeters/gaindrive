@@ -241,7 +241,8 @@ void GainDrive::routes_browse()
 		// several roots. Absent means every root, mixed, which is what
 		// third-party clients expect and get.
 		auto artists = store_.get_artist_dirs(
-			pu, to_int(req.get_param_value("musicFolderId"), 0),
+			req.get_param_value("u"), pu,
+			to_int(req.get_param_value("musicFolderId"), 0),
 			req.get_param_value("contentType"));
 
 		auto buckets = index_buckets(artists, pu == MediaStore::PERSONAL_ALL_USERS);
@@ -301,7 +302,8 @@ void GainDrive::routes_browse()
 		// several roots. Absent means every root, mixed, which is what
 		// third-party clients expect and get.
 		auto artists = store_.get_artist_dirs(
-			pu, to_int(req.get_param_value("musicFolderId"), 0),
+			req.get_param_value("u"), pu,
+			to_int(req.get_param_value("musicFolderId"), 0),
 			req.get_param_value("contentType"));
 
 		auto buckets = index_buckets(artists, pu == MediaStore::PERSONAL_ALL_USERS);
@@ -366,7 +368,7 @@ void GainDrive::routes_browse()
 
 		std::string user = req.params.find("u")->second;
 		const int artist_fid = to_int(it->second, -1);
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          store_.get_folder_path(artist_fid), use_json)) return;
 		auto info = store_.get_artist(artist_fid, user);
 		if (!info) { err(70, "Artist not found."); return; }
@@ -454,10 +456,11 @@ void GainDrive::routes_browse()
 		// uploads root is skipped by get_music_folders() but is still a
 		// folders row, so without this getMusicDirectory on its id lists every
 		// user's name, and on a batch id lists that user's library.
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          store_.get_folder_path(dir_id), use_json)) return;
 
-		auto dir = store_.get_directory(dir_id, flat_multi_disc_);
+		auto dir = store_.get_directory(dir_id, req.get_param_value("u"),
+		                                flat_multi_disc_);
 		if (!dir) { err(70, "Directory not found."); return; }
 
 		std::string body;
@@ -587,7 +590,7 @@ void GainDrive::routes_browse()
 		auto entries = store_.get_now_playing();
 
 		std::erase_if(entries, [&](const MediaStore::NowPlayingEntry& e) {
-			return !item_read_allowed(req, store_, uploads_root_name_, e.song_path);
+			return !item_read_allowed(req, store_, e.song_path);
 			});
 
 		bool use_json = (fmt_of(req) == "json");
@@ -693,7 +696,7 @@ void GainDrive::routes_browse()
 		// check was run against its account at getCastToken, and the grant
 		// names the one cover that song passed for.
 		if (!grant_authed
-		    && !check_item_read_perm(req, res, store_, uploads_root_name_,
+		    && !check_item_read_perm(req, res, store_,
 		                             rel_path.empty()
 		                                 ? store_.get_folder_path(folder_id)
 		                                 : rel_path,
@@ -988,7 +991,7 @@ void GainDrive::routes_browse()
 			}
 
 		std::string folder_rel = store_.get_folder_path(to_int(it->second, -1));
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          folder_rel, fmt_of(req) == "json")) return;
 		if (folder_rel.empty()) {
 			res.status = 404;
@@ -1085,7 +1088,7 @@ void GainDrive::routes_browse()
 			}
 
 		const int images_fid = to_int(it->second, -1);
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          store_.get_folder_path(images_fid),
 		                          fmt_of(req) == "json")) return;
 		int count = store_.get_image_count(images_fid);
@@ -1123,7 +1126,7 @@ void GainDrive::routes_browse()
 			}
 
 		std::string folder_rel = store_.get_folder_path(to_int(id_it->second, -1));
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          folder_rel, fmt_of(req) == "json")) return;
 		if (folder_rel.empty()) {
 			res.status = 404;
@@ -1196,7 +1199,7 @@ void GainDrive::routes_browse()
 		std::string user = req.params.find("u")->second;
 		const int album_fid = to_int(it->second, -1);
 		const std::string album_rel = store_.get_folder_path(album_fid);
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          album_rel, use_json)) return;
 		auto info = store_.get_album(album_fid, flat_multi_disc_, user);
 		if (!info) { err(70, "Album not found."); return; }
@@ -1308,7 +1311,7 @@ void GainDrive::routes_browse()
 
 		auto song = store_.get_song_entry(to_int(it->second, -1));
 		if (!song) { err(70, "Song not found."); return; }
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          song->path, use_json)) return;
 
 		std::string body;
@@ -1334,7 +1337,7 @@ void GainDrive::routes_browse()
 	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
-		auto genres   = store_.get_genres();
+		auto genres   = store_.get_genres(req.get_param_value("u"));
 
 		std::string body;
 		if (use_json)
@@ -1386,7 +1389,8 @@ void GainDrive::routes_browse()
 		int offset = std::clamp(to_int(req.get_param_value("offset"), 0),
 		                        0, MAX_LIST_OFFSET);
 
-		auto songs = store_.get_songs_by_genre(genre, count, offset);
+		auto songs = store_.get_songs_by_genre(req.get_param_value("u"),
+		                                       genre, count, offset);
 
 		std::string body;
 		if (use_json)
@@ -1451,7 +1455,7 @@ void GainDrive::routes_browse()
 
 		bool personal = qp("personal") == "true";
 		std::string pu = personal ? qp("u") : "";
-		auto sr = store_.search(query,
+		auto sr = store_.search(qp("u"), query,
 		                        artist_count, artist_offset,
 		                        album_count,  album_offset,
 		                        song_count,   song_offset,

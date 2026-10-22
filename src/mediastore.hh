@@ -8,6 +8,7 @@
 #include <vector>
 #include <optional>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <system_error>
 #include <SQLiteCpp/SQLiteCpp.h>
@@ -43,6 +44,8 @@ bool batch_held(const std::filesystem::path& batch);
 // it is the scanner's own working type and nothing outside the scan needs it;
 // declared here only so commit_album() can take one.
 struct AlbumReadData;
+
+class Visibility;
 
 class MediaStore {
 	public:
@@ -82,6 +85,7 @@ class MediaStore {
 		           const std::string& user_db_path = "",
 		           int video_art_px = 640, bool video_art_frames = false,
 		           bool video_art_embedded = false, int scan_jobs = 0);
+		~MediaStore();
 
 		// The configured roots, in the order given.
 		const std::vector<Root>& roots() const;
@@ -143,6 +147,9 @@ class MediaStore {
 			bool        upload_allowed;
 			bool        disabled;
 			bool        cast_allowed;
+			// Hide every level-1 folder no admin tag lets this user see;
+			// ignored for admins. See visibility.hh.
+			bool        block_untagged = false;
 			};
 
 		std::optional<UserInfo> get_user(const std::string& username);
@@ -159,7 +166,8 @@ class MediaStore {
 		                 bool is_admin,
 		                 bool upload_allowed,
 		                 bool disabled,
-		                 bool cast_allowed);
+		                 bool cast_allowed,
+		                 bool block_untagged);
 
 		// Validates Subsonic auth params. Supply either password (from p=,
 		// possibly with "enc:" prefix) or token+salt (from t= and s=).
@@ -167,6 +175,50 @@ class MediaStore {
 		                   const std::string& password,
 		                   const std::string& token,
 		                   const std::string& salt);
+
+		// ---- Tags on level-1 folders (see visibility.hh) ----
+
+		// What a user may see. Every listing below already asks it; reads by
+		// id ask through item_read_allowed().
+		const Visibility& visibility() const;
+
+		struct TagInfo {
+			int         id = 0;
+			std::string name;
+			std::string owner;          // empty for an admin tag
+			std::string default_state;  // empty for a user tag
+			std::string personal_of;    // the account this is the personal tag of
+			std::vector<std::string> folders;   // "<root>/<folder>"
+			};
+		struct TagCell {
+			std::string username;
+			int         tag_id = 0;
+			std::string state;
+			};
+
+		// Every tag, users' own included, for the admin.
+		std::vector<TagInfo> list_tags();
+		// Every cell that has been set; a missing one means the default.
+		std::vector<TagCell> list_tag_cells();
+
+		// The admin tag calls answer false, and change nothing, for an id that
+		// is not an admin tag, a state that is not one of the four, or a name
+		// already in use. Tag names compare case-insensitively.
+		std::optional<int> create_tag(const std::string& name,
+		                              const std::string& default_state);
+		bool update_tag(int tag_id, const std::string& name,
+		                const std::string& default_state);
+		// Any tag except a personal one, which goes only with its account.
+		bool delete_tag(int tag_id);
+		// A user tag becomes an admin tag. The owner's switch stays as their
+		// cell.
+		bool promote_tag(int tag_id, const std::string& default_state);
+		// Replaces the admin tags on one level-1 folder; users' own tags on
+		// it are left alone. False when `path` is not a level-1 folder.
+		bool set_folder_tags(const std::string& path, const std::vector<int>& tag_ids);
+		// An empty state clears the cell back to the tag's default.
+		bool set_user_tag(const std::string& username, int tag_id,
+		                  const std::string& state);
 
 		// ---- Library browsing ----
 
@@ -485,6 +537,8 @@ class MediaStore {
 		// personal_user non-empty → restrict to that user's subtree of the
 		// uploads root, or to every user's under PERSONAL_ALL_USERS; else the
 		// shared library, excluding uploads entirely.
+		// viewer is the requesting account; folders it may not see are left
+		// out (see visibility.hh). Every listing below takes one.
 		// music_folder_id > 0 restricts to one root (the Subsonic
 		// musicFolderId filter); <= 0 spans every root, which is what an
 		// unfiltered request means.
@@ -493,6 +547,7 @@ class MediaStore {
 		// replacement: a kind may span several roots, which a single folder id
 		// cannot express, and two artist roots must list together.
 		std::vector<ArtistDir> get_artist_dirs(
+			const std::string& viewer,
 			const std::string& personal_user = "",
 			int music_folder_id = 0,
 			const std::string& content_type = "");
@@ -599,7 +654,11 @@ class MediaStore {
 			std::vector<ChildEntry> children;
 			};
 
-		std::optional<DirInfo> get_directory(int folder_id, bool flat_multi_disc = true);
+		// Listing a root leaves out the level-1 folders `viewer` may not see.
+		// Below that nothing is filtered: the caller has checked the folder
+		// itself, and a soft-hidden folder reached by id is meant to open.
+		std::optional<DirInfo> get_directory(int folder_id, const std::string& viewer,
+		                                     bool flat_multi_disc = true);
 
 		struct AlbumEntry {
 			int         id;           // folder_id (used as Subsonic album id)
@@ -630,7 +689,7 @@ class MediaStore {
 		// type: newest | random | alphabeticalByName | alphabeticalByArtist |
 		//       frequent | recent | starred | byYear | byGenre
 		// from_year/to_year: used for byYear; genre: used for byGenre.
-		// username: required for frequent, recent, starred.
+		// username: the viewer, and whose plays and stars count.
 		std::vector<AlbumEntry> get_album_list(
 			const std::string& type,
 			int size, int offset,
@@ -708,7 +767,7 @@ class MediaStore {
 		std::optional<SongInfo> get_song(int song_id);
 
 		// All video rows, ordered by folder then disc/track, for getVideos.
-		std::vector<ChildEntry> get_videos();
+		std::vector<ChildEntry> get_videos(const std::string& viewer);
 
 		// One row of getGenres. `name` is the commonest raw spelling of the
 		// tag; the counts are over the folded form, so "Rock" and "rock" are
@@ -728,11 +787,12 @@ class MediaStore {
 		// case and padding is not the same thing -- those spellings are the
 		// same tag by anyone's account, and no information is lost by
 		// counting them together.
-		std::vector<GenreEntry> get_genres();
+		std::vector<GenreEntry> get_genres(const std::string& viewer);
 
 		// The songs carrying one genre, matched on the folded spelling so the
 		// value taken from get_genres() always matches.
-		std::vector<ChildEntry> get_songs_by_genre(const std::string& genre,
+		std::vector<ChildEntry> get_songs_by_genre(const std::string& viewer,
+		                                            const std::string& genre,
 		                                            int count, int offset);
 
 		// One selectable caption source. index is the absolute ffprobe stream
@@ -904,7 +964,8 @@ class MediaStore {
 			std::vector<ChapterHit> chapters;
 			};
 
-		SearchResult search(const std::string& query,
+		SearchResult search(const std::string& viewer,
+		                    const std::string& query,
 		                    int artist_count, int artist_offset,
 		                    int album_count,  int album_offset,
 		                    int song_count,   int song_offset,
@@ -1146,6 +1207,20 @@ class MediaStore {
 		// col is the qualified path column, e.g. "f.path".
 		std::string not_uploads(const char* col) const;
 
+		// "gd_visible(<id>, col)": true for rows `viewer` may see in a
+		// listing. visible_to() is the same with a leading " AND ". The id is
+		// an integer, so it is interpolated like not_uploads() and the
+		// hand-counted bind indices stay as they are.
+		std::string visible_clause(const std::string& viewer, const char* col) const;
+		std::string visible_to(const std::string& viewer, const char* col) const;
+
+		// Re-reads the tag tables into visibility_. Caller holds db_mutex_.
+		void reload_visibility_locked();
+		// The [username] admin tag, made if the account has none. Caller
+		// holds db_mutex_.
+		void ensure_personal_tag_locked(int user_id, const std::string& username);
+		bool is_level1_folder_locked(const std::string& path);
+
 		// Root whose filesystem path contains `abs`, or nullptr. Used on the
 		// way in, when the scanner has an absolute path and needs the stored
 		// form.
@@ -1158,6 +1233,10 @@ class MediaStore {
 		// these are the only places that know it.
 		std::string strip_root(const std::string& abs) const;
 		std::string join_root (const std::string& rel) const;
+
+		// Declared before db_music_ so it outlives the connection, which
+		// holds a pointer to it for gd_visible().
+		std::unique_ptr<Visibility> visibility_;
 
 		SQLite::Database db_music_;
 		std::mutex       db_mutex_;  // guards db_music_ across scan thread + API threads

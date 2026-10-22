@@ -33,7 +33,7 @@ void GainDrive::routes_playlist()
 		auto range = req.params.equal_range("id");
 		for (auto it = range.first; it != range.second; ++it) {
 			if (auto p = store_.song_path_by_id(to_int(it->second, -1)))
-				if (item_read_allowed(req, store_, uploads_root_name_, *p))
+				if (item_read_allowed(req, store_, *p))
 					paths.push_back(*p);
 			}
 
@@ -41,7 +41,7 @@ void GainDrive::routes_playlist()
 		std::string current_path = "";
 		if (current_id != 0) {
 			if (auto p = store_.song_path_by_id(current_id))
-				if (item_read_allowed(req, store_, uploads_root_name_, *p))
+				if (item_read_allowed(req, store_, *p))
 					current_path = *p;
 			}
 		int64_t offset_ms  = to_int64(qp("position", "0"), 0);
@@ -122,7 +122,7 @@ void GainDrive::routes_playlist()
 		auto range = req.params.equal_range("id");
 		for (auto it = range.first; it != range.second; ++it) {
 			if (auto p = store_.song_path_by_id(to_int(it->second, -1)))
-				if (item_read_allowed(req, store_, uploads_root_name_, *p))
+				if (item_read_allowed(req, store_, *p))
 					store_.scrobble(user, *p, submission, client);
 			}
 
@@ -169,7 +169,7 @@ void GainDrive::routes_playlist()
 		// getNowPlaying with the full song entry.
 		auto song_path = store_.song_path_by_id(to_int(qp("mediaId"), -1));
 		if (!song_path
-		    || !item_read_allowed(req, store_, uploads_root_name_, *song_path)) {
+		    || !item_read_allowed(req, store_, *song_path)) {
 			err(70, "Song not found.");
 			return;
 			}
@@ -206,7 +206,7 @@ void GainDrive::routes_playlist()
 
 		auto song_path = store_.song_path_by_id(song_id);
 		if (!song_path
-		    || !item_read_allowed(req, store_, uploads_root_name_, *song_path)) {
+		    || !item_read_allowed(req, store_, *song_path)) {
 			res.set_content(subsonic_error(70, "Song not found."), "application/xml");
 			return;
 			}
@@ -244,7 +244,7 @@ void GainDrive::routes_playlist()
 		auto range = req.params.equal_range("songId");
 		for (auto i = range.first; i != range.second; ++i) {
 			if (auto p = store_.song_path_by_id(to_int(i->second, -1)))
-				if (item_read_allowed(req, store_, uploads_root_name_, *p))
+				if (item_read_allowed(req, store_, *p))
 					song_paths.push_back(*p);
 			}
 
@@ -435,7 +435,7 @@ void GainDrive::routes_playlist()
 		for (auto& [k, v] : req.params) {
 			if (k == "songIdToAdd") {
 				if (auto p = store_.song_path_by_id(to_int(v, -1)))
-					if (item_read_allowed(req, store_, uploads_root_name_, *p))
+					if (item_read_allowed(req, store_, *p))
 						paths_to_add.push_back(*p);
 				}
 			else if (k == "songIndexToRemove") to_remove.push_back(to_int(v, -1));
@@ -460,7 +460,7 @@ void GainDrive::routes_playlist()
 
 		// item_read_allowed on every kind of id - see scrobble.
 		auto readable = [&](const std::string& path) {
-			return item_read_allowed(req, store_, uploads_root_name_, path);
+			return item_read_allowed(req, store_, path);
 			};
 		for (auto& [k, v] : req.params) {
 			if (k == "id") {
@@ -489,7 +489,7 @@ void GainDrive::routes_playlist()
 		std::string user = req.params.find("u")->second;
 
 		auto readable = [&](const std::string& path) {
-			return item_read_allowed(req, store_, uploads_root_name_, path);
+			return item_read_allowed(req, store_, path);
 			};
 		for (auto& [k, v] : req.params) {
 			if (k == "id") {

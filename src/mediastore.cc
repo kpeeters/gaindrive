@@ -38,6 +38,7 @@
 #include "dvd.hh"
 #include "parallel.hh"
 #include "tmdb.hh"
+#include "visibility.hh"
 #include "untrusted.hh"
 #include "videoname.hh"
 
@@ -619,7 +620,8 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	// a property of the connection, so it also covers the attached client
 	// schema.  db_mutex_ is no help: it serialises our own threads, and this
 	// contention is between processes.
-	: db_music_(derive_path(db_path, "-music"),
+	: visibility_(std::make_unique<Visibility>()),
+	  db_music_(derive_path(db_path, "-music"),
 	            SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE,
 	            DB_BUSY_TIMEOUT_MS)
 	{
@@ -712,7 +714,12 @@ MediaStore::MediaStore(const std::string& db_path, const std::vector<Root>& root
 	// a typed video title - so it keeps the fsync per commit.  Its writes are
 	// small and rare, and a scan does not touch it.
 	db_music_.exec("PRAGMA client.synchronous=FULL");
+	visibility_->install(db_music_);
 	create_schema();
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	reload_visibility_locked();
+	}
 	purge_disabled_video_art();
 	repair_album_art();
 	sync_roots();
@@ -1221,7 +1228,48 @@ void MediaStore::create_schema()
 			last_access    DATETIME,
 			upload_allowed INTEGER DEFAULT 0,
 			disabled       INTEGER DEFAULT 0,
-			cast_allowed   INTEGER DEFAULT 0
+			cast_allowed   INTEGER DEFAULT 0,
+			-- See visibility.hh. personal_tag_id is the [username] admin
+			-- tag; a column rather than a name match, so that renaming the
+			-- tag does not break tagging the account's uploads.
+			block_untagged  INTEGER DEFAULT 0,
+			personal_tag_id INTEGER REFERENCES tags(id) ON DELETE SET NULL
+		);
+
+		-- Tags on level-1 folders, which decide who sees what; see
+		-- visibility.hh. An admin tag has no owner and a default for every
+		-- user's cell; a user tag belongs to its owner and means nothing to
+		-- anyone else.
+		CREATE TABLE IF NOT EXISTS client.tags (
+			id            INTEGER PRIMARY KEY,
+			name          TEXT NOT NULL COLLATE NOCASE,
+			owner_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+			default_state TEXT CHECK(default_state IN
+			                  ('blocked','shown','choice_on','choice_off'))
+		);
+		-- UNIQUE(owner_id, name) would not do: NULLs never collide, so it
+		-- would let two admin tags share a name.
+		CREATE UNIQUE INDEX IF NOT EXISTS client.tags_admin_name
+			ON tags(name) WHERE owner_id IS NULL;
+		CREATE UNIQUE INDEX IF NOT EXISTS client.tags_user_name
+			ON tags(owner_id, name) WHERE owner_id IS NOT NULL;
+
+		-- path is a level-1 folder, "<root>/<folder>", and nothing deeper.
+		CREATE TABLE IF NOT EXISTS client.folder_tags (
+			path   TEXT NOT NULL,
+			tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+			PRIMARY KEY (path, tag_id)
+		);
+
+		-- Admin tags: the cells that have been set, a missing row meaning
+		-- the tag's default_state. User tags: at most the owner's row,
+		-- choice_on or choice_off, a missing one meaning on.
+		CREATE TABLE IF NOT EXISTS client.user_tags (
+			user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			tag_id  INTEGER NOT NULL REFERENCES tags(id)  ON DELETE CASCADE,
+			state   TEXT NOT NULL CHECK(state IN
+			            ('blocked','shown','choice_on','choice_off')),
+			PRIMARY KEY (user_id, tag_id)
 		);
 
 		-- All references to music-DB rows are by filesystem path, RELATIVE
@@ -1388,6 +1436,21 @@ void MediaStore::create_schema()
 	catch (const SQLite::Exception&) {}
 	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN cast_allowed INTEGER DEFAULT 0"); }
 	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN block_untagged INTEGER DEFAULT 0"); }
+	catch (const SQLite::Exception&) {}
+	try { db_music_.exec("ALTER TABLE client.users ADD COLUMN personal_tag_id INTEGER"
+	                     " REFERENCES tags(id) ON DELETE SET NULL"); }
+	catch (const SQLite::Exception&) {}
+	{
+	// Accounts made before tags existed get their [username] tag now.
+	std::vector<std::pair<int, std::string>> missing;
+	SQLite::Statement q(db_music_,
+		"SELECT id, username FROM client.users WHERE personal_tag_id IS NULL");
+	while (q.executeStep())
+		missing.emplace_back(q.getColumn(0).getInt(), q.getColumn(1).getString());
+	for (const auto& [id, name] : missing)
+		ensure_personal_tag_locked(id, name);
+	}
 	// reportPlayback's timeline. `counted` says the play this row belongs to
 	// has already been scrobbled, so reports past the threshold count it once.
 	try { db_music_.exec("ALTER TABLE client.now_playing ADD COLUMN state TEXT"); }
@@ -4805,7 +4868,10 @@ bool MediaStore::add_user(const std::string& username, const std::string& passwo
 	ins.bind(2, password);
 	ins.bind(3, is_admin ? 1 : 0);
 	ins.exec();
-	return db_music_.getChanges() > 0;
+	if (db_music_.getChanges() == 0) return false;
+	ensure_personal_tag_locked((int)db_music_.getLastInsertRowid(), username);
+	reload_visibility_locked();
+	return true;
 	}
 
 bool MediaStore::has_users()
@@ -4820,7 +4886,8 @@ std::optional<MediaStore::UserInfo> MediaStore::get_user(const std::string& user
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement sel(db_music_,
-		"SELECT username, email, is_admin, upload_allowed, disabled, cast_allowed"
+		"SELECT username, email, is_admin, upload_allowed, disabled, cast_allowed,"
+		"       COALESCE(block_untagged, 0)"
 		" FROM client.users WHERE username = ?");
 	sel.bind(1, username);
 	if (!sel.executeStep()) return std::nullopt;
@@ -4831,6 +4898,7 @@ std::optional<MediaStore::UserInfo> MediaStore::get_user(const std::string& user
 	u.upload_allowed = sel.getColumn(3).getInt() != 0;
 	u.disabled       = sel.getColumn(4).getInt() != 0;
 	u.cast_allowed   = sel.getColumn(5).getInt() != 0;
+	u.block_untagged = sel.getColumn(6).getInt() != 0;
 	return u;
 	}
 
@@ -4838,7 +4906,8 @@ std::vector<MediaStore::UserInfo> MediaStore::list_users()
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	SQLite::Statement sel(db_music_,
-		"SELECT username, email, is_admin, upload_allowed, disabled, cast_allowed"
+		"SELECT username, email, is_admin, upload_allowed, disabled, cast_allowed,"
+		"       COALESCE(block_untagged, 0)"
 		" FROM client.users ORDER BY username");
 	std::vector<UserInfo> result;
 	while (sel.executeStep()) {
@@ -4849,6 +4918,7 @@ std::vector<MediaStore::UserInfo> MediaStore::list_users()
 		u.upload_allowed = sel.getColumn(3).getInt() != 0;
 		u.disabled       = sel.getColumn(4).getInt() != 0;
 		u.cast_allowed   = sel.getColumn(5).getInt() != 0;
+		u.block_untagged = sel.getColumn(6).getInt() != 0;
 		result.push_back(u);
 		}
 	return result;
@@ -4860,26 +4930,32 @@ bool MediaStore::update_user(const std::string& username,
                               bool is_admin,
                               bool upload_allowed,
                               bool disabled,
-                              bool cast_allowed)
+                              bool cast_allowed,
+                              bool block_untagged)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
+	bool changed = false;
 	if (new_password.empty()) {
 		SQLite::Statement upd(db_music_,
 			"UPDATE client.users"
-			" SET email=?, is_admin=?, upload_allowed=?, disabled=?, cast_allowed=?"
+			" SET email=?, is_admin=?, upload_allowed=?, disabled=?, cast_allowed=?,"
+			"     block_untagged=?"
 			" WHERE username=?");
 		upd.bind(1, email);
 		upd.bind(2, is_admin       ? 1 : 0);
 		upd.bind(3, upload_allowed ? 1 : 0);
 		upd.bind(4, disabled       ? 1 : 0);
 		upd.bind(5, cast_allowed   ? 1 : 0);
-		upd.bind(6, username);
+		upd.bind(6, block_untagged ? 1 : 0);
+		upd.bind(7, username);
 		upd.exec();
+		changed = db_music_.getChanges() > 0;
 		}
 	else {
 		SQLite::Statement upd(db_music_,
 			"UPDATE client.users"
-			" SET password_enc=?, email=?, is_admin=?, upload_allowed=?, disabled=?, cast_allowed=?"
+			" SET password_enc=?, email=?, is_admin=?, upload_allowed=?, disabled=?, cast_allowed=?,"
+			"     block_untagged=?"
 			" WHERE username=?");
 		upd.bind(1, new_password);
 		upd.bind(2, email);
@@ -4887,10 +4963,291 @@ bool MediaStore::update_user(const std::string& username,
 		upd.bind(4, upload_allowed ? 1 : 0);
 		upd.bind(5, disabled       ? 1 : 0);
 		upd.bind(6, cast_allowed   ? 1 : 0);
-		upd.bind(7, username);
+		upd.bind(7, block_untagged ? 1 : 0);
+		upd.bind(8, username);
 		upd.exec();
+		changed = db_music_.getChanges() > 0;
 		}
-	return db_music_.getChanges() > 0;
+	// is_admin and block_untagged both change what this account sees.
+	reload_visibility_locked();
+	return changed;
+	}
+
+// ---- Tags on level-1 folders ------------------------------------------------
+
+MediaStore::~MediaStore() = default;
+
+const Visibility& MediaStore::visibility() const
+	{
+	return *visibility_;
+	}
+
+void MediaStore::reload_visibility_locked()
+	{
+	visibility_->reload(db_music_, uploads_prefix_.empty()
+	                               ? std::string()
+	                               : uploads_prefix_.substr(0, uploads_prefix_.size() - 1));
+	}
+
+std::string MediaStore::visible_clause(const std::string& viewer, const char* col) const
+	{
+	return "gd_visible(" + std::to_string(visibility_->user_id(viewer)) + ", "
+	       + col + ")";
+	}
+
+std::string MediaStore::visible_to(const std::string& viewer, const char* col) const
+	{
+	return " AND " + visible_clause(viewer, col);
+	}
+
+void MediaStore::ensure_personal_tag_locked(int user_id, const std::string& username)
+	{
+	// Named after the account, unless an admin tag of that name was made
+	// first; that one is the admin's, and stays theirs.
+	auto name_free = [&](const std::string& n) {
+		SQLite::Statement q(db_music_,
+			"SELECT 1 FROM client.tags WHERE owner_id IS NULL AND name = ?");
+		q.bind(1, n);
+		return !q.executeStep();
+		};
+	std::string name = username;
+	for (int i = 2; !name_free(name); ++i)
+		name = username + "-" + std::to_string(i);
+
+	// Others start out off, free to opt in; the owner starts out on.
+	SQLite::Statement ins(db_music_,
+		"INSERT INTO client.tags (name, owner_id, default_state)"
+		" VALUES (?, NULL, 'choice_off')");
+	ins.bind(1, name);
+	ins.exec();
+	const int tag_id = (int)db_music_.getLastInsertRowid();
+
+	SQLite::Statement cell(db_music_,
+		"INSERT OR REPLACE INTO client.user_tags (user_id, tag_id, state)"
+		" VALUES (?, ?, 'choice_on')");
+	cell.bind(1, user_id);
+	cell.bind(2, tag_id);
+	cell.exec();
+
+	SQLite::Statement upd(db_music_,
+		"UPDATE client.users SET personal_tag_id = ? WHERE id = ?");
+	upd.bind(1, tag_id);
+	upd.bind(2, user_id);
+	upd.exec();
+	}
+
+bool MediaStore::is_level1_folder_locked(const std::string& path)
+	{
+	SQLite::Statement q(db_music_,
+		"SELECT 1 FROM folders f JOIN folders r ON r.id = f.parent_id"
+		" WHERE f.path = ? AND r.parent_id IS NULL");
+	q.bind(1, path);
+	return q.executeStep();
+	}
+
+std::vector<MediaStore::TagInfo> MediaStore::list_tags()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	std::vector<TagInfo> result;
+	std::unordered_map<int, size_t> at;
+	{
+	SQLite::Statement q(db_music_,
+		"SELECT t.id, t.name, COALESCE(o.username, ''), COALESCE(t.default_state, ''),"
+		"       COALESCE(p.username, '')"
+		" FROM client.tags t"
+		" LEFT JOIN client.users o ON o.id = t.owner_id"
+		" LEFT JOIN client.users p ON p.personal_tag_id = t.id"
+		" ORDER BY t.owner_id IS NOT NULL, o.username, t.name");
+	while (q.executeStep()) {
+		TagInfo t;
+		t.id            = q.getColumn(0).getInt();
+		t.name          = q.getColumn(1).getString();
+		t.owner         = q.getColumn(2).getString();
+		t.default_state = q.getColumn(3).getString();
+		t.personal_of   = q.getColumn(4).getString();
+		at[t.id] = result.size();
+		result.push_back(std::move(t));
+		}
+	}
+	SQLite::Statement q(db_music_,
+		"SELECT tag_id, path FROM client.folder_tags ORDER BY path COLLATE NOCASE");
+	while (q.executeStep()) {
+		auto it = at.find(q.getColumn(0).getInt());
+		if (it != at.end())
+			result[it->second].folders.push_back(q.getColumn(1).getString());
+		}
+	return result;
+	}
+
+std::vector<MediaStore::TagCell> MediaStore::list_tag_cells()
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	std::vector<TagCell> result;
+	SQLite::Statement q(db_music_,
+		"SELECT u.username, ut.tag_id, ut.state"
+		" FROM client.user_tags ut JOIN client.users u ON u.id = ut.user_id"
+		" ORDER BY u.username, ut.tag_id");
+	while (q.executeStep())
+		result.push_back({ q.getColumn(0).getString(), q.getColumn(1).getInt(),
+		                   q.getColumn(2).getString() });
+	return result;
+	}
+
+std::optional<int> MediaStore::create_tag(const std::string& name,
+                                          const std::string& default_state)
+	{
+	if (name.empty() || !Visibility::parse_cell(default_state)) return std::nullopt;
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	try {
+		SQLite::Statement ins(db_music_,
+			"INSERT INTO client.tags (name, owner_id, default_state) VALUES (?, NULL, ?)");
+		ins.bind(1, name);
+		ins.bind(2, default_state);
+		ins.exec();
+		}
+	catch (const SQLite::Exception& e) {
+		// The unique index: a tag of that name exists.
+		std::cout << stamp() << "create_tag " << name << ": " << e.what() << std::endl;
+		return std::nullopt;
+		}
+	const int id = (int)db_music_.getLastInsertRowid();
+	reload_visibility_locked();
+	return id;
+	}
+
+bool MediaStore::update_tag(int tag_id, const std::string& name,
+                            const std::string& default_state)
+	{
+	if (name.empty() || !Visibility::parse_cell(default_state)) return false;
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	bool changed = false;
+	try {
+		SQLite::Statement upd(db_music_,
+			"UPDATE client.tags SET name = ?, default_state = ?"
+			" WHERE id = ? AND owner_id IS NULL");
+		upd.bind(1, name);
+		upd.bind(2, default_state);
+		upd.bind(3, tag_id);
+		upd.exec();
+		changed = db_music_.getChanges() > 0;
+		}
+	catch (const SQLite::Exception& e) {
+		std::cout << stamp() << "update_tag " << tag_id << ": " << e.what() << std::endl;
+		return false;
+		}
+	reload_visibility_locked();
+	return changed;
+	}
+
+bool MediaStore::delete_tag(int tag_id)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	SQLite::Statement del(db_music_,
+		"DELETE FROM client.tags WHERE id = ?"
+		"   AND NOT EXISTS (SELECT 1 FROM client.users WHERE personal_tag_id = ?)");
+	del.bind(1, tag_id);
+	del.bind(2, tag_id);
+	del.exec();
+	const bool changed = db_music_.getChanges() > 0;
+	reload_visibility_locked();
+	return changed;
+	}
+
+bool MediaStore::promote_tag(int tag_id, const std::string& default_state)
+	{
+	if (!Visibility::parse_cell(default_state)) return false;
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	bool changed = false;
+	try {
+		// The owner's row already is a cell, so it carries over as one.
+		SQLite::Statement upd(db_music_,
+			"UPDATE client.tags SET owner_id = NULL, default_state = ?"
+			" WHERE id = ? AND owner_id IS NOT NULL");
+		upd.bind(1, default_state);
+		upd.bind(2, tag_id);
+		upd.exec();
+		changed = db_music_.getChanges() > 0;
+		}
+	catch (const SQLite::Exception& e) {
+		// An admin tag of that name exists.
+		std::cout << stamp() << "promote_tag " << tag_id << ": " << e.what() << std::endl;
+		return false;
+		}
+	reload_visibility_locked();
+	return changed;
+	}
+
+bool MediaStore::set_folder_tags(const std::string& path, const std::vector<int>& tag_ids)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	if (!is_level1_folder_locked(path)) return false;
+	for (int id : tag_ids) {
+		SQLite::Statement q(db_music_,
+			"SELECT 1 FROM client.tags WHERE id = ? AND owner_id IS NULL");
+		q.bind(1, id);
+		if (!q.executeStep()) return false;
+		}
+	try {
+		SQLite::Transaction txn(db_music_);
+		SQLite::Statement del(db_music_,
+			"DELETE FROM client.folder_tags WHERE path = ?"
+			"   AND tag_id IN (SELECT id FROM client.tags WHERE owner_id IS NULL)");
+		del.bind(1, path);
+		del.exec();
+		for (int id : tag_ids) {
+			SQLite::Statement ins(db_music_,
+				"INSERT OR IGNORE INTO client.folder_tags (path, tag_id) VALUES (?, ?)");
+			ins.bind(1, path);
+			ins.bind(2, id);
+			ins.exec();
+			}
+		txn.commit();
+		}
+	catch (const SQLite::Exception& e) {
+		std::cout << stamp() << "set_folder_tags " << path << ": " << e.what() << std::endl;
+		reload_visibility_locked();
+		return false;
+		}
+	reload_visibility_locked();
+	return true;
+	}
+
+bool MediaStore::set_user_tag(const std::string& username, int tag_id,
+                              const std::string& state)
+	{
+	if (!state.empty() && !Visibility::parse_cell(state)) return false;
+	std::lock_guard<std::mutex> lock(db_mutex_);
+	int user_id = 0;
+	{
+	SQLite::Statement q(db_music_, "SELECT id FROM client.users WHERE username = ?");
+	q.bind(1, username);
+	if (!q.executeStep()) return false;
+	user_id = q.getColumn(0).getInt();
+	}
+	{
+	SQLite::Statement q(db_music_,
+		"SELECT 1 FROM client.tags WHERE id = ? AND owner_id IS NULL");
+	q.bind(1, tag_id);
+	if (!q.executeStep()) return false;
+	}
+	if (state.empty()) {
+		SQLite::Statement del(db_music_,
+			"DELETE FROM client.user_tags WHERE user_id = ? AND tag_id = ?");
+		del.bind(1, user_id);
+		del.bind(2, tag_id);
+		del.exec();
+		}
+	else {
+		SQLite::Statement ins(db_music_,
+			"INSERT OR REPLACE INTO client.user_tags (user_id, tag_id, state)"
+			" VALUES (?, ?, ?)");
+		ins.bind(1, user_id);
+		ins.bind(2, tag_id);
+		ins.bind(3, state);
+		ins.exec();
+		}
+	reload_visibility_locked();
+	return true;
 	}
 
 // The `p=enc:HEXHEX` spelling of a password, decoded, or the string
@@ -5811,7 +6168,7 @@ std::optional<MediaStore::SongInfo> MediaStore::get_song(int song_id)
 	return s;
 	}
 
-std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
+std::vector<MediaStore::ChildEntry> MediaStore::get_videos(const std::string& viewer)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 	// Same shape as the other ChildEntry queries, with the two video columns
@@ -5831,7 +6188,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
-		" WHERE s.is_video = 1" + not_uploads("s.path") +
+		" WHERE s.is_video = 1" + not_uploads("s.path") + visible_to(viewer, "s.path") +
 		" ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE,"
 		"          s.disc_number, s.track_number, s.title COLLATE NOCASE");
 	std::vector<ChildEntry> result;
@@ -5864,7 +6221,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_videos()
 	return result;
 	}
 
-std::vector<MediaStore::GenreEntry> MediaStore::get_genres()
+std::vector<MediaStore::GenreEntry> MediaStore::get_genres(const std::string& viewer)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
@@ -5892,14 +6249,14 @@ std::vector<MediaStore::GenreEntry> MediaStore::get_genres()
 	SQLite::Statement q(db_music_,
 		"SELECT (SELECT g2.name FROM song_genres g2"
 		"         WHERE LOWER(g2.name) = fold"
-		+ not_uploads("g2.path") +
+		+ not_uploads("g2.path") + visible_to(viewer, "g2.path") +
 		"         GROUP BY g2.name"
 		"         ORDER BY COUNT(*) DESC, g2.name LIMIT 1) AS name,"
 		"       songs,"
 		"       (SELECT COUNT(DISTINCT s.album_id) FROM song_genres g3"
 		"          JOIN songs s ON s.path = g3.path"
 		"         WHERE LOWER(g3.name) = fold"
-		+ not_uploads("g3.path") +
+		+ not_uploads("g3.path") + visible_to(viewer, "g3.path") +
 		"       ) AS albums"
 		// Joined to songs, not counted off song_genres alone: the counts are
 		// a contract with the two browse endpoints, and both of those return
@@ -5911,7 +6268,7 @@ std::vector<MediaStore::GenreEntry> MediaStore::get_genres()
 		"          FROM song_genres g"
 		"          JOIN songs s0 ON s0.path = g.path"
 		"         WHERE TRIM(g.name) <> ''"
-		+ not_uploads("g.path") +
+		+ not_uploads("g.path") + visible_to(viewer, "g.path") +
 		"         GROUP BY fold)"
 		" ORDER BY songs DESC, fold");
 
@@ -5929,7 +6286,7 @@ std::vector<MediaStore::GenreEntry> MediaStore::get_genres()
 	}
 
 std::vector<MediaStore::ChildEntry> MediaStore::get_songs_by_genre(
-	const std::string& genre, int count, int offset)
+	const std::string& viewer, const std::string& genre, int count, int offset)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
 
@@ -5950,7 +6307,7 @@ std::vector<MediaStore::ChildEntry> MediaStore::get_songs_by_genre(
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
 		" WHERE EXISTS (SELECT 1 FROM song_genres g"
 		"                WHERE g.path = s.path AND LOWER(g.name) = LOWER(TRIM(?)))"
-		+ not_uploads("s.path") +
+		+ not_uploads("s.path") + visible_to(viewer, "s.path") +
 		" ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE,"
 		"          s.disc_number, s.track_number, s.title COLLATE NOCASE"
 		" LIMIT ? OFFSET ?");
@@ -6393,6 +6750,7 @@ MediaStore::VideoStreams MediaStore::get_video_streams(int song_id)
 	}
 
 std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
+	const std::string& viewer,
 	const std::string& personal_user, int music_folder_id,
 	const std::string& content_type)
 	{
@@ -6450,6 +6808,7 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 		sql += not_uploads("f.path");
 	else
 		sql += " AND f.path LIKE ?";
+	sql += visible_to(viewer, "f.path");
 	sql += " GROUP BY f.id ORDER BY name COLLATE NOCASE";
 
 	SQLite::Statement sel(db_music_, sql);
@@ -6487,6 +6846,7 @@ std::vector<MediaStore::ArtistDir> MediaStore::get_artist_dirs(
 	}
 
 std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
+                                                               const std::string& viewer,
                                                                bool flat_multi_disc)
 	{
 	std::lock_guard<std::mutex> lock(db_mutex_);
@@ -6513,6 +6873,12 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 	dir.parent_id    = fsel.getColumn(2).isNull() ? -1 : fsel.getColumn(2).getInt();
 	bool is_album    = !fsel.getColumn(3).isNull();
 	dir.cover_art_id = fsel.getColumn(4).getInt();
+	// Only a root's children are level-1 folders, and only those are judged:
+	// further down the caller has already checked this folder itself.
+	const std::string child_filter = dir.parent_id < 0
+		? visible_to(viewer, "f.path") : std::string();
+	const std::string song_filter  = dir.parent_id < 0
+		? visible_to(viewer, "s.path") : std::string();
 
 	// Flattening pulls in the songs of every child folder, which is right for
 	// an album's disc subdirectories and wrong for a section that holds loose
@@ -6543,7 +6909,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 			" LEFT JOIN albums al ON al.folder_id = f.id"
 			" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
 			" LEFT JOIN artists a ON a.id = aa.artist_id"
-			" WHERE f.parent_id = ?"
+			" WHERE f.parent_id = ?" + child_filter +
 			" ORDER BY f.name COLLATE NOCASE");
 		dsel.bind(1, folder_id);
 		while (dsel.executeStep()) {
@@ -6564,7 +6930,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 	// subfolders (one level down), ordered by disc then track. Those songs report
 	// the album folder as parent, not the disc subfolder they physically sit in -
 	// the listing claims to be the album's, and parent is emitted as albumId.
-	const char* song_sql_flat =
+	const std::string song_sql_flat =
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, COALESCE(al.folder_id, s.folder_id),"
@@ -6576,11 +6942,12 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
-		" WHERE s.folder_id = ?"
-		"    OR s.folder_id IN (SELECT id FROM folders WHERE parent_id = ?)"
+		" WHERE (s.folder_id = ?"
+		"    OR s.folder_id IN (SELECT id FROM folders WHERE parent_id = ?))"
+		+ song_filter +
 		" ORDER BY s.disc_number, s.track_number, s.filename";
 
-	const char* song_sql_normal =
+	const std::string song_sql_normal =
 		"SELECT s.id, s.title, s.track_number, s.disc_number,"
 		"       s.year, s.genre, s.duration, s.bitrate,"
 		"       s.file_size, s.codec, s.folder_id,"
@@ -6592,7 +6959,7 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
-		" WHERE s.folder_id = ?"
+		" WHERE s.folder_id = ?" + song_filter +
 		" ORDER BY s.disc_number, s.track_number, s.filename";
 
 	SQLite::Statement ssel(db_music_, flatten ? song_sql_flat : song_sql_normal);
@@ -6702,6 +7069,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		}
 	else
 		add_where("f.path LIKE ?");
+	add_where(visible_clause(username, "f.path"));
 
 	// GROUP BY needed when aggregating play counts.
 	if (play_count_join) sql += " GROUP BY al.id";
@@ -6782,7 +7150,7 @@ std::vector<MediaStore::RecentSongEntry> MediaStore::get_recent_songs(
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN song_artists sas ON sas.song_id = s.id AND sas.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sas.artist_id"
-		" WHERE u.username = ?"
+		" WHERE u.username = ?" + visible_to(username, "s.path") +
 		" ORDER BY pc.last_played DESC"
 		" LIMIT ? OFFSET ?");
 	q.bind(1, username);
@@ -7478,6 +7846,7 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
 		" WHERE u.username = ? AND st.song_path IS NOT NULL"
+		+ visible_to(username, "s.path") +
 		" ORDER BY st.created DESC");
 	sq.bind(1, username);
 	while (sq.executeStep()) {
@@ -7519,6 +7888,7 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
 		" LEFT JOIN artists a ON a.id = aa.artist_id"
 		" WHERE u.username = ? AND st.album_folder_path IS NOT NULL"
+		+ visible_to(username, "f.path") +
 		" ORDER BY st.created DESC");
 	aq.bind(1, username);
 	while (aq.executeStep()) {
@@ -7540,6 +7910,7 @@ MediaStore::StarredResult MediaStore::get_starred(const std::string& username)
 		" JOIN client.users u ON u.id = st.user_id"
 		" JOIN folders f ON f.path = st.artist_folder_path"
 		" WHERE u.username = ? AND st.artist_folder_path IS NOT NULL"
+		+ visible_to(username, "f.path") +
 		" ORDER BY st.created DESC");
 	arq.bind(1, username);
 	while (arq.executeStep())
@@ -7929,6 +8300,9 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 		// scan silently overwrites, or a typed title that reverts.
 		rewrite("client.manual_covers",  "album_folder_path");
 		rewrite("client.song_meta",      "song_path");
+		// Matches only when a level-1 folder itself moves; an album below
+		// one never touches it.
+		rewrite("client.folder_tags",    "path");
 
 		// Music DB. Note what is deliberately absent: video_meta.poster_path is
 		// a path on TMDB's servers, not ours, and artists.image_path is a dead
@@ -8002,6 +8376,7 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 		          << " failed: " << e.what() << std::endl;
 		return false;
 		}
+	reload_visibility_locked();
 
 	std::cout << stamp() << "Relocated DB paths " << old_rel
 	          << " -> " << new_rel << std::endl;
@@ -8060,6 +8435,10 @@ void MediaStore::forget_prefix(const std::string& rel)
 		// to that path next.
 		forget("client.manual_covers",  "album_folder_path");
 		forget("client.song_meta",      "song_path");
+		// client.folder_tags is deliberately absent. A tag is the admin's or a
+		// user's decision about a folder, and a folder that is gone for a
+		// while - a drive unmounted, a root left out of the config - should
+		// come back with it. A tag on a path with nothing at it hides nothing.
 
 		txn.commit();
 		}
@@ -8162,7 +8541,8 @@ std::optional<MediaStore::ChildEntry> MediaStore::get_song_entry(int song_id)
 	return e;
 	}
 
-MediaStore::SearchResult MediaStore::search(const std::string& query,
+MediaStore::SearchResult MediaStore::search(const std::string& viewer,
+                                             const std::string& query,
                                              int artist_count, int artist_offset,
                                              int album_count,  int album_offset,
                                              int song_count,   int song_offset,
@@ -8190,15 +8570,15 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		return r;
 		};
 	std::string pattern = "%" + like_escape(query) + "%";
-	std::string path_filter = personal_user.empty()
+	std::string path_filter = (personal_user.empty()
 		? not_uploads("f.path")
-		: " AND f.path LIKE ?";
+		: " AND f.path LIKE ?") + visible_to(viewer, "f.path");
 	std::string path_bind = personal_user.empty()
 		? ""
 		: uploads_prefix_ + personal_user + "/%";
-	std::string song_filter = personal_user.empty()
+	std::string song_filter = (personal_user.empty()
 		? not_uploads("s.path")
-		: " AND s.path LIKE ?";
+		: " AND s.path LIKE ?") + visible_to(viewer, "s.path");
 
 	// Artists - folder-level, depth-1 children of the root.
 	std::string aq_sql =
@@ -8333,6 +8713,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& query,
 		" WHERE LOWER(c.title) LIKE LOWER(?) ESCAPE '\\'";
 	if (personal_user.empty()) sql += not_uploads("s.path");
 	else                       sql += " AND s.path LIKE ?";
+	sql += visible_to(viewer, "s.path");
 	sql += " ORDER BY c.title COLLATE NOCASE LIMIT ? OFFSET ?";
 
 	SQLite::Statement cq(db_music_, sql);

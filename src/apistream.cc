@@ -216,7 +216,7 @@ void GainDrive::routes_stream()
 		// check was run against its account at getCastToken, and the grant
 		// names the one song it passed for.
 		if (!cast_authed && !grant_authed
-		    && !check_item_read_perm(req, res, store_, uploads_root_name_,
+		    && !check_item_read_perm(req, res, store_,
 		                             song->path, fmt_of(req) == "json")) return;
 
 		// Compose-and-validate the absolute song path once. Streamer reads from
@@ -464,7 +464,7 @@ void GainDrive::routes_stream()
 			}
 		auto song = store_.get_song(to_int(it->second, -1));
 		if (!song) { err(70, "Song not found."); return; }
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          song->path, use_json)) return;
 
 		std::string song_abs = store_.abs_path(song->path);
@@ -511,7 +511,7 @@ void GainDrive::routes_stream()
 	                                            httplib::Response& res) {
 		if (!check_auth(req, res, store_)) return;
 		bool use_json = (fmt_of(req) == "json");
-		auto videos   = store_.get_videos();
+		auto videos   = store_.get_videos(req.get_param_value("u"));
 
 		std::string body;
 		if (use_json)
@@ -553,7 +553,7 @@ void GainDrive::routes_stream()
 		int  song_id = to_int(it->second, -1);
 		auto song    = store_.get_song(song_id);
 		if (!song || !song->is_video) { err(70, "Video not found."); return; }
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          song->path, use_json)) return;
 
 		auto streams = store_.get_video_streams(song_id);
@@ -653,7 +653,7 @@ void GainDrive::routes_stream()
 		// else may not read another user's uploads by id.
 		if (!cast_authed && !grant_authed) {
 			auto song = store_.get_song(req_song_id);
-			if (song && !check_item_read_perm(req, res, store_, uploads_root_name_,
+			if (song && !check_item_read_perm(req, res, store_,
 			                                  song->path, use_json)) return;
 			}
 
@@ -709,7 +709,7 @@ void GainDrive::routes_stream()
 		int  song_id = to_int(it->second, -1);
 		auto song    = store_.get_song(song_id);
 		if (!song) { err(70, "Song not found."); return; }
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          song->path, use_json)) return;
 
 		auto vc = store_.get_chapters(song_id);
@@ -762,7 +762,7 @@ void GainDrive::routes_stream()
 			             " without its chapters" << std::endl;
 			err(70, "Album folder not found."); return;
 			}
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          folder_rel, use_json)) return;
 
 		auto vids = store_.get_album_chapters(folder_id);
@@ -888,7 +888,7 @@ void GainDrive::routes_stream()
 				}
 			}
 		if (!check_auth(req, res, store_)) return false;
-		if (!check_item_read_perm(req, res, store_, uploads_root_name_,
+		if (!check_item_read_perm(req, res, store_,
 		                          song.path, use_json)) return false;
 		owner = "user:" + req.get_param_value("u");
 		return true;

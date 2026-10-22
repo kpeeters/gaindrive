@@ -872,7 +872,7 @@ void GainDrive::handle_artist_info(const httplib::Request& req,
 	// An id under another user's uploads must answer exactly like a missing
 	// one - this endpoint both leaks the directory name and pushes it onto
 	// the provider queue, so it is a read like any other.
-	if (!item_read_allowed(req, store_, uploads_root_name_,
+	if (!item_read_allowed(req, store_,
 	                       store_.get_folder_path(id))) {
 		err(70, "Artist not found."); return;
 		}
@@ -1651,7 +1651,7 @@ void GainDrive::handle_album_info(const httplib::Request& req,
 	// Same rule as handle_artist_info: an id in somebody else's uploads is
 	// answered like a missing one, before its title reaches a log line or the
 	// resolver queue.
-	if (!item_read_allowed(req, store_, uploads_root_name_,
+	if (!item_read_allowed(req, store_,
 	                       store_.get_folder_path(id))) {
 		err(70, "Album not found."); return;
 		}

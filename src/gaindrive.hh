@@ -107,6 +107,7 @@ class GainDrive {
 		// to be registered after all of them or it answers the lot.
 		void routes_web();       // server options, middleware, web assets
 		void routes_system();    // ping, scan, users, settings
+		void routes_tags();      // tags on level-1 folders: who sees what
 		void routes_browse();    // the library, its artwork and its texts
 		void routes_playlist();  // play queue, playlists, stars, bookmarks
 		void routes_stream();    // stream, download, video, captions, hls
