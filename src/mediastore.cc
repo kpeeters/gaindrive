@@ -6733,6 +6733,18 @@ MediaStore::VideoChapters MediaStore::get_chapters(int song_id)
 	// that genuinely does carry container chapters.
 	if (!song->is_video) return vc;
 
+	// A Blu-ray's chapters are marks in its playlist, not in any clip.
+	if (bd_is_playlist(abs)) {
+		if (auto pl = bd_parse_mpls(abs)) {
+			for (auto t : pl->marks) {
+				if (vc.chapters.size() >= MAX_CHAPTERS) break;
+				vc.chapters.push_back({ t / 45000.0, "" });
+				}
+			}
+		if (!vc.chapters.empty()) vc.source = "container";
+		return vc;
+		}
+
 	std::vector<std::string> args = {
 		"ffprobe", "-v", "quiet", "-print_format", "json", "-show_chapters",
 		disc_probe_path(abs)

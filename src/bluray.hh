@@ -20,7 +20,8 @@
 // DVDFab.miniso are never looked at.
 //
 // Known gap: a PlayItem's in/out times are ignored and whole clips are
-// played.  Main features nearly always use their clips whole.
+// played.  Main features nearly always use their clips whole, which is also
+// what makes the playlist's chapter times line up with what is played.
 
 struct MplsPlaylist
 	{
@@ -28,6 +29,9 @@ struct MplsPlaylist
 	std::vector<std::string> clips;
 	// Sum of the PlayItems' out minus in times, in 45 kHz ticks.
 	int64_t                  ticks = 0;
+	// Chapter starts on that same timeline, ascending.  Discs name no
+	// chapters, only place them.
+	std::vector<int64_t>     marks;
 	};
 
 // Reads the PlayItem list of an .mpls file.  Empty when the file is not a

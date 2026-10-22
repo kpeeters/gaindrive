@@ -41,6 +41,9 @@ std::optional<MplsPlaylist> bd_parse_mpls(const std::filesystem::path& mpls)
 	int items = be16(d, pl + 6);
 
 	MplsPlaylist out;
+	// Where each PlayItem starts on the playlist timeline, and its IN_time,
+	// to place the marks below.
+	std::vector<std::pair<int64_t, uint32_t>> starts;
 	size_t at = pl + 10;
 	for (int i = 0; i < items; ++i) {
 		// PlayItem(): length(2), then clip name(5) codec id(4) flags(2)
@@ -56,11 +59,34 @@ std::optional<MplsPlaylist> bd_parse_mpls(const std::filesystem::path& mpls)
 			return std::nullopt;
 		uint32_t t_in  = be32(d, p + 12);
 		uint32_t t_out = be32(d, p + 16);
+		starts.push_back({ out.ticks, t_in });
 		if (t_out > t_in) out.ticks += t_out - t_in;
 		out.clips.push_back(std::move(clip));
 		at = p + len;
 		}
 	if (out.clips.empty()) return std::nullopt;
+
+	// PlayListMark(): length(4) number_of_marks(2), then 14-byte marks:
+	// reserved(1) mark_type(1) ref_to_PlayItem_id(2) time(4) PID(2)
+	// duration(4).  Type 1 is an entry mark, which is what a player calls a
+	// chapter.  A bad mark table loses the chapters, never the title.
+	size_t pm = be32(d, 12);
+	if (pm != 0 && pm + 6 <= d.size()) {
+		int marks = be16(d, pm + 4);
+		for (int i = 0; i < marks; ++i) {
+			size_t m = pm + 6 + size_t(i) * 14;
+			if (m + 14 > d.size()) break;
+			if (d[m + 1] != 1) continue;
+			size_t item = be16(d, m + 2);
+			if (item >= starts.size()) continue;
+			uint32_t t = be32(d, m + 4);
+			if (t < starts[item].second) continue;
+			int64_t at_ticks = starts[item].first + (t - starts[item].second);
+			if (at_ticks >= out.ticks) continue;
+			if (!out.marks.empty() && out.marks.back() >= at_ticks) continue;
+			out.marks.push_back(at_ticks);
+			}
+		}
 	return out;
 	}
 
