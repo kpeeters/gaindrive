@@ -1698,14 +1698,19 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 /* .artist-bio-text and .bio-toggle are reused for the notes text + toggle. */
 
+/* Tinted pills, as on Linux and iOS: bare accent text beside the accent
+   'more' toggle read as more prose rather than as places to go. */
 .wiki-link {
    font-size: 0.75rem;
    color: var(--accent);
    text-decoration: none;
+   background: color-mix(in srgb, var(--accent) 12%, transparent);
+   border-radius: 999px;
+   padding: 2px 10px;
 }
 
 .wiki-link:hover {
-   text-decoration: underline;
+   background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .links-row {
@@ -2496,8 +2501,52 @@ input.chapter-time.bad { border-color: #e06c6c; }
    flex: 1;
    min-width: 60px;
    max-width: 260px;
-   accent-color: var(--accent);
    cursor: pointer;
+   /* Styled from scratch because accent-color leaves the thumb to the
+      browser, which rings or lightens it; Android and Linux draw it in
+      plain accent. Browsers only honour thumb styles once the whole
+      control has appearance: none. */
+   -webkit-appearance: none;
+   appearance: none;
+   height: 16px;
+   background: transparent;
+}
+
+#player-seek::-webkit-slider-runnable-track {
+   height: 4px;
+   border-radius: 2px;
+   background: linear-gradient(to right,
+      var(--accent) var(--seek-pct, 0%), var(--divider) var(--seek-pct, 0%));
+}
+
+#player-seek::-webkit-slider-thumb {
+   -webkit-appearance: none;
+   width: 14px;
+   height: 14px;
+   margin-top: -5px;
+   border: none;
+   border-radius: 50%;
+   background: var(--accent);
+}
+
+#player-seek::-moz-range-track {
+   height: 4px;
+   border-radius: 2px;
+   background: var(--divider);
+}
+
+#player-seek::-moz-range-progress {
+   height: 4px;
+   border-radius: 2px;
+   background: var(--accent);
+}
+
+#player-seek::-moz-range-thumb {
+   width: 14px;
+   height: 14px;
+   border: none;
+   border-radius: 50%;
+   background: var(--accent);
 }
 
 #player-time {

@@ -4445,6 +4445,7 @@ function onCastStatus(s) {
    if (!seek.dataset.seeking) {
       if (totalSecs > 0) seek.max = totalSecs;
       seek.value = Math.floor(absCurrent);
+      seekPaint(seek);
       }
    playerPlayGlyph(s.playerState === 'PAUSED' ? 'play_arrow' : 'pause');
    // The receiver owns the spinner for the same reason it owns the glyph:
@@ -4889,7 +4890,10 @@ setInterval(() => {
    const totalSecs = (song?.duration ?? 0) || castSongDuration;
    const seek = document.getElementById('player-seek');
    const time = document.getElementById('player-time');
-   if (!seek.dataset.seeking) seek.value = Math.floor(absCurrent);
+   if (!seek.dataset.seeking) {
+      seek.value = Math.floor(absCurrent);
+      seekPaint(seek);
+      }
    time.textContent = `${fmtDuration(Math.floor(absCurrent))} / ${fmtDuration(totalSecs)}`;
    // Same clock, two consumers more: the picture follows what the bar draws,
    // and so does the chapter label -- the local timeupdate handler returns
@@ -7322,7 +7326,17 @@ function playerSkip(delta) {
                                        Math.max(0, dur - 1)));
    playerSeekTo(target);
    const seek = document.getElementById('player-seek');
-   if (!seek.dataset.seeking) seek.value = Math.floor(target);
+   if (!seek.dataset.seeking) {
+      seek.value = Math.floor(target);
+      seekPaint(seek);
+      }
+}
+
+// Chrome has no pseudo-element for the played part of a range track, so it is
+// a gradient stop in the stylesheet that has to follow every value change.
+function seekPaint(seek) {
+   const max = Number(seek.max);
+   seek.style.setProperty('--seek-pct', max > 0 ? `${seek.value / max * 100}%` : '0%');
 }
 
 // Stops the current stream and returns the transport bar to its idle state.
@@ -7358,6 +7372,7 @@ function playerStop() {
    const seek = document.getElementById('player-seek');
    seek.value = 0;
    seek.max   = 0;
+   seekPaint(seek);
    // '' resolves to GET / and must never be assigned.
    document.getElementById('player-cover').removeAttribute('src');
    document.querySelector('.track-row.playing')
@@ -8772,6 +8787,7 @@ el.addEventListener('timeupdate', () => {
    if (!seek.dataset.seeking) {
       seek.max   = Math.floor(dur);
       seek.value = Math.floor(cur);
+      seekPaint(seek);
       }
    time.textContent = `${fmtDuration(Math.floor(cur))} / ${fmtDuration(Math.floor(dur))}`;
    videoChapterTick(cur);
@@ -8945,6 +8961,7 @@ function setupPlayer() {
    const seek = document.getElementById('player-seek');
    seek.addEventListener('mousedown',  () => { seek.dataset.seeking = '1'; });
    seek.addEventListener('touchstart', () => { seek.dataset.seeking = '1'; });
+   seek.addEventListener('input',      () => seekPaint(seek));
    seek.addEventListener('change', () => {
       playerSeekTo(Number(seek.value));
       delete seek.dataset.seeking;
@@ -11632,6 +11649,7 @@ async function showShell() {
             player.captionIndex = sess.trackId > 0 ? sess.trackId - 1 : null;
             const seek = document.getElementById('player-seek');
             if (sess.songDuration > 0) seek.max = sess.songDuration;
+            seekPaint(seek);
             castButtonState(true);
             // Populate player queue so title/thumbnail are visible in the bar.
             try {
