@@ -1722,7 +1722,7 @@ input.chapter-time.bad { border-color: #e06c6c; }
    display: flex;
    align-items: center;
    gap: 0.75rem;
-   margin-top: 0.3rem;
+   margin-top: 0.6rem;
 }
 
 /* ── Liner notes ───────────────────────────────────────── */
