@@ -22,6 +22,12 @@ namespace {
 	// client's numbers.
 	const double   picture_dead     = 0.03;
 	const double   picture_hard     = 1.0;
+	// Behind by more than this, the picture is moved rather than made to
+	// catch up: a negative offset only works while decoding runs faster
+	// than real time, and when it does not the picture stutters for good.
+	const double   picture_behind   = 0.1;
+	const double   picture_lead_start = 1.0;
+	const double   picture_lead_max   = 8.0;
 	const unsigned picture_every_ms = 100;
 	// The server drops a now-playing entry it has not heard about for five
 	// minutes; the web client refreshes it every 30 seconds.
@@ -593,6 +599,7 @@ void Playback::error(const std::string& e)
 		if(s && api_ && !picture_hls_) {
 			picture_hls_     = true;
 			picture_running_ = false;
+			picture_holding_ = false;
 			picture_ended_   = false;
 			picture_offset_  = 0;
 			player_.play_picture(video_url(*s, true), position());
@@ -785,6 +792,8 @@ void Playback::picture_follow(double offset)
 	picture_running_ = false;
 	picture_ended_   = false;
 	picture_hls_     = false;
+	picture_holding_ = false;
+	picture_lead_    = picture_lead_start;
 	picture_offset_  = 0;
 	// Held still at the offset: picture_sync() starts it once the receiver
 	// plays, which for a soundtrack is after the server has built it.
@@ -802,6 +811,7 @@ void Playback::picture_stop()
 	player_.stop();
 	picture_         = false;
 	picture_running_ = false;
+	picture_holding_ = false;
 	}
 
 bool Playback::picture_sync()
@@ -813,6 +823,8 @@ bool Playback::picture_sync()
 			player_.pause();
 			picture_running_ = false;
 			}
+		// Wherever the receiver resumes, it is sought anew.
+		picture_holding_ = false;
 		return true;
 		}
 	double delay = 0;
@@ -820,13 +832,25 @@ bool Playback::picture_sync()
 	if(d!=settings_.cast_sync_ms.end()) delay = d->second/1000.0;
 	double target = std::max(0.0, caster_.position()-delay);
 	if(!player_.settled()) return true;
+	if(picture_holding_) {
+		double err = player_.position()-target;
+		if(err<-picture_behind) {
+			// The seek took longer than the lead: the sound is already past.
+			picture_lead_ = std::min(picture_lead_*2, picture_lead_max);
+			std::cout << stamp() << "Cast: picture seek outlasted its lead, now "
+			          << picture_lead_ << " s" << std::endl;
+			picture_ahead(target);
+			}
+		else if(err<=picture_dead) {
+			picture_holding_ = false;
+			picture_running_ = true;
+			player_.resume();
+			}
+		return true;
+		}
 	if(!picture_running_) {
-		// The receiver has started, or resumed: go from where it is.
-		picture_offset_ = 0;
-		player_.set_picture_offset(0);
-		player_.seek(target, true);
-		player_.resume();
-		picture_running_ = true;
+		// The receiver has started, or resumed.
+		picture_ahead(target);
 		return true;
 		}
 	// Buffering.
@@ -835,15 +859,27 @@ bool Playback::picture_sync()
 	// screen is position - offset; the offset that puts `target` there is
 	// the difference itself, with no loop to wind up.
 	double err = player_.position()-target;
-	if(std::fabs(err)>picture_hard) {
-		std::cout << stamp() << "Cast: picture " << err << " s out, seeking" << std::endl;
-		picture_offset_ = 0;
-		player_.set_picture_offset(0);
-		player_.seek(target, true);
+	if(err>picture_hard || err<-picture_behind) {
+		std::cout << stamp() << "Cast: picture " << err << " s out, moving it" << std::endl;
+		picture_ahead(target);
 		}
 	else if(std::fabs(err-picture_offset_)>picture_dead) {
 		picture_offset_ = err;
 		player_.set_picture_offset(err);
 		}
 	return true;
+	}
+
+void Playback::picture_ahead(double target)
+	{
+	// Holding a frame until the sound reaches it is exact however slow the
+	// seek turns out to be; catching up afterwards is not.
+	if(picture_running_) {
+		player_.pause();
+		picture_running_ = false;
+		}
+	picture_holding_ = true;
+	picture_offset_  = 0;
+	player_.set_picture_offset(0);
+	player_.seek(target+picture_lead_, true);
 	}

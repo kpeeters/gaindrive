@@ -106,6 +106,9 @@ class Playback {
 		void picture_follow(double offset);
 		void picture_stop();
 		bool picture_sync();
+		// Moves the picture ahead of the receiver and holds it there until
+		// the sound arrives.
+		void picture_ahead(double target);
 		void update_next();
 		void advanced();
 		void ended();
@@ -128,6 +131,10 @@ class Playback {
 		bool                       picture_=false;
 		// Told to play, as opposed to held still for the receiver.
 		bool                       picture_running_=false;
+		// Sought ahead of the receiver, waiting for it to reach the frame.
+		bool                       picture_holding_=false;
+		// How far ahead, in seconds; grows when a seek outlasts it.
+		double                     picture_lead_=0;
 		// Ran out before the receiver did; it is not restarted under it.
 		bool                       picture_ended_=false;
 		// Already fetched as HLS after the stored file failed.
