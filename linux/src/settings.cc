@@ -49,6 +49,12 @@ void AppSettings::load()
 	cast_original = co.is_boolean() && co.get<bool>();
 	const auto& vao = jsub(j, "videoAudioOnly");
 	video_audio_only = vao.is_boolean() && vao.get<bool>();
+	const auto& clv = jsub(j, "castLocalVideo");
+	cast_local_video = !clv.is_boolean() || clv.get<bool>();
+	const auto& sync = jsub(j, "castSyncMs");
+	if(sync.is_object())
+		for(const auto& [dev, ms]: sync.items())
+			if(ms.is_number_integer()) cast_sync_ms[dev] = ms.get<int>();
 	auto th = jstr(j, "theme");
 	for(const auto& t: themes)
 		if(th==t.param) theme = th;
@@ -88,6 +94,7 @@ void AppSettings::save() const
 	write_config("settings.json", {
 		{"qualityCap", quality_cap}, {"transcodeFormat", format},
 		{"castOriginal", cast_original}, {"videoAudioOnly", video_audio_only},
+		{"castLocalVideo", cast_local_video}, {"castSyncMs", cast_sync_ms},
 		{"theme", theme}, {"subtitleSize", subtitle_size},
 		{"sortByName", sort_by_name},
 		{"eqOn", eq_on}, {"eqGains", eq_gains}, {"eqSlots", eq_slots},

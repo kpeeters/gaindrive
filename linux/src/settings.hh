@@ -18,6 +18,13 @@ struct AppSettings {
 	// Videos fetched and played as their soundtrack alone, as the other
 	// clients' setting; here a toggle in the player bar.
 	bool        video_audio_only=false;
+	// A film cast to a receiver with no screen also plays here, silent,
+	// following the receiver. On by default, as on the web client.
+	bool        cast_local_video=true;
+	// How far that picture is held back from the receiver's reported
+	// position, in ms, by Cast device id: the receiver's output delay,
+	// which only the person watching can measure.
+	std::map<std::string, int> cast_sync_ms;
 	// "auto" leaves GTK's own light or dark choice alone; "light", "dark".
 	std::string theme="auto";
 	// A param of subtitle_sizes.

@@ -68,6 +68,9 @@ class Playback {
 		// A film is being cast and the receiver shows its picture, so it
 		// also draws the subtitles.
 		bool        cast_picture() const;
+		// A film is being cast to a receiver with no screen, and its
+		// picture plays here, silent, following the receiver.
+		bool        picture_local() const { return picture_; }
 		// A video played as one, rather than as its soundtrack alone.
 		bool        shows_picture(const Song& s) const;
 		// The audio-only setting changed: a video playing now is reloaded
@@ -98,6 +101,11 @@ class Playback {
 		void cast_start(double offset);
 		void cast_film(double offset);
 		void cast_ended();
+		// Starts or stops the local picture of a cast film, whichever the
+		// receiver and the settings now call for.
+		void picture_follow(double offset);
+		void picture_stop();
+		bool picture_sync();
 		void update_next();
 		void advanced();
 		void ended();
@@ -117,6 +125,16 @@ class Playback {
 		// subtitles are ours to draw.
 		bool                       cast_screen_=false;
 		std::string                cast_sent_, cast_type_;
+		bool                       picture_=false;
+		// Told to play, as opposed to held still for the receiver.
+		bool                       picture_running_=false;
+		// Ran out before the receiver did; it is not restarted under it.
+		bool                       picture_ended_=false;
+		// Already fetched as HLS after the stored file failed.
+		bool                       picture_hls_=false;
+		// The sink offset in force, in seconds.
+		double                     picture_offset_=0;
+		sigc::connection           picture_timer_;
 		std::string                caption_song_;
 		int                        caption_track_=0;
 		std::shared_ptr<ApiClient> api_;

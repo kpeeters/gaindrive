@@ -19,13 +19,14 @@ namespace {
 	// gtk4paintablesink, inside a glsinkbin when GTK draws with GL, which
 	// is how that sink's own examples set it up: the GL upload then happens
 	// in GStreamer's GL context rather than as a copy in ours.
-	GstElement *make_video_sink(GdkPaintable *& paintable)
+	GstElement *make_video_sink(GdkPaintable *& paintable, GstElement *& inner)
 		{
 		GstElement *sink = gst_element_factory_make("gtk4paintablesink", nullptr);
 		if(!sink) {
 			std::cout << stamp() << "GStreamer has no gtk4paintablesink: films will play without picture" << std::endl;
 			return nullptr;
 			}
+		inner = sink;
 		g_object_get(sink, "paintable", &paintable, nullptr);
 		GdkGLContext *gl = nullptr;
 		if(g_object_class_find_property(G_OBJECT_GET_CLASS(paintable), "gl-context"))
@@ -97,7 +98,7 @@ Player::Player()
 		return;
 		}
 	g_object_set(playbin_, "flags", flag_audio | flag_soft_volume | flag_buffering, nullptr);
-	if(GstElement *vsink = make_video_sink(paintable_))
+	if(GstElement *vsink = make_video_sink(paintable_, vsink_))
 		g_object_set(playbin_, "video-sink", vsink, nullptr);
 	// Always in place, flat when off, so switching it never relinks
 	// anything under a playing stream.
@@ -137,6 +138,7 @@ void Player::play_uri(const std::string& uri, double start, bool video)
 	guint flags = flag_audio | flag_soft_volume | flag_buffering;
 	if(video && paintable_) flags |= flag_video | flag_deinterlace;
 	g_object_set(playbin_, "flags", flags, "uri", uri.c_str(), nullptr);
+	set_picture_offset(0);
 	target_playing_ = true;
 	buffering_      = false;
 	pending_seek_   = start;
@@ -144,6 +146,26 @@ void Player::play_uri(const std::string& uri, double start, bool video)
 	last_position_  = start;
 	// To an offset by way of PAUSED, so nothing is heard from the beginning.
 	gst_element_set_state(playbin_, start>0 ? GST_STATE_PAUSED : GST_STATE_PLAYING);
+	}
+
+void Player::play_picture(const std::string& uri, double start)
+	{
+	if(!playbin_ || !paintable_) return;
+	{
+	std::lock_guard<std::mutex> lock(mtx_);
+	next_uri_.clear();
+	advance_pending_ = false;
+	}
+	gst_element_set_state(playbin_, GST_STATE_READY);
+	g_object_set(playbin_, "flags", flag_video | flag_deinterlace | flag_buffering,
+	             "uri", uri.c_str(), nullptr);
+	set_picture_offset(0);
+	target_playing_ = false;
+	buffering_      = false;
+	pending_seek_   = start;
+	seek_target_    = start>0 ? start : -1;
+	last_position_  = start;
+	gst_element_set_state(playbin_, GST_STATE_PAUSED);
 	}
 
 void Player::set_next_uri(const std::string& uri)
@@ -186,16 +208,21 @@ void Player::stop()
 		}
 	}
 
-void Player::seek(double seconds)
+void Player::seek(double seconds, bool accurate)
 	{
 	if(!playbin_) return;
 	seek_target_ = seconds;
 	if(!gst_element_seek_simple(playbin_, GST_FORMAT_TIME,
-		GstSeekFlags(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
+		GstSeekFlags(GST_SEEK_FLAG_FLUSH | (accurate ? GST_SEEK_FLAG_ACCURATE : GST_SEEK_FLAG_KEY_UNIT)),
 		gint64(seconds*GST_SECOND))) {
 		std::cout << stamp() << "GStreamer refused a seek to " << seconds << " s" << std::endl;
 		seek_target_ = -1;
 		}
+	}
+
+void Player::set_picture_offset(double seconds)
+	{
+	if(vsink_) g_object_set(vsink_, "ts-offset", gint64(seconds*GST_SECOND), nullptr);
 	}
 
 void Player::set_eq(bool on, const std::vector<int>& gains)

@@ -47,6 +47,7 @@ ICONS = {
 	'info':           ('info',          False),
 	'videocam-off':   ('videocam_off',  False),
 	'copy':           ('content_copy',  False),
+	'av-timer':       ('av_timer',      False),
 }
 
 def glyphsets():

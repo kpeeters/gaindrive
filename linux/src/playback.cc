@@ -17,6 +17,12 @@
 namespace {
 	// "Previous" restarts the track past this point, as everywhere else.
 	const double restart_after = 3;
+	// The local picture of a cast film: inside picture_dead its offset is
+	// left alone; beyond picture_hard it is moved by a seek instead. The web
+	// client's numbers.
+	const double   picture_dead     = 0.03;
+	const double   picture_hard     = 1.0;
+	const unsigned picture_every_ms = 100;
 	// The server drops a now-playing entry it has not heard about for five
 	// minutes; the web client refreshes it every 30 seconds.
 	const unsigned report_every = 30;
@@ -70,6 +76,8 @@ Playback::Playback(const AppSettings& settings, WorkPool& pool)
 	player_.signal_advanced.connect(sigc::mem_fun(*this, &Playback::advanced));
 	player_.signal_ended.connect(sigc::mem_fun(*this, &Playback::ended));
 	player_.signal_state.connect([this](bool playing) {
+		// The picture of a cast film says nothing about the receiver.
+		if(picture_) return;
 		// Only `playing` is read off the player: a stop, an end and an error
 		// leave PLAYING too, and must not reach the server as a pause after
 		// their own `stopped`. toggle() reports the real pauses.
@@ -89,6 +97,7 @@ Playback::Playback(const AppSettings& settings, WorkPool& pool)
 Playback::~Playback()
 	{
 	timer_.disconnect();
+	picture_timer_.disconnect();
 	}
 
 void Playback::set_api(std::shared_ptr<ApiClient> api)
@@ -191,6 +200,12 @@ void Playback::seek(double seconds)
 	// cache, whole, so it seeks in anything.
 	if(caster_.active()) {
 		caster_.seek(seconds);
+		// picture_sync() follows a running picture by itself, but one that
+		// ran out has to be fetched again.
+		if(picture_ && picture_ended_) {
+			picture_stop();
+			picture_follow(seconds);
+			}
 		return;
 		}
 	// A film is either the stored file or HLS, and both seek.
@@ -210,6 +225,7 @@ void Playback::stop()
 	{
 	if(current()) report("stopped", position());
 	++cast_gen_;
+	picture_stop();
 	caster_.disconnect();
 	player_.stop();
 	}
@@ -281,6 +297,7 @@ void Playback::stop_casting()
 	double pos = position();
 	bool was   = caster_.playing();
 	++cast_gen_;
+	picture_stop();
 	caster_.disconnect();
 	if(current() && was) {
 		local_start(pos);
@@ -360,8 +377,11 @@ void Playback::video_mode_changed()
 	const Song *s = current();
 	if(!s || !s->is_video || !api_) return;
 	// The receiver goes on as it is: what it is sent is the server's
-	// decision, which this setting is not part of.
-	if(!caster_.active()) {
+	// decision, which this setting is not part of. Only the picture here
+	// comes or goes.
+	if(caster_.active())
+		picture_follow(position());
+	else {
 		mp3_retried_ = false;
 		local_start(position());
 		next_id_.clear();
@@ -385,6 +405,7 @@ void Playback::cast_start(double offset)
 	{
 	const Song *s = current();
 	if(!s || !api_) return;
+	picture_stop();
 	if(s->is_video) {
 		cast_film(offset);
 		return;
@@ -534,11 +555,13 @@ void Playback::cast_film(double offset)
 							cast_screen_ = false;
 							cast_sent_   = cast_how(fb);
 							cast_type_   = jstr(fb, "contentType");
+							picture_follow(position());
 							});
 					return rr.ok;
 					};
 				}
 			caster_.load(l);
+			picture_follow(offset);
 			});
 		});
 	}
@@ -563,6 +586,21 @@ void Playback::cast_ended()
 void Playback::error(const std::string& e)
 	{
 	const Song *s = current();
+	if(picture_) {
+		// Only the picture failed; the receiver plays on. Once as HLS, as
+		// for a film played here, then the panel saying where it went.
+		std::cout << stamp() << "Cast: local picture failed: " << e << std::endl;
+		if(s && api_ && !picture_hls_) {
+			picture_hls_     = true;
+			picture_running_ = false;
+			picture_ended_   = false;
+			picture_offset_  = 0;
+			player_.play_picture(video_url(*s, true), position());
+			}
+		else
+			picture_stop();
+		return;
+		}
 	// The web client's fallback: what GStreamer cannot decode, the server
 	// can convert. Once per track, from where it failed.
 	if(s && api_ && !mp3_retried_ && shows_picture(*s)) {
@@ -619,6 +657,13 @@ void Playback::advanced()
 
 void Playback::ended()
 	{
+	if(picture_) {
+		// The picture runs out while the receiver still plays the last
+		// of the sound, and the receiver owns the advance.
+		picture_ended_   = true;
+		picture_running_ = false;
+		return;
+		}
 	if(!current()) return;
 	if(!scrobbled_) {
 		scrobbled_ = true;
@@ -724,4 +769,81 @@ std::string Playback::video_url(const Song& s, bool hls) const
 	// than converted to AAC, as GStreamer plays both from MP4.
 	p.push_back({"audioCodecs", "opus,flac"});
 	return api_->url("hls", p);
+	}
+
+void Playback::picture_follow(double offset)
+	{
+	const Song *s = current();
+	bool want = s && api_ && caster_.active() && shows_picture(*s) && !cast_screen_
+	            && settings_.cast_local_video && player_.paintable();
+	if(!want) {
+		picture_stop();
+		return;
+		}
+	if(picture_) return;
+	picture_         = true;
+	picture_running_ = false;
+	picture_ended_   = false;
+	picture_hls_     = false;
+	picture_offset_  = 0;
+	// Held still at the offset: picture_sync() starts it once the receiver
+	// plays, which for a soundtrack is after the server has built it.
+	player_.play_picture(video_url(*s, false), offset);
+	picture_timer_ = Glib::signal_timeout().connect(
+		sigc::mem_fun(*this, &Playback::picture_sync), picture_every_ms);
+	}
+
+void Playback::picture_stop()
+	{
+	if(!picture_) return;
+	picture_timer_.disconnect();
+	// Before picture_ is cleared, so the player's own stop does not reach
+	// the window as the receiver stopping.
+	player_.stop();
+	picture_         = false;
+	picture_running_ = false;
+	}
+
+bool Playback::picture_sync()
+	{
+	if(!picture_) return false;
+	if(picture_ended_) return true;
+	if(!caster_.playing()) {
+		if(picture_running_) {
+			player_.pause();
+			picture_running_ = false;
+			}
+		return true;
+		}
+	double delay = 0;
+	auto d = settings_.cast_sync_ms.find(caster_.device().id);
+	if(d!=settings_.cast_sync_ms.end()) delay = d->second/1000.0;
+	double target = std::max(0.0, caster_.position()-delay);
+	if(!player_.settled()) return true;
+	if(!picture_running_) {
+		// The receiver has started, or resumed: go from where it is.
+		picture_offset_ = 0;
+		player_.set_picture_offset(0);
+		player_.seek(target, true);
+		player_.resume();
+		picture_running_ = true;
+		return true;
+		}
+	// Buffering.
+	if(!player_.playing()) return true;
+	// The sink's reported position ignores its ts-offset, so what is on
+	// screen is position - offset; the offset that puts `target` there is
+	// the difference itself, with no loop to wind up.
+	double err = player_.position()-target;
+	if(std::fabs(err)>picture_hard) {
+		std::cout << stamp() << "Cast: picture " << err << " s out, seeking" << std::endl;
+		picture_offset_ = 0;
+		player_.set_picture_offset(0);
+		player_.seek(target, true);
+		}
+	else if(std::fabs(err-picture_offset_)>picture_dead) {
+		picture_offset_ = err;
+		player_.set_picture_offset(err);
+		}
+	return true;
 	}

@@ -28,6 +28,16 @@ namespace {
 	const double   chapter_slack = 0.25;
 	// Below this the smallest setting in a small window is unreadable.
 	const int      caption_min_px = 14;
+	// The sync staircase, in ms. 400 is unmistakable on the first press; 25
+	// is below a frame. An amplifier's DSP puts the useful range well to
+	// the positive side.
+	const int      sync_step_start = 400;
+	const int      sync_step_min   = 25;
+	const int      sync_min_ms     = -1000;
+	const int      sync_max_ms     = 3000;
+	// The buttons rest while the picture moves, so nobody adjusts into a
+	// picture that has not arrived yet.
+	const unsigned sync_busy_ms    = 1000;
 
 	// "01:02:03.456" or "02:03.456", in seconds; -1 when it is neither.
 	double vtt_time(const std::string& s)
@@ -111,9 +121,10 @@ std::vector<VideoView::Cue> parse_vtt(const std::string& text)
 	return cues;
 	}
 
-VideoView::VideoView(Playback& playback)
-	: playback_(playback),
-	  bar_(Gtk::Orientation::HORIZONTAL, 6)
+VideoView::VideoView(Playback& playback, AppSettings& settings)
+	: playback_(playback), settings_(settings),
+	  bar_(Gtk::Orientation::HORIZONTAL, 6),
+	  sync_box_(Gtk::Orientation::VERTICAL, 6)
 	{
 	add_css_class("video");
 	set_focusable(true);
@@ -192,6 +203,23 @@ VideoView::VideoView(Playback& playback)
 		button->set_visible(false);
 		bar_.append(*button);
 		}
+	sync_button_.set_icon_name("gd-av-timer-symbolic");
+	sync_button_.set_tooltip_text("Audio/video sync");
+	sync_button_.add_css_class("flat");
+	sync_button_.set_direction(Gtk::ArrowType::UP);
+	sync_button_.set_visible(false);
+	auto sync_title = Gtk::make_managed<Gtk::Label>("Press what you hear");
+	sync_title->add_css_class("dim-label");
+	sync_later_.set_label("Sound is late");
+	sync_earlier_.set_label("Sound is early");
+	sync_box_.set_margin(6);
+	sync_box_.append(*sync_title);
+	sync_box_.append(sync_later_);
+	sync_box_.append(sync_earlier_);
+	sync_box_.append(sync_value_);
+	sync_popover_.set_child(sync_box_);
+	sync_button_.set_popover(sync_popover_);
+	bar_.append(sync_button_);
 	bar_.append(full_);
 	bottom_.set_child(bar_);
 	bottom_.set_valign(Gtk::Align::END);
@@ -205,6 +233,8 @@ VideoView::VideoView(Playback& playback)
 	full_.signal_clicked().connect([this]() { signal_fullscreen.emit(); });
 	chapter_prev_.signal_clicked().connect(sigc::mem_fun(*this, &VideoView::chapter_prev));
 	chapter_next_.signal_clicked().connect(sigc::mem_fun(*this, &VideoView::chapter_next));
+	sync_later_.signal_clicked().connect([this]() { sync_adjust(+1); });
+	sync_earlier_.signal_clicked().connect([this]() { sync_adjust(-1); });
 
 	chapters_list_.signal_row_activated().connect([this](Gtk::ListBoxRow *row) {
 		size_t i = size_t(row->get_index());
@@ -253,6 +283,7 @@ VideoView::~VideoView()
 	{
 	timer_.disconnect();
 	hide_.disconnect();
+	sync_busy_.disconnect();
 	}
 
 void VideoView::show_film(const Song& film, std::shared_ptr<ApiClient> api)
@@ -261,6 +292,10 @@ void VideoView::show_film(const Song& film, std::shared_ptr<ApiClient> api)
 	film_id_ = film.ref.id;
 	api_     = std::move(api);
 	unsigned gen = ++gen_;
+	// The calibration starts coarse again; the delay itself is the
+	// receiver's and is kept.
+	sync_step_ = sync_step_start;
+	sync_dir_  = sync_run_ = 0;
 	chapters_.clear();
 	chapter_ = -1;
 	signal_chapter.emit(-1);
@@ -425,10 +460,17 @@ bool VideoView::tick()
 	if(!get_mapped()) return true;
 	update_chapter();
 	auto& caster = playback_.caster();
-	bool cast = caster.active();
+	bool local = playback_.picture_local();
+	bool cast  = caster.active() && !local;
 	picture_.set_opacity(cast ? 0 : 1);
 	missing_.set_visible(!cast && playback_.paintable()==nullptr);
 	casting_.set_visible(cast);
+	sync_button_.set_visible(local);
+	if(local) {
+		auto d = settings_.cast_sync_ms.find(caster.device().id);
+		int ms = d==settings_.cast_sync_ms.end() ? 0 : d->second;
+		sync_value_.set_text(std::to_string(ms) + " ms");
+		}
 	if(cast) casting_.set_text("Playing on " + caster.device_name());
 	if(playback_.cast_picture()) {
 		caption_.set_visible(false);
@@ -511,4 +553,40 @@ bool VideoView::key(guint keyval, guint, Gdk::ModifierType state)
 		default:
 			return false;
 		}
+	}
+
+int& VideoView::sync_ms()
+	{
+	return settings_.cast_sync_ms[playback_.caster().device().id];
+	}
+
+void VideoView::sync_adjust(int dir)
+	{
+	if(!playback_.picture_local() || sync_busy_.connected()) return;
+	// "Late" is the symptom, and late sound wants the picture held back:
+	// a larger delay.
+	if(sync_dir_ && dir!=sync_dir_) {
+		sync_step_ = std::max(sync_step_/2, sync_step_min);
+		sync_run_  = 0;
+		}
+	else if(++sync_run_>=3) {
+		// Halving alone would let one mistaken early press cap the step
+		// for the rest of the calibration.
+		sync_step_ = std::min(sync_step_*2, sync_step_start);
+		sync_run_  = 0;
+		}
+	sync_dir_ = dir;
+	int& ms  = sync_ms();
+	int want = std::clamp(ms + dir*sync_step_, sync_min_ms, sync_max_ms);
+	if(want==ms) return;
+	ms = want;
+	settings_.save();
+	std::cout << stamp() << "Cast: picture delay " << ms << " ms (step " << sync_step_ << " ms)" << std::endl;
+	sync_later_.set_sensitive(false);
+	sync_earlier_.set_sensitive(false);
+	sync_busy_ = Glib::signal_timeout().connect([this]() {
+		sync_later_.set_sensitive(true);
+		sync_earlier_.set_sensitive(true);
+		return false;
+		}, sync_busy_ms);
 	}

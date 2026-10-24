@@ -27,15 +27,24 @@ class Player {
 		// for a film: a cover embedded in a music file is a video stream
 		// too.
 		void play_uri(const std::string& uri, double start=0, bool video=false);
+		// A film's picture without its sound, for a receiver playing the
+		// sound. Held at `start`, paused, until resume().
+		void play_picture(const std::string& uri, double start);
 		// What to switch to, without a gap, when the current stream ends.
 		// Empty for nothing.
 		void set_next_uri(const std::string& uri);
 		void pause();
 		void resume();
 		void stop();
-		void seek(double seconds);
+		// Accurate lands on the frame rather than the keyframe before it.
+		void seek(double seconds, bool accurate=false);
+		// Shows each frame this much later than the clock says (earlier
+		// when negative), without a seek: the video sink's ts-offset.
+		void set_picture_offset(double seconds);
 
 		double position() const;   // seconds into the current stream
+		// No seek or start offset is still on its way.
+		bool   settled() const { return seek_target_<0 && pending_seek_==0; }
 		bool   playing() const;
 		// False for a stream the server is converting as it sends: it has no
 		// Range support, so the only way to move in it is a new request.
@@ -70,6 +79,8 @@ class Player {
 		GstElement   *eq_=nullptr;
 		GstElement   *preamp_=nullptr;
 		GdkPaintable *paintable_=nullptr;
+		// The gtk4paintablesink itself, which may sit inside a glsinkbin.
+		GstElement   *vsink_=nullptr;
 		unsigned    watch_=0;
 		// Whether the user wants sound; buffering pauses underneath it.
 		bool        target_playing_=false;

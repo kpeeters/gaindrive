@@ -112,6 +112,18 @@ void SettingsPage::show_playback()
 		settings_.save();
 		});
 
+	auto local_video = Gtk::make_managed<Gtk::CheckButton>("Keep video here when casting to a speaker");
+	local_video->set_active(settings_.cast_local_video);
+	content_.append(*local_video);
+	add_label("A speaker or amplifier that cannot show a picture is sent the soundtrack. "
+	          "With this on the film also plays here, silent and kept in step with it, "
+	          "which means streaming it to this computer as well. Takes effect on the "
+	          "next film.", "dim-label");
+	local_video->signal_toggled().connect([this, local_video]() {
+		settings_.cast_local_video = local_video->get_active();
+		settings_.save();
+		});
+
 	quality->property_selected().signal_changed().connect([this, quality, format_row]() {
 		guint i = quality->get_selected();
 		settings_.quality_cap = (i==0 || i>quality_caps.size()) ? 0 : quality_caps[i-1];

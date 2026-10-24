@@ -188,7 +188,7 @@ MainWindow::MainWindow()
 	  main_(Gtk::Orientation::HORIZONTAL),
 	  sidebar_(Gtk::Orientation::VERTICAL),
 	  queue_(playback_),
-	  video_(playback_),
+	  video_(playback_, settings_),
 	  artists_(covers_),
 	  playlists_(covers_),
 	  recents_(covers_),

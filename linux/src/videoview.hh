@@ -17,6 +17,7 @@
 
 class ApiClient;
 class Playback;
+struct AppSettings;
 struct Song;
 
 // A film as it plays: the picture, subtitles, chapters, and controls that get
@@ -29,7 +30,7 @@ class VideoView : public Gtk::Overlay {
 			std::string text;
 		};
 
-		explicit VideoView(Playback& playback);
+		VideoView(Playback& playback, AppSettings& settings);
 		~VideoView() override;
 
 		// Fetches this film's captions and chapters; again only for another
@@ -63,8 +64,14 @@ class VideoView : public Gtk::Overlay {
 		void poke();
 		bool hide_controls();
 		bool key(guint keyval, guint keycode, Gdk::ModifierType state);
+		// One press of "sound is late" (+1) or "sound is early" (-1).
+		void sync_adjust(int dir);
+
+		// The picture's delay for this receiver, in ms.
+		int& sync_ms();
 
 		Playback&                  playback_;
+		AppSettings&               settings_;
 		std::shared_ptr<ApiClient> api_;
 		std::string                film_id_;
 		// Bumped per film, so an answer for the previous one is dropped.
@@ -86,6 +93,16 @@ class VideoView : public Gtk::Overlay {
 		Gtk::MenuButton chapters_button_, captions_button_;
 		Gtk::Popover   chapters_popover_, captions_popover_;
 		Gtk::ListBox   chapters_list_, captions_list_;
+		// Shown while a cast film's picture plays here.
+		Gtk::MenuButton sync_button_;
+		Gtk::Popover   sync_popover_;
+		Gtk::Box       sync_box_;
+		Gtk::Button    sync_later_, sync_earlier_;
+		Gtk::Label     sync_value_;
+		// The web client's staircase: the step halves on every change of
+		// direction, and grows again after three presses the same way.
+		int            sync_step_=0, sync_dir_=0, sync_run_=0;
+		sigc::connection sync_busy_;
 
 		std::vector<Chapter>     chapters_;
 		int                      chapter_=-1;
