@@ -57,6 +57,8 @@ namespace {
 		.notice { padding: 6px 12px; background-color: alpha(@error_color, 0.2); }
 		.sidebar { min-width: 255px; }
 		.playing .row-title { font-weight: bold; }
+		.playing-mark { opacity: 0; color: @gd_red; -gtk-icon-size: 20px; }
+		.playing .playing-mark { opacity: 1; }
 		.player-bar { padding: 8px 12px; border-top: 1px solid alpha(currentColor, 0.15); }
 		.pane-empty { padding: 12px; }
 		.info-block { margin: 0 12px 12px 12px; }

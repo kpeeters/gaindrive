@@ -25,6 +25,10 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 		cover_ = Gtk::make_managed<CoverImage>(*covers, cover_px);
 		item_.append(*cover_);
 		}
+	// The web's red triangle before the number of what plays now.
+	mark_.set_from_icon_name("gd-play-symbolic");
+	mark_.add_css_class("playing-mark");
+	item_.append(mark_);
 	lead_.set_width_chars(3);
 	lead_.set_xalign(1);
 	lead_.add_css_class("dim-label");
@@ -110,6 +114,9 @@ void RowWidget::show_item(const std::string& cover_id, const std::string& lead,
 	if(cover_) cover_->show_cover(cover_id);
 	lead_.set_text(lead);
 	lead_.set_visible(!lead.empty());
+	// Numbered rows keep the slot, so the numbers stay put as the track
+	// changes; set_playing adds it to the others.
+	mark_.set_visible(!lead.empty());
 	title_.set_text(title);
 	subtitle_.set_text(subtitle);
 	subtitle_.set_visible(!subtitle.empty());
@@ -144,6 +151,7 @@ void RowWidget::set_playing(bool on)
 	{
 	if(on) add_css_class("playing");
 	else   remove_css_class("playing");
+	if(!lead_.get_visible()) mark_.set_visible(on);
 	}
 
 // ---- Pane ---------------------------------------------------------------

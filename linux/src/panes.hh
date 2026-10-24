@@ -5,6 +5,7 @@
 #include <giomm/liststore.h>
 #include <gtkmm/box.h>
 #include <gtkmm/button.h>
+#include <gtkmm/image.h>
 #include <gtkmm/label.h>
 #include <gtkmm/listview.h>
 #include <gtkmm/overlay.h>
@@ -62,6 +63,7 @@ class RowWidget : public Gtk::Box {
 		Gtk::Box    item_;
 		Gtk::Widget *extra_=nullptr;
 		CoverImage *cover_=nullptr;
+		Gtk::Image  mark_;
 		Gtk::Label  lead_, title_, subtitle_, trail_;
 		Gtk::Box    text_;
 };

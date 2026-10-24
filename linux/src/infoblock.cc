@@ -4,6 +4,7 @@
 #include "jsonread.hh"
 
 #include <gdkmm/frameclock.h>
+#include <gtkmm/gestureclick.h>
 #include <glibmm/main.h>
 
 #include <algorithm>
@@ -104,6 +105,17 @@ InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 		more_.set_label(expand ? "less" : "more");
 		animate(from, to);
 		});
+	// The text is a bigger target than the toggle. Capture, as the label
+	// claims its own clicks for selecting; a click that ends a selection is
+	// left alone, or copying a sentence would fold the bio.
+	auto click = Gtk::GestureClick::create();
+	click->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+	click->signal_released().connect([this](int, double, double) {
+		int start, end;
+		if(!more_.get_visible() || text_.get_selection_bounds(start, end)) return;
+		more_.activate();
+		});
+	clip_.add_controller(click);
 	links_.add_css_class("info-links");
 	links_.append(wiki_);
 	links_.append(allmusic_);
