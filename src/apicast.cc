@@ -117,6 +117,98 @@ void GainDrive::routes_cast()
 			}), "application/json");
 		});
 
+	// getCastLoad - the LOAD this server would send, for a client that drives
+	// a receiver itself (the Linux player).  The decision about what to send
+	// is build_cast_load(), the same one castLoad runs, so a film reaches a
+	// receiver the same way whichever player sent it.  Only the receiver is
+	// the client's: its `deviceId` (for the per-device preference and the
+	// refusal list) and its mDNS `capabilities`.
+	//
+	// Gated as getCastToken is, and for its reasons; the grant it mints is
+	// the same one.
+	//
+	// The warm runs before the answer, so this can take as long as building
+	// a soundtrack does; the client waits for it rather than the receiver.
+	//
+	// `refused=true` says the receiver refused the video this returned
+	// before.  It is recorded, so the next build sends the soundtrack, and
+	// what comes back is that soundtrack, warmed: it stands in for the
+	// fallback's prepare, which cannot cross HTTP.
+	server_.Get("/rest/getCastLoad.view", [this](const httplib::Request& req,
+	                                             httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		auto err = [&](int code, const char* msg) {
+			res.set_content(subsonic_error_json(code, msg), "application/json");
+			};
+
+		auto it = req.params.find("id");
+		if (it == req.params.end()) {
+			err(10, "Required parameter missing: id.");
+			return;
+			}
+		const int song_id = to_int(it->second, -1);
+		auto entry = store_.get_song_entry(song_id);
+		auto song  = store_.get_song(song_id);
+		if (!entry || !song) { err(70, "Song not found."); return; }
+		if (!check_item_read_perm(req, res, store_,
+		                          entry->path, true)) return;
+
+		const std::string user  = req.get_param_value("u");
+		const std::string token = mint_stream_grant(user, song_id,
+		                                            entry->cover_art_id);
+		if (token.empty()) { err(0, "Could not mint a stream token."); return; }
+
+		CastTarget target;
+		target.device_id = req.get_param_value("deviceId");
+		CastManager::CastDevice dev;
+		dev.capabilities = to_int(req.get_param_value("capabilities"), -1);
+		target.video_out = dev.video_out();
+		target.mint = [token](const std::vector<int>&) { return token; };
+		target.keep = [this, user](std::shared_ptr<const TranscodeCache::Entry> e) {
+			std::lock_guard<std::mutex> lk(cast_warm_mu_);
+			client_warm_[user] = std::move(e);
+			};
+
+		if (req.get_param_value("refused") == "true" && song->is_video)
+			cast_note_video_refused(target.device_id,
+			                        song->video_codec + "/" + song->audio_codec);
+
+		// Named as castLoad names them.
+		const float offset = std::max(0.0f, to_float(req.get_param_value("timeOffset"), 0.0f));
+		const int   track  = to_int(req.get_param_value("trackId"), 0);
+		CastStreamInfo stream, fb;
+		CastManager::LoadRequest lr = build_cast_load(req, *song, song_id, offset,
+		                                              track, "", 0, target,
+		                                              stream, &fb);
+		if (lr.url.empty()) { err(0, "Nothing to cast for this song."); return; }
+		if (lr.prepare && !lr.prepare()) {
+			err(0, "The stream for this song could not be prepared.");
+			return;
+			}
+
+		auto describe = [](nlohmann::json& j, const CastManager::LoadRequest& l,
+		                   const CastStreamInfo& d) {
+			j["url"]                = l.url;
+			j["contentType"]        = l.mime;
+			j["currentTime"]        = l.current_time;
+			j["duration"]           = l.duration;
+			j["audioOnly"]          = d.audio_only;
+			j["receiverShowsVideo"] = d.receiver_video;
+			j["sentSuffix"]         = d.suffix;
+			j["sentBitRate"]        = d.bitrate;
+			j["tier"]               = d.tier;
+			};
+		res.set_content(subsonic_ok_json([&](nlohmann::json& r) {
+			auto& c = r["castLoad"];
+			describe(c, lr, stream);
+			// For what the client adds to the LOAD itself: the cover.
+			c["castToken"]      = token;
+			c["tracks"]         = lr.tracks;
+			c["activeTrackIds"] = lr.active_track_ids;
+			if (lr.fallback) describe(c["fallback"], *lr.fallback, fb);
+			}), "application/json");
+		});
+
 	// listCastDevices - return the cached device list and kick off a background
 	// refresh so the next call will have up-to-date results.
 	server_.Get("/rest/listCastDevices.view", [this](const httplib::Request& req,
@@ -1047,6 +1139,7 @@ CastManager::LoadRequest
 GainDrive::soundtrack_load(const std::string& base,
                            const MediaStore::SongInfo& song, int song_id,
                            float offset, bool is_fallback,
+                           const CastTarget& target, const std::string& token,
                            CastStreamInfo& desc)
 	{
 	CastManager::LoadRequest lr;
@@ -1057,10 +1150,6 @@ GainDrive::soundtrack_load(const std::string& base,
 	const std::string fmt = cast_soundtrack_format(song.audio_codec);
 	if (fmt.empty()) return lr;
 
-	// No captions collected, which is not an omission: there is no picture to
-	// put them on, and an empty list is what leaves the minted token unable to
-	// fetch one at all.
-	const std::string token = cast_manager_.mint_token(song_id, {});
 	if (token.empty()) return lr;
 
 	const std::string sid_s = std::to_string(song_id);
@@ -1101,10 +1190,6 @@ GainDrive::soundtrack_load(const std::string& base,
 	// marker meaning "encode" and describes nothing about the bytes.
 	desc.bitrate = (plan.target && plan.target->lossy) ? plan.bitrate : 0;
 
-	// Captured now: by the time prepare runs, the session's device is still the
-	// same one, but reading it on that thread would be a second answer to a
-	// question already settled here.
-	const std::string dev  = cast_manager_.get_device_id();
 	const std::string pair = song.video_codec + "/" + song.audio_codec;
 
 	// The soundtrack of a film is a transcode of a two-hour AC3 track, and
@@ -1117,7 +1202,7 @@ GainDrive::soundtrack_load(const std::string& base,
 	// The entry is kept alive afterwards: it is an RAII in-use count and
 	// prune() skips in-use keys, so releasing it here would let the file be
 	// evicted between the warm and the receiver's first GET.
-	lr.prepare = [this, si, sid_s, plan, copying, is_fallback, desc, dev,
+	lr.prepare = [this, si, sid_s, plan, copying, is_fallback, desc, target,
 	              pair]() {
 		// Before the warm, not after: a client asking castSession during the
 		// minute ffmpeg takes should already be told what it is waiting for.
@@ -1125,8 +1210,8 @@ GainDrive::soundtrack_load(const std::string& base,
 		// refused - CastManager only reaches a fallback down that path - which
 		// is why both of these live here and nowhere else.
 		if (is_fallback) {
-			cast_note_video_refused(dev, pair);
-			set_cast_stream(desc);
+			cast_note_video_refused(target.device_id, pair);
+			if (target.fell_back) target.fell_back(desc);
 			}
 		auto entry = Streamer::cache_entry(si, transcode_cache_, plan);
 		if (!entry) {
@@ -1148,8 +1233,7 @@ GainDrive::soundtrack_load(const std::string& base,
 		std::cout << stamp() << "Cast: soundtrack warmed song=" << sid_s
 		          << " " << (entry->hit() ? "hit" : "built")
 		          << " bytes=" << entry->size() << std::endl;
-		std::lock_guard<std::mutex> lk(cast_warm_mu_);
-		cast_warm_entry_ = std::move(entry);
+		target.keep(std::move(entry));
 		return true;
 		};
 	return lr;
@@ -1160,6 +1244,39 @@ GainDrive::cast_load_song(const httplib::Request& req,
                           const MediaStore::SongInfo& song,
                           int song_id, float offset, int track_id,
                           const std::string& format, int max_bitrate)
+	{
+	CastTarget target;
+	target.device_id = cast_manager_.get_device_id();
+	target.video_out = cast_manager_.device_video_out();
+	target.mint = [this, song_id](const std::vector<int>& caption_ids) {
+		return cast_manager_.mint_token(song_id, caption_ids);
+		};
+	target.keep = [this](std::shared_ptr<const TranscodeCache::Entry> entry) {
+		std::lock_guard<std::mutex> lk(cast_warm_mu_);
+		cast_warm_entry_ = std::move(entry);
+		};
+	target.fell_back = [this](const CastStreamInfo& desc) { set_cast_stream(desc); };
+
+	CastStreamInfo stream;
+	CastManager::LoadRequest lr = build_cast_load(req, song, song_id, offset,
+	                                              track_id, format, max_bitrate,
+	                                              target, stream);
+	if (lr.url.empty()) return {};
+
+	last_cast_song_id_ = std::to_string(song_id);
+	last_cast_offset_  = 0.0f;
+	set_cast_stream(stream);
+	cast_manager_.load(lr);
+	return stream;
+	}
+
+CastManager::LoadRequest
+GainDrive::build_cast_load(const httplib::Request& req,
+                           const MediaStore::SongInfo& song,
+                           int song_id, float offset, int track_id,
+                           const std::string& format, int max_bitrate,
+                           const CastTarget& target, CastStreamInfo& stream,
+                           CastStreamInfo* fallback_desc)
 	{
 	// Everything the receiver fetches hangs off this, and every one of them
 	// carries the cast token rather than the account's credentials: a
@@ -1222,8 +1339,8 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	//    capabilities == -1 and so reads as capable, which means a screenless
 	//    device named in the config could not be told it has no screen.
 	const std::string video_pref =
-		store_.get_setting("cast_video:" + cast_manager_.get_device_id());
-	bool shows_video = cast_manager_.device_video_out();
+		store_.get_setting("cast_video:" + target.device_id);
+	bool shows_video = target.video_out;
 	const std::string codec_pair = song.video_codec + "/" + song.audio_codec;
 	if (video_pref == "sound")
 		shows_video = false;
@@ -1236,8 +1353,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// reliable one.  Being refused once is what makes it reliable.
 		shows_video = cast_tier_for(song.codec, song.video_codec,
 		                            song.audio_codec) == CastTier::Direct
-		           && !cast_video_refused(cast_manager_.get_device_id(),
-		                                  codec_pair);
+		           && !cast_video_refused(target.device_id, codec_pair);
 
 	// Empty when there is nothing to extract - a silent film, or one the
 	// scanner could not probe.  Such a video stays on the video ladder, which
@@ -1252,10 +1368,14 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	// soundtrack is built by soundtrack_load(), which the fallback below builds
 	// again - that is why it is a function rather than a branch.
 	CastManager::LoadRequest lr;
-	CastStreamInfo stream;
+	stream = CastStreamInfo{};
 
 	if (audio_only) {
-		lr = soundtrack_load(base, song, song_id, offset, false, stream);
+		// No captions declared, which is not an omission: there is no picture
+		// to put them on, and an empty list is what leaves a session token
+		// unable to fetch one at all.
+		lr = soundtrack_load(base, song, song_id, offset, false, target,
+		                     target.mint({}), stream);
 		if (lr.url.empty()) {
 			std::cout << stamp(client_addr(req)) << "Cast: no soundtrack load for song=" << sid_s
 			          << "; refusing to load" << std::endl;
@@ -1282,7 +1402,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// fetches carries this rather than the account's credentials - a
 		// television is not a place to leave a password - so what it is worth is
 		// what a leak costs: one song, for as long as this LOAD is current.
-		const std::string token = cast_manager_.mint_token(song_id, caption_ids);
+		const std::string token = target.mint(caption_ids);
 		if (token.empty()) {
 			std::cout << stamp(client_addr(req)) << "Cast: no stream token; refusing to load"
 			          << std::endl;
@@ -1339,8 +1459,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// device_video_out() is the raw announcement here on purpose: the
 		// preference decides what to send, and no preference gives a receiver a
 		// screen.
-		stream.receiver_video = song.is_video
-		                     && cast_manager_.device_video_out();
+		stream.receiver_video = song.is_video && target.video_out;
 		// Only the direct tier sends the file as it stands, so only there is
 		// the file's own bitrate the one going over the wire.  0 otherwise
 		// rather than the source's figure: a copy is close enough to it that
@@ -1355,7 +1474,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 			// about a minute of silence - so built before it is told anything,
 			// as a soundtrack is.  Kept alive for the same reason; see
 			// cast_warm_entry_.
-			lr.prepare = [this, si, sid_s, plan = *convert]() {
+			lr.prepare = [si, sid_s, plan = *convert, target, this]() {
 				auto entry = Streamer::cache_entry(si, transcode_cache_, plan);
 				if (!entry) {
 					// May still play as a pipe, so the LOAD goes out; logged
@@ -1367,8 +1486,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 				std::cout << stamp() << "Cast: warmed song=" << sid_s << " "
 				          << (entry->hit() ? "hit" : "built")
 				          << " bytes=" << entry->size() << std::endl;
-				std::lock_guard<std::mutex> lk(cast_warm_mu_);
-				cast_warm_entry_ = std::move(entry);
+				target.keep(std::move(entry));
 				return true;
 				};
 			}
@@ -1425,9 +1543,11 @@ GainDrive::cast_load_song(const httplib::Request& req,
 		// to a receiver that cannot decode it still fails, and the tier ladder
 		// has nothing better to offer it - a remux is -c copy, so it would send
 		// the identical codecs a second time.
-		if (song.is_video && !cast_manager_.device_video_out()) {
+		if (song.is_video && !target.video_out) {
 			CastStreamInfo fb;
-			auto fb_req = soundtrack_load(base, song, song_id, offset, true, fb);
+			auto fb_req = soundtrack_load(base, song, song_id, offset, true,
+			                              target, token, fb);
+			if (!fb_req.url.empty() && fallback_desc) *fallback_desc = fb;
 			if (!fb_req.url.empty())
 				lr.fallback = std::make_shared<CastManager::LoadRequest>(
 				                  std::move(fb_req));
@@ -1458,11 +1578,7 @@ GainDrive::cast_load_song(const httplib::Request& req,
 	                            ? 0 : lr.active_track_ids.front())
 	          << std::endl;
 
-	last_cast_song_id_ = sid_s;
-	last_cast_offset_  = 0.0f;
-	set_cast_stream(stream);
-	cast_manager_.load(lr);
-	return stream;
+	return lr;
 	}
 
 // A configured cast device is never confirmed by anything: mDNS does not

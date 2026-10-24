@@ -113,9 +113,9 @@ class Playback {
 		Caster                     caster_;
 		// Bumped by each cast load, so a slow one that is overtaken is dropped.
 		unsigned                   cast_gen_=0;
-		// The film on the receiver is its soundtrack alone, piped from a
-		// timeOffset, so a seek reloads from there.
-		bool                       cast_soundtrack_=false;
+		// The receiver shows the film, as the server reported; otherwise the
+		// subtitles are ours to draw.
+		bool                       cast_screen_=false;
 		std::string                cast_sent_, cast_type_;
 		std::string                caption_song_;
 		int                        caption_track_=0;

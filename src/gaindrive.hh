@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -154,6 +155,10 @@ class GainDrive {
 		// httplib thread.
 		std::mutex      cast_warm_mu_;
 		std::shared_ptr<const TranscodeCache::Entry> cast_warm_entry_;
+		// The same for getCastLoad, one per account: a client driving its own
+		// receiver must not evict the warm of the server's session.
+		std::unordered_map<std::string,
+		                   std::shared_ptr<const TranscodeCache::Entry>> client_warm_;
 		// What the last LOAD decided - reported to the client rather than
 		// left for it to re-derive, for the reason cast_load_song() gives
 		// about audioOnly: the ladder these come off lives in codecs.hh, and
@@ -372,26 +377,59 @@ class GainDrive {
 		                              const std::string& format = "",
 		                              int max_bitrate = 0);
 
+		// Who a LOAD is built for.  The server's own session and a client
+		// that drives a receiver itself (getCastLoad) must get the same
+		// answer about what to send, so these are the only things that may
+		// differ between them.
+		struct CastTarget {
+			std::string device_id;
+			bool        video_out = true;
+			// The credential every URL of the LOAD carries, given the
+			// caption ids it declares.  Empty refuses the LOAD.
+			std::function<std::string(const std::vector<int>&)> mint;
+			// Holds a warmed cache entry while the LOAD is current; see
+			// cast_warm_entry_.
+			std::function<void(std::shared_ptr<const TranscodeCache::Entry>)> keep;
+			// Told what the fallback sends, once its prepare runs.  Unset for
+			// a client, which learns that from its own receiver.
+			std::function<void(const CastStreamInfo&)> fell_back;
+			};
+
+		// The decision half of cast_load_song(): what to send `target` and
+		// how, without sending it.  `url` is empty when there is nothing to
+		// send.  `fallback_desc`, when given, describes lr.fallback.
+		CastManager::LoadRequest
+		    build_cast_load(const httplib::Request& req,
+		                    const MediaStore::SongInfo& song,
+		                    int song_id, float offset, int track_id,
+		                    const std::string& format, int max_bitrate,
+		                    const CastTarget& target, CastStreamInfo& stream,
+		                    CastStreamInfo* fallback_desc = nullptr);
+
 		// One LOAD carrying a film's soundtrack rather than the film.
 		//
 		// Extracted because it is now built twice: as the load itself, when the
 		// receiver announced no screen, and as the **fallback** hung off a
 		// video load a screenless receiver may refuse outright.  Two copies of
-		// the format choice, the token minting and the cache warm would be two
+		// the format choice and the cache warm would be two
 		// copies of something that has to agree with Streamer::serve() exactly.
 		//
 		// `url` comes back empty when there is nothing to send - no token, or a
 		// silent film with no audio stream to extract - and the caller decides
 		// what that means.  `desc` is filled with what a client should be told.
 		//
+		// `token` is the one the LOAD it hangs off carries: minting a second
+		// session token would invalidate the first.
+		//
 		// is_fallback does two extra things, and both are only knowable here:
-		// it swaps last_cast_stream_ so castSession stops describing the
+		// it tells target.fell_back, so castSession stops describing the
 		// attempt that failed, and it records the refusal so the next play of
 		// the same film on the same device does not repeat it.
 		CastManager::LoadRequest
 		    soundtrack_load(const std::string& base,
 		                    const MediaStore::SongInfo& song, int song_id,
 		                    float offset, bool is_fallback,
+		                    const CastTarget& target, const std::string& token,
 		                    CastStreamInfo& desc);
 
 		// Codec pairs a device has already refused when handed the whole file,

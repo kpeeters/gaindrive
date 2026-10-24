@@ -104,9 +104,10 @@ void ApiClient::text(const std::string& endpoint, Params params,
 		});
 	}
 
-bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string& error)
+bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string& error,
+                          int read_timeout)
 	{
-	auto f = get_if_changed(url, "");
+	auto f = get_if_changed(url, "", read_timeout);
 	if(f.status!=200) {
 		error = std::move(f.error);
 		return false;
@@ -115,13 +116,16 @@ bool ApiClient::get_bytes(const std::string& url, std::string& body, std::string
 	return true;
 	}
 
-ApiClient::Fetch ApiClient::get_if_changed(const std::string& url, const std::string& etag)
+ApiClient::Fetch ApiClient::get_if_changed(const std::string& url, const std::string& etag,
+                                           int read_timeout)
 	{
 	Fetch f;
 	std::string origin, path;
 	split_url(url, origin, path);
 	try {
 		auto& cli = client_for(origin);
+		// Per request: the client is kept alive and shared by every call.
+		cli->set_read_timeout(read_timeout);
 		httplib::Headers headers = {{"User-Agent", "gaindrive-player/" GAINDRIVE_VERSION}};
 		if(!etag.empty()) headers.emplace("If-None-Match", etag);
 		auto res = cli->Get(path, headers);
@@ -209,12 +213,13 @@ bool ApiClient::probe_stream(const std::string& url, std::string& content_type,
 		}
 	}
 
-ApiResult ApiClient::get_json(const Session& s, const std::string& endpoint, const Params& params)
+ApiResult ApiClient::get_json(const Session& s, const std::string& endpoint, const Params& params,
+                              int read_timeout)
 	{
 	ApiResult r;
 	std::string url = s.base_url + "/rest/" + endpoint + ".view?" + query(s, params);
 	std::string body;
-	if(!get_bytes(url, body, r.error)) {
+	if(!get_bytes(url, body, r.error, read_timeout)) {
 		std::cout << stamp() << endpoint << ": " << r.error << std::endl;
 		return r;
 		}

@@ -32,6 +32,29 @@ namespace {
 		return false;
 		}
 
+	bool flag(const nlohmann::json& j, const std::string& key)
+		{
+		const auto& v = jsub(j, key);
+		return v.is_boolean() && v.get<bool>();
+		}
+
+	// What a cast is sent, in the web client's words, from the server's
+	// description of it.
+	std::string cast_how(const nlohmann::json& c)
+		{
+		std::string suffix = jstr(c, "sentSuffix"), tier = jstr(c, "tier");
+		std::transform(suffix.begin(), suffix.end(), suffix.begin(),
+		               [](unsigned char ch) { return std::toupper(ch); });
+		int kbps = jint(c, "sentBitRate");
+		std::string what = kbps>0 ? suffix + " " + std::to_string(kbps) + " kbps" : suffix;
+		std::string how  = flag(c, "audioOnly")
+		                     ? (tier=="remux" ? "soundtrack only, copied" : "soundtrack only, re-encoded")
+		                 : tier=="copy"   ? "HLS, picture copied"
+		                 : tier=="encode" ? "HLS, re-encoded"
+		                 :                  "as stored";
+		return what.empty() ? how : what + " - " + how;
+		}
+
 	std::string mime_of_format(const std::string& format)
 		{
 		if(format=="opus") return "audio/ogg";
@@ -164,14 +187,10 @@ void Playback::seek(double seconds)
 	if(!s || !api_) return;
 	seconds = std::max(0.0, seconds);
 	signal_seeked.emit(seconds);
-	// The receiver fetches a converted track from the server's cache, whole,
-	// so it seeks in anything.
+	// The receiver fetches a converted track or soundtrack from the server's
+	// cache, whole, so it seeks in anything.
 	if(caster_.active()) {
-		// A receiver cannot seek in a pipe.
-		if(s->is_video && cast_soundtrack_)
-			cast_film(seconds);
-		else
-			caster_.seek(seconds);
+		caster_.seek(seconds);
 		return;
 		}
 	// A film is either the stored file or HLS, and both seek.
@@ -328,7 +347,7 @@ std::string Playback::local_url() const
 bool Playback::cast_picture() const
 	{
 	const Song *s = current();
-	return caster_.active() && s && s->is_video && !cast_soundtrack_;
+	return caster_.active() && s && s->is_video && cast_screen_;
 	}
 
 bool Playback::shows_picture(const Song& s) const
@@ -340,12 +359,11 @@ void Playback::video_mode_changed()
 	{
 	const Song *s = current();
 	if(!s || !s->is_video || !api_) return;
-	double at = position();
-	if(caster_.active())
-		cast_film(at);
-	else {
+	// The receiver goes on as it is: what it is sent is the server's
+	// decision, which this setting is not part of.
+	if(!caster_.active()) {
 		mp3_retried_ = false;
-		local_start(at);
+		local_start(position());
 		next_id_.clear();
 		update_next();
 		}
@@ -371,7 +389,7 @@ void Playback::cast_start(double offset)
 		cast_film(offset);
 		return;
 		}
-	cast_soundtrack_ = false;
+	cast_screen_ = false;
 	caster_.prepare(offset);
 	unsigned gen = ++cast_gen_;
 
@@ -448,143 +466,78 @@ void Playback::cast_film(double offset)
 	{
 	const Song *s = current();
 	if(!s || !api_) return;
-	// Bit 0 of the receiver's `ca` record is video_out; one that does not
-	// say is taken to have a screen, as the server takes it. A WiiM has none.
-	int  ca      = caster_.device().capabilities;
-	// A receiver with a screen gets the soundtrack too when the picture is
-	// not wanted.
-	bool picture = (ca<0 || (ca & 1)!=0) && shows_picture(*s);
-	cast_soundtrack_ = !picture;
+	// What the receiver is sent is the server's decision, the one it makes
+	// for its own casts, so a film reaches a receiver the same way whichever
+	// player sends it. Only the receiver is ours to describe.
+	cast_screen_ = false;
 	caster_.prepare(offset);
 	unsigned gen = ++cast_gen_;
 
-	Params p = {{"id", s->ref.id}};
-	std::string mime, endpoint = "stream";
-	const char *ext = ".view";
-	double base = 0;
-	if(picture) {
-		std::string suffix = s->suffix;
-		std::transform(suffix.begin(), suffix.end(), suffix.begin(),
-		               [](unsigned char c) { return std::tolower(c); });
-		// The file itself only when the server says a receiver plays it, and
-		// in a container a receiver is known to take; anything else, AV1
-		// included, as HLS, which a receiver seeks by segment. No format or
-		// cap: either would make the server send the soundtrack alone, or
-		// re-encode.
-		if(s->cast_direct && (suffix=="mp4" || suffix=="m4v" || suffix=="webm"))
-			mime = s->content_type;
-		else {
-			endpoint = "hls";
-			ext      = ".m3u8";
-			mime     = "application/x-mpegURL";
-			}
-		}
-	else {
-		bool copy = settings_.cast_original && !s->soundtrack_format.empty()
-		            && cast_plays(s->soundtrack_content_type);
-		if(copy) {
-			p.push_back({"format", s->soundtrack_format});
-			mime = s->soundtrack_content_type;
-			}
-		else if(settings_.cast_original) {
-			p.push_back({"format", "flac"});
-			mime = "audio/flac";
-			}
-		else {
-			// "Original" means the file as stored, which a soundtrack is
-			// not; the apps send AAC at 160 kbps then.
-			bool capped = settings_.quality_cap>0;
-			std::string fmt = capped ? settings_.format : "m4a";
-			p.push_back({"format", fmt});
-			p.push_back({"maxBitRate", std::to_string(capped ? settings_.quality_cap : 160)});
-			mime = mime_of_format(fmt);
-			}
-		// Always, 0 included: the server then pipes the soundtrack rather
-		// than building it whole first, which takes minutes for a film. A
-		// receiver cannot seek in a pipe, so a seek reloads from there.
-		base = std::floor(offset);
-		p.push_back({"timeOffset", std::to_string(long(base))});
-		}
-	p.push_back({"pace", "true"});
-	// In words for the track info, as the web client's: the server says
-	// nothing about a film's stream the way X-Gaindrive-Sent does a track's.
-	std::string how;
-	if(picture)
-		how = endpoint=="hls" ? "HLS" : s->suffix + " - as stored";
-	else {
-		std::string fmt, kbps;
-		for(const auto& [k, v]: p) {
-			if(k=="format")     fmt  = v;
-			if(k=="maxBitRate") kbps = v;
-			}
-		bool copied = fmt==s->soundtrack_format && kbps.empty();
-		how = fmt + (kbps.empty() ? "" : " " + kbps + " kbps")
-		    + (copied ? " - soundtrack only, copied" : " - soundtrack only, re-encoded");
-		}
+	const auto& dev = caster_.device();
+	Params p = {{"id", s->ref.id}, {"deviceId", dev.id},
+	            {"capabilities", std::to_string(dev.capabilities)}};
+	if(caption_song_==s->ref.id && caption_track_>0)
+		p.push_back({"trackId", std::to_string(caption_track_)});
 
-	pool_.submit([this, api=api_, song=*s, p, mime, endpoint, ext, gen, offset, base, picture, how]() {
-		std::string token;
-		auto r = ApiClient::get_json(api->session(), "getCastToken", {{"id", song.ref.id}});
-		if(r.ok)
-			token = jstr(r.body, "castToken");
-		else
-			std::cout << stamp() << "Cast: no cast token (" << r.error
-			          << "); sending the account's credentials" << std::endl;
-		std::string url = api->cast_url(endpoint, p, token, ext);
-
-		// The grant covers this film's captions too.
-		nlohmann::json tracks = nlohmann::json::array();
-		if(picture) {
-			auto info = ApiClient::get_json(api->session(), "getVideoInfo", {{"id", song.ref.id}});
-			const auto& caps = jsub(jsub(info.body, "videoInfo"), "captions");
-			if(!info.ok)
-				std::cout << stamp() << "Cast: getVideoInfo failed (" << info.error
-				          << "); casting without subtitles" << std::endl;
-			else if(caps.is_array())
-				for(size_t i=0; i<caps.size(); ++i) {
-					const auto& c = caps[i];
-					std::string name = jstr(c, "name");
-					tracks.push_back({
-						{"trackId",          int(i+1)},
-						{"type",             "TEXT"},
-						{"subtype",          "SUBTITLES"},
-						{"trackContentId",   api->cast_url("getCaptions",
-						                       {{"id", song.ref.id}, {"captionId", jstr(c, "id")}}, token)},
-						{"trackContentType", "text/vtt"},
-						// Required for a subtitle track; getVideoInfo has
-						// none, and this is the code meaning exactly that.
-						{"language",         "und"},
-						{"name",             name.empty() ? "Subtitles" : name}
-						});
-					}
-			}
+	pool_.submit([this, api=api_, song=*s, p, gen, offset]() {
+		// The server builds a soundtrack before answering, which for a long
+		// film is a while.
+		auto r = ApiClient::get_json(api->session(), "getCastLoad", p, 300);
+		const auto& c = jsub(r.body, "castLoad");
+		std::string token = jstr(c, "castToken");
 
 		nlohmann::json meta;
-		if(picture)
-			meta = {{"metadataType", 1}, {"title", song.title}, {"subtitle", song.album}};
-		else
+		if(flag(c, "audioOnly"))
 			meta = {{"metadataType", 3}, {"title", song.title}, {"artist", song.artist},
 			        {"albumName", song.album}};
+		else
+			meta = {{"metadataType", 1}, {"title", song.title}, {"subtitle", song.album}};
 		if(!token.empty() && !song.cover_art.empty())
 			meta["images"] = {{{"url", api->cast_url("getCoverArt",
 			                     {{"id", song.cover_art}, {"size", "600"}}, token)}}};
 
-		on_ui([this, url, mime, meta, tracks, gen, offset, base, picture, how,
-		       id=song.ref.id, duration=song.duration]() {
+		on_ui([this, r, c, meta, gen, offset, api, p]() {
 			if(gen!=cast_gen_ || !caster_.active()) return;
-			cast_sent_ = how;
-			cast_type_ = mime;
+			if(!r.ok) {
+				signal_error.emit("Cannot cast this film: " + r.error);
+				signal_state.emit(false);
+				return;
+				}
+			cast_screen_ = flag(c, "receiverShowsVideo");
+			cast_sent_   = cast_how(c);
+			cast_type_   = jstr(c, "contentType");
 			Caster::Load l;
-			l.url      = url;
-			l.mime     = mime;
+			l.url      = jstr(c, "url");
+			l.mime     = cast_type_;
+			l.duration = jnum(c, "duration");
+			l.start    = offset;
 			l.metadata = meta;
-			l.tracks   = tracks;
-			l.base     = base;
-			// A pipe starts where it was asked to, so nothing is left to seek.
-			l.start    = picture ? offset : 0;
-			l.duration = std::max(0.0, duration - base);
-			if(picture && caption_song_==id && caption_track_>0 && size_t(caption_track_)<=tracks.size())
-				l.active_tracks = {caption_track_};
+			l.tracks   = jsub(c, "tracks").is_array() ? jsub(c, "tracks")
+			                                         : nlohmann::json::array();
+			for(const auto& t: jsub(c, "activeTrackIds"))
+				if(t.is_number_integer()) l.active_tracks.push_back(t.get<int>());
+			const auto& fb = jsub(c, "fallback");
+			if(fb.is_object()) {
+				l.fallback = std::make_shared<Caster::Load>();
+				l.fallback->url      = jstr(fb, "url");
+				l.fallback->mime     = jstr(fb, "contentType");
+				l.fallback->duration = jnum(fb, "duration");
+				// Runs on the caster's queue once the receiver has refused
+				// the film: the server records that and builds the soundtrack.
+				Params refused = p;
+				refused.push_back({"refused", "true"});
+				l.fallback_prepare = [this, api, refused, fb, gen]() {
+					auto rr = ApiClient::get_json(api->session(), "getCastLoad", refused, 300);
+					if(rr.ok)
+						on_ui([this, fb, gen]() {
+							if(gen!=cast_gen_) return;
+							cast_screen_ = false;
+							cast_sent_   = cast_how(fb);
+							cast_type_   = jstr(fb, "contentType");
+							});
+					return rr.ok;
+					};
+				}
 			caster_.load(l);
 			});
 		});

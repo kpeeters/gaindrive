@@ -63,9 +63,12 @@ class ApiClient {
 		                  const std::string& password,
 		                  std::function<void(const ApiResult&, const Session&)> done);
 
-		// Blocking; for worker threads only.
-		static ApiResult get_json(const Session& s, const std::string& endpoint, const Params& params);
-		static bool      get_bytes(const std::string& url, std::string& body, std::string& error);
+		// Blocking; for worker threads only. `read_timeout` in seconds, for
+		// a call the server takes long to answer.
+		static ApiResult get_json(const Session& s, const std::string& endpoint, const Params& params,
+		                          int read_timeout=20);
+		static bool      get_bytes(const std::string& url, std::string& body, std::string& error,
+		                           int read_timeout=20);
 		// A GET with If-None-Match when `etag` is not empty, for a cache that
 		// revalidates what it holds.
 		struct Fetch {
@@ -75,7 +78,8 @@ class ApiClient {
 			// says "there is nothing, and that will not change soon".
 			int         miss_max_age=0;
 		};
-		static Fetch     get_if_changed(const std::string& url, const std::string& etag);
+		static Fetch     get_if_changed(const std::string& url, const std::string& etag,
+		                                int read_timeout=20);
 		// Fetches the first byte of a stream for its Content-Type. The server
 		// builds a conversion whole before sending anything, so this can take
 		// minutes, and is better done before a receiver starts its own clock.

@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
@@ -47,15 +48,17 @@ class Caster {
 		struct Load {
 			std::string      url, mime;
 			double           duration=0;
-			// Where in the stream to begin, and where in the song the stream
-			// itself begins: a soundtrack piped from a timeOffset starts
-			// part way in. Positions here are always the song's.
-			double           start=0, base=0;
+			// Where in the song to begin.
+			double           start=0;
 			nlohmann::json   metadata;
 			// Subtitle tracks, declared in every film LOAD, since a track the
 			// LOAD did not declare cannot be turned on later.
 			nlohmann::json   tracks=nlohmann::json::array();
 			std::vector<int> active_tracks;
+			// Sent instead when the receiver refuses this load outright,
+			// once `fallback_prepare` has made it answerable.
+			std::shared_ptr<Load>  fallback;
+			std::function<bool()>  fallback_prepare;
 		};
 
 		// A load is on its way: from here on, what the receiver says about the
@@ -114,7 +117,6 @@ class Caster {
 		int                          notice_seq_=0;
 		// Where the current load should start; sent as a SEEK once it plays.
 		double                       seek_to_=0;
-		double                       base_=0;
 		bool                         vol_known_=false, vol_fixed_=false;
 		float                        vol_=0;
 

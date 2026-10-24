@@ -145,8 +145,15 @@ void Caster::load(const Load& l)
 	req.metadata         = l.metadata;
 	req.tracks           = l.tracks;
 	req.active_track_ids = l.active_tracks;
-	prepare(l.base + l.start);
-	base_ = l.base;
+	if(l.fallback) {
+		req.fallback = std::make_shared<CastManager::LoadRequest>();
+		req.fallback->url      = l.fallback->url;
+		req.fallback->mime     = l.fallback->mime;
+		req.fallback->duration = l.fallback->duration;
+		req.fallback->metadata = l.metadata;
+		req.fallback->prepare  = l.fallback_prepare;
+		}
+	prepare(l.start);
 	// Not as the LOAD's currentTime: a receiver handed an unindexed FLAC
 	// with one plays from the start, or fails with error 102. A SEEK once
 	// it plays is answered with a Range request, which works.
@@ -188,13 +195,12 @@ void Caster::seek(double seconds)
 	if(!active_) return;
 	time_ = seconds;
 	at_   = std::chrono::steady_clock::now();
-	double in_stream = std::max(0.0, seconds - base_);
 	// Before the load plays, the seek it is waiting to send is this one.
 	if(seek_to_>0) {
-		seek_to_ = in_stream;
+		seek_to_ = seconds;
 		return;
 		}
-	queue_->submit([cm=cm_, in_stream]() { cm->cast_seek(float(in_stream)); });
+	queue_->submit([cm=cm_, seconds]() { cm->cast_seek(float(seconds)); });
 	}
 
 bool Caster::playing() const
@@ -290,7 +296,7 @@ void Caster::received(const Snapshot& s)
 	if(s.session!=0 && s.session==stale_session_) return;
 	session_ = s.session;
 	bool was_playing = playing();
-	time_ = base_ + (seek_to_>0 ? seek_to_ : s.time);
+	time_ = seek_to_>0 ? seek_to_ : s.time;
 	at_   = std::chrono::steady_clock::now();
 	if(s.state=="IDLE") {
 		// A fresh load reads IDLE with no reason until the receiver starts;
@@ -319,7 +325,7 @@ void Caster::received(const Snapshot& s)
 		if(seek_to_>0 && s.state=="PLAYING") {
 			double to = seek_to_;
 			seek_to_ = 0;
-			seek(base_ + to);
+			seek(to);
 			}
 		}
 	state_ = s.state;
