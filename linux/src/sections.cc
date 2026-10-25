@@ -72,7 +72,7 @@ void PlaylistsPane::bind(RowWidget& w, const ListRow& row)
 			const auto& p = row.playlist;
 			std::string meta = plural(p.song_count, "track", "tracks");
 			if(p.duration) meta += " · " + format_duration(p.duration);
-			w.show_item("", "", p.name, meta, "");
+			w.show_item({}, "", p.name, meta, "");
 			break;
 			}
 		case ListRow::Kind::album:
@@ -89,9 +89,9 @@ void PlaylistsPane::activated(const ListRow& row)
 	if(row.kind==ListRow::Kind::playlist)
 		signal_playlist.emit(row.playlist);
 	else if(row.kind==ListRow::Kind::album)
-		signal_open_album.emit(row.album.ref.id, "");
+		signal_open_album.emit(row.album.ref, "");
 	else if(row.kind==ListRow::Kind::song)
-		signal_open_album.emit(row.song.album_id, row.song.ref.id);
+		signal_open_album.emit({row.song.ref.server, row.song.album_id}, row.song.ref.id);
 	}
 
 // ---- PlaylistPane -------------------------------------------------------
@@ -141,7 +141,7 @@ void PlaylistPane::reload()
 void PlaylistPane::bind(RowWidget& w, const ListRow& row)
 	{
 	const auto& s = row.song;
-	w.show_item("", row.text, s.title, s.artist, format_duration(s.duration));
+	w.show_item({}, row.text, s.title, s.artist, format_duration(s.duration));
 	w.show_actions(true, s.starred,
 	               owner_ ? RowWidget::ListButton::remove : RowWidget::ListButton::add, true);
 	}
@@ -245,9 +245,9 @@ void RecentsPane::bind(RowWidget& w, const ListRow& row)
 void RecentsPane::activated(const ListRow& row)
 	{
 	if(row.kind==ListRow::Kind::album)
-		signal_open_album.emit(row.album.ref.id, "");
+		signal_open_album.emit(row.album.ref, "");
 	else if(row.kind==ListRow::Kind::song)
-		signal_open_album.emit(row.song.album_id, row.song.ref.id);
+		signal_open_album.emit({row.song.ref.server, row.song.album_id}, row.song.ref.id);
 	}
 
 // ---- SearchPane ---------------------------------------------------------
@@ -344,7 +344,7 @@ void SearchPane::bind(RowWidget& w, const ListRow& row)
 			// The artist's portrait: getCoverArt takes the artist's own id.
 			// Only when known: a server other than gaindrive may not send
 			// albumCount with a search hit.
-			w.show_item(row.artist.ref.id, "", row.artist.name, "",
+			w.show_item(row.artist.ref, "", row.artist.name, "",
 			            row.artist.album_count>0 ? plural(row.artist.album_count, "album", "albums") : "");
 			break;
 		case ListRow::Kind::album:
@@ -361,9 +361,9 @@ void SearchPane::activated(const ListRow& row)
 	if(row.kind==ListRow::Kind::artist)
 		signal_open_artist.emit(row.artist);
 	else if(row.kind==ListRow::Kind::album)
-		signal_open_album.emit(row.album.ref.id, "");
+		signal_open_album.emit(row.album.ref, "");
 	else if(row.kind==ListRow::Kind::song)
-		signal_open_album.emit(row.song.album_id, row.song.ref.id);
+		signal_open_album.emit({row.song.ref.server, row.song.album_id}, row.song.ref.id);
 	}
 
 // ---- SettingsPane -------------------------------------------------------
@@ -382,14 +382,16 @@ void SettingsPane::load()
 		ListRow::setting("playback", "Playback", settings_.quality_label()),
 		ListRow::setting("appearance", "Appearance", settings_.theme_label()),
 		ListRow::setting("servers",  "Servers",
-		                 servers_.empty() ? "None" : servers_.front().url),
+		                 servers_.empty()     ? "None"
+		                 : servers_.size()==1 ? servers_.front().url
+		                 : std::to_string(servers_.size()) + " servers"),
 		ListRow::setting("about",    "About",    "GainDrive " GAINDRIVE_VERSION)
 		});
 	}
 
 void SettingsPane::bind(RowWidget& w, const ListRow& row)
 	{
-	w.show_item("", "", row.text, row.detail, "");
+	w.show_item({}, "", row.text, row.detail, "");
 	}
 
 void SettingsPane::activated(const ListRow& row)

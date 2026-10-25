@@ -10,6 +10,7 @@
 #include <vector>
 
 class ApiClient;
+class Clients;
 class WorkPool;
 struct AppSettings;
 
@@ -19,11 +20,13 @@ struct AppSettings;
 // on a Cast receiver while one is connected.
 class Playback {
 	public:
-		Playback(const AppSettings& settings, WorkPool& pool);
+		// Each track goes to its own server's client in `clients`.
+		Playback(const AppSettings& settings, WorkPool& pool, const Clients& clients);
 		~Playback();
 
-		// Null on logout, which stops playback.
-		void set_api(std::shared_ptr<ApiClient> api);
+		// A server is about to log out: its tracks leave the queue, and
+		// playback stops if one of them is playing.
+		void forget_server(const std::string& key);
 
 		// `offset` seconds into the track, for a resumed one.
 		void play(const std::vector<Song>& songs, size_t start, double offset=0);
@@ -114,6 +117,9 @@ class Playback {
 		void ended();
 		bool tick();
 		void report(const char *state, double pos);
+		void scrobble(const Song& s);
+		// Null once the song's server has logged out.
+		std::shared_ptr<ApiClient> api_for(const Song& s) const;
 		std::string stream_url(const Song& s, double offset=0, bool mp3=false) const;
 		std::string video_url(const Song& s, bool hls) const;
 		void        error(const std::string& e);
@@ -144,7 +150,7 @@ class Playback {
 		sigc::connection           picture_timer_;
 		std::string                caption_song_;
 		int                        caption_track_=0;
-		std::shared_ptr<ApiClient> api_;
+		const Clients&             clients_;
 		std::vector<Song>          queue_;
 		long                       index_=-1;
 		size_t                     auto_from_=0;

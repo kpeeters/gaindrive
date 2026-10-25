@@ -1,5 +1,7 @@
 #include "coverstore.hh"
 #include "apiclient.hh"
+#include "clients.hh"
+#include "model.hh"
 #include "md5.hh"
 #include "stamp.hh"
 #include "uithread.hh"
@@ -147,31 +149,21 @@ namespace {
 		}
 }
 
-CoverStore::CoverStore()
-	: pool_(std::make_unique<WorkPool>(cover_threads))
+CoverStore::CoverStore(const Clients& clients)
+	: pool_(std::make_unique<WorkPool>(cover_threads)), clients_(clients)
 	{
 	}
 
 CoverStore::~CoverStore() = default;
 
-void CoverStore::set_api(std::shared_ptr<ApiClient> api)
-	{
-	api_ = std::move(api);
-	memory_.clear();
-	ages_.clear();
-	pending_.clear();
-	missing_.clear();
-	++epoch_;
-	}
-
-Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, std::string& key,
+Glib::RefPtr<Gdk::Texture> CoverStore::get(const ItemRef& cover, int px, std::string& key,
                                            int index, bool fetch)
 	{
 	key.clear();
-	if(!api_ || cover_id.empty()) return {};
+	if(cover.id.empty()) return {};
+	const std::string& cover_id = cover.id;
 
-	const auto& s = api_->session();
-	key = s.server_key + "|" + cover_id + "|" + std::to_string(px);
+	key = cover.server + "|" + cover_id + "|" + std::to_string(px);
 	if(index>0) key += "|" + std::to_string(index);
 
 	auto it = memory_.find(key);
@@ -186,6 +178,9 @@ Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, 
 		missing_.erase(miss);
 		}
 	if(pending_.count(key)) return {};
+	// A server logged out shows what is in memory, and fetches nothing.
+	auto api = clients_.get(cover.server);
+	if(!api) return {};
 	pending_.insert(key);
 
 	// .cover, not the .img of the entries before ETags: those are never read,
@@ -193,8 +188,8 @@ Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, 
 	auto file = cache_dir() / (md5_hex(key) + ".cover");
 	Params p = {{"id", cover_id}, {"size", std::to_string(px)}};
 	if(index>0) p.push_back({"index", std::to_string(index)});
-	auto url  = api_->url("getCoverArt", p);
-	pool_->submit([this, key, file, url, epoch=epoch_]() {
+	auto url  = api->url("getCoverArt", p);
+	pool_->submit([this, key, file, url]() {
 		// Always asked, never trusted: the server's ETag covers the file and
 		// its size, and a rescan can hand a cover id to another album, so a
 		// stored copy may be another album's art. A 304 costs no image.
@@ -235,10 +230,8 @@ Glib::RefPtr<Gdk::Texture> CoverStore::get(const std::string& cover_id, int px, 
 				std::filesystem::remove(file, ec);
 				}
 			}
-		on_ui([this, key, tex, epoch, failed, keep_miss]() {
+		on_ui([this, key, tex, failed, keep_miss]() {
 			auto texture = Glib::wrap(tex);
-			// A logout in between: the key may now mean another account.
-			if(epoch!=epoch_) return;
 			pending_.erase(key);
 			if(!texture) {
 				if(keep_miss>0)
@@ -291,16 +284,17 @@ void CoverImage::ready(const std::string& key, const Glib::RefPtr<Gdk::Texture>&
 		set(tex);
 	}
 
-void CoverImage::show_cover(const std::string& cover_id, int index)
+void CoverImage::show_cover(const ItemRef& cover, int index)
 	{
 	retry_.disconnect();
 	stop_watching();
-	cover_id_ = cover_id;
+	server_   = cover.server;
+	cover_id_ = cover.id;
 	index_    = index;
 	tries_    = 0;
 	// What is in memory is shown at once, wherever the image is.
 	int px = css_px_ * (get_scale_factor()>1 ? 2 : 1);
-	if(auto tex = store_.get(cover_id_, px, wanted_, index_, false)) {
+	if(auto tex = store_.get({server_, cover_id_}, px, wanted_, index_, false)) {
 		set(tex);
 		return;
 		}
@@ -377,7 +371,7 @@ void CoverImage::fetch()
 	// the server keeps, so fractional scales are rounded up rather than
 	// followed. The same rule as the web client's coverPx().
 	int px = css_px_ * (get_scale_factor()>1 ? 2 : 1);
-	auto tex = store_.get(cover_id_, px, wanted_, index_);
+	auto tex = store_.get({server_, cover_id_}, px, wanted_, index_);
 	if(tex) set(tex);
 	else    clear();
 	}

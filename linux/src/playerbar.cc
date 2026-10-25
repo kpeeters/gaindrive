@@ -165,7 +165,7 @@ void PlayerBar::track_changed()
 	const Song *s = playback_.current();
 	title_.set_text(s ? s->title : "");
 	artist_.set_text(s ? s->artist : "");
-	cover_->show_cover(s ? s->cover_art : "");
+	cover_->show_cover(s ? ItemRef{s->ref.server, s->cover_art} : ItemRef{});
 	// Control by control: the cast button works with nothing loaded.
 	cover_->set_sensitive(s!=nullptr);
 	play_.set_sensitive(s!=nullptr);

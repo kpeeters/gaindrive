@@ -217,6 +217,7 @@ ApiResult ApiClient::get_json(const Session& s, const std::string& endpoint, con
                               int read_timeout)
 	{
 	ApiResult r;
+	r.server = s.server_key;
 	std::string url = s.base_url + "/rest/" + endpoint + ".view?" + query(s, params);
 	std::string body;
 	if(!get_bytes(url, body, r.error, read_timeout)) {

@@ -5,9 +5,9 @@
 
 #include <string>
 
-// Every id is qualified by the server it came from. Only one server is used
-// for now, but Subsonic ids are only unique per server, and retrofitting the
-// qualification once several servers are merged would touch everything.
+// Every id is qualified by the server it came from: Subsonic ids are only
+// unique per server. Ids inside an item (an album's artist_id, a song's
+// album_id and cover_art) are on the item's own server.
 struct ItemRef {
 	std::string server;   // ServerConfig::key
 	std::string id;

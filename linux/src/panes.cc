@@ -103,7 +103,7 @@ void RowWidget::show_heading(const std::string& text)
 	item_.set_visible(false);
 	}
 
-void RowWidget::show_item(const std::string& cover_id, const std::string& lead,
+void RowWidget::show_item(const ItemRef& cover, const std::string& lead,
                           const std::string& title, const std::string& subtitle,
                           const std::string& trail)
 	{
@@ -111,7 +111,7 @@ void RowWidget::show_item(const std::string& cover_id, const std::string& lead,
 	heading_.set_visible(false);
 	item_.set_visible(true);
 	show_actions(false, false, ListButton::none, false);
-	if(cover_) cover_->show_cover(cover_id);
+	if(cover_) cover_->show_cover(cover);
 	lead_.set_text(lead);
 	lead_.set_visible(!lead.empty());
 	// Numbered rows keep the slot, so the numbers stay put as the track
@@ -411,7 +411,7 @@ void Pane::bind_song_hit(RowWidget& w, const Song& s, const std::string& trail)
 	{
 	std::string sub = s.artist;
 	if(!s.album.empty()) sub += (sub.empty() ? "" : " · ") + s.album;
-	w.show_item(s.cover_art, "", s.title, sub, trail);
+	w.show_item({s.ref.server, s.cover_art}, "", s.title, sub, trail);
 	w.show_actions(true, s.starred, RowWidget::ListButton::add, true);
 	}
 
@@ -419,6 +419,6 @@ void Pane::bind_album_hit(RowWidget& w, const Album& a)
 	{
 	std::string sub = a.artist;
 	if(a.year) sub += (sub.empty() ? "" : " · ") + std::to_string(a.year);
-	w.show_item(a.cover_art, "", a.title, sub, "");
+	w.show_item({a.ref.server, a.cover_art}, "", a.title, sub, "");
 	w.show_actions(true, a.starred, RowWidget::ListButton::none, false);
 	}

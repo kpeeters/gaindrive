@@ -4,7 +4,8 @@ LoginView::LoginView()
 	: Gtk::Box(Gtk::Orientation::VERTICAL),
 	  form_(Gtk::Orientation::VERTICAL, 10),
 	  title_("GainDrive"),
-	  login_("Log in")
+	  login_("Log in"),
+	  cancel_("Cancel")
 	{
 	form_.set_halign(Gtk::Align::CENTER);
 	form_.set_valign(Gtk::Align::CENTER);
@@ -26,6 +27,8 @@ LoginView::LoginView()
 
 	login_.add_css_class("suggested-action");
 	form_.append(login_);
+	cancel_.set_visible(false);
+	form_.append(cancel_);
 	form_.append(spinner_);
 
 	error_.set_wrap(true);
@@ -37,6 +40,7 @@ LoginView::LoginView()
 	append(form_);
 
 	login_.signal_clicked().connect(sigc::mem_fun(*this, &LoginView::submit));
+	cancel_.signal_clicked().connect([this]() { signal_cancel.emit(); });
 	url_.signal_activate().connect([this]() { user_.grab_focus(); });
 	user_.signal_activate().connect([this]() { password_.grab_focus(); });
 	password_.signal_activate().connect(sigc::mem_fun(*this, &LoginView::submit));
@@ -63,6 +67,11 @@ void LoginView::set_error(const std::string& text)
 	{
 	error_.set_text(text);
 	error_.set_visible(!text.empty());
+	}
+
+void LoginView::set_cancellable(bool on)
+	{
+	cancel_.set_visible(on);
 	}
 
 void LoginView::submit()

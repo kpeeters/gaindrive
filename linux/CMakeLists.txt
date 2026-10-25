@@ -112,6 +112,7 @@ add_executable(gaindrive-player
 	src/main.cc
 	src/apiclient.cc
 	src/castbutton.cc
+	src/clients.cc
 	src/caster.cc
 	src/configfile.cc
 	src/coverstore.cc

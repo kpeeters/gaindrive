@@ -1,4 +1,5 @@
 #include "infoblock.hh"
+#include "model.hh"
 #include "apiclient.hh"
 #include "coverstore.hh"
 #include "jsonread.hh"
@@ -174,7 +175,7 @@ void InfoBlock::clear()
 	timer_.disconnect();
 	api_.reset();
 	set_visible(false);
-	if(portrait_) portrait_->show_cover("");
+	if(portrait_) portrait_->show_cover({});
 	}
 
 void InfoBlock::load(std::shared_ptr<ApiClient> api, const std::string& endpoint,
@@ -188,7 +189,7 @@ void InfoBlock::load(std::shared_ptr<ApiClient> api, const std::string& endpoint
 	answer_   = answer;
 	text_key_ = text_key;
 	tries_    = 0;
-	if(portrait_) portrait_->show_cover(portrait_id);
+	if(portrait_) portrait_->show_cover({api_->session().server_key, portrait_id});
 	request();
 	}
 

@@ -113,7 +113,7 @@ void ArtistPane::bind(RowWidget& w, const ListRow& row)
 	if(row.kind==ListRow::Kind::heading)
 		w.show_heading(row.text);
 	else
-		w.show_item("", "", row.artist.name, "", plural(row.artist.album_count, "album", "albums"));
+		w.show_item({}, "", row.artist.name, "", plural(row.artist.album_count, "album", "albums"));
 	}
 
 void ArtistPane::activated(const ListRow& row)
@@ -141,9 +141,9 @@ AlbumPane::AlbumPane(CoverStore& covers, AppSettings& settings)
 
 AlbumPane::~AlbumPane() = default;
 
-const std::string& AlbumPane::artist_id() const
+const ItemRef& AlbumPane::artist() const
 	{
-	return artist_id_;
+	return artist_;
 	}
 
 std::string AlbumPane::section() const
@@ -164,7 +164,7 @@ void AlbumPane::clear()
 	Pane::clear();
 	bio_->clear();
 	sort_.set_visible(false);
-	artist_id_.clear();
+	artist_ = {};
 	albums_.clear();
 	}
 
@@ -172,7 +172,7 @@ void AlbumPane::show_artist(std::shared_ptr<ApiClient> api, const Artist& artist
 	{
 	clear();
 	unsigned gen = gen_;
-	artist_id_ = artist.ref.id;
+	artist_    = artist.ref;
 	category_  = artist.category;
 	set_title(artist.name);
 	label_sort();
@@ -226,7 +226,7 @@ void AlbumPane::bind(RowWidget& w, const ListRow& row)
 	std::string meta;
 	if(a.year)       meta = std::to_string(a.year);
 	if(a.song_count) meta += (meta.empty() ? "" : " · ") + plural(a.song_count, "track", "tracks");
-	w.show_item(a.cover_art, "", a.title, meta, "");
+	w.show_item({a.ref.server, a.cover_art}, "", a.title, meta, "");
 	w.show_actions(true, a.starred, RowWidget::ListButton::none, false);
 	}
 
@@ -299,7 +299,7 @@ TrackPane::~TrackPane() = default;
 void TrackPane::clear()
 	{
 	Pane::clear();
-	hero_->show_cover("");
+	hero_->show_cover({});
 	hero_box_.set_visible(false);
 	image_  = 0;
 	images_ = 1;
@@ -412,7 +412,7 @@ void TrackPane::show_rows()
 void TrackPane::show_image(int index)
 	{
 	image_ = index;
-	hero_->show_cover(album_.cover_art, index);
+	hero_->show_cover({album_.ref.server, album_.cover_art}, index);
 	img_prev_.set_visible(images_>1);
 	img_next_.set_visible(images_>1);
 	img_prev_.set_sensitive(index>0);
@@ -476,7 +476,7 @@ void TrackPane::bind(RowWidget& w, const ListRow& row)
 		return;
 		}
 	if(row.kind==ListRow::Kind::chapter) {
-		w.show_item("", std::to_string(row.index),
+		w.show_item({}, std::to_string(row.index),
 		            row.text.empty() ? "Chapter " + std::to_string(row.index) : row.text,
 		            "", row.duration>0 ? format_duration(row.duration) : "");
 		// No star, playlist or queue: they all address a song, and a
@@ -488,7 +488,7 @@ void TrackPane::bind(RowWidget& w, const ListRow& row)
 	// writes the same name differently, so an exact comparison is enough.
 	std::string artist = (!s.display_album_artist.empty() && s.artist!=s.display_album_artist)
 		? s.artist : "";
-	w.show_item("", row.text, s.title, artist, format_duration(s.duration));
+	w.show_item({}, row.text, s.title, artist, format_duration(s.duration));
 	w.show_actions(true, s.starred, RowWidget::ListButton::add, true);
 	}
 

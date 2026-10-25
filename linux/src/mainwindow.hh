@@ -1,5 +1,6 @@
 #pragma once
 
+#include "clients.hh"
 #include "coverstore.hh"
 #include "loginview.hh"
 #include "panes.hh"
@@ -45,17 +46,29 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void show_login(const std::string& error);
 		void login(const std::string& url, const std::string& user, const std::string& password);
 		void logged_in(const ApiResult& r, const Session& s);
-		void start_session(const Session& s);
+		// The browse view, with the lists of the scope's server.
+		void open_browse();
 		// Back to the login view, forgetting nothing on disk.
 		void end_session(const std::string& error);
+		// The login view over the browse view, which Cancel goes back to.
+		void add_server();
+		void relogin(const std::string& key);
 		void remove_server(const std::string& key);
+		// One server logs out; the others carry on.
+		void drop_client(const std::string& key, const std::string& message);
+		// The server list or its states changed.
+		void servers_changed();
+		std::shared_ptr<ApiClient> client_for(const std::string& key) const;
+		// The server whose lists the sections show: the first one with a
+		// session.
+		std::shared_ptr<ApiClient> scope_client() const;
 		void failed(const ApiResult& r);
 		void notify(const std::string& text);
 
 		// The sidebar's sections, by their stack names.
 		void show_section(const std::string& name);
 		void open_artist(const Artist& a);
-		void open_album(const std::string& album_id, const std::string& play_id);
+		void open_album(const ItemRef& album, const std::string& play_id);
 		void album_loaded(const Album& a);
 		void play(const std::vector<Song>& songs, size_t index);
 		void star(ListRow::Kind kind, const ItemRef& ref, bool on);
@@ -80,8 +93,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		// everything they might still touch is alive.
 		WorkPool                   pool_;
 		AppSettings                settings_;
+		Clients                    clients_;
 		CoverStore                 covers_;
-		std::shared_ptr<ApiClient> api_;
 		std::vector<ServerConfig>  servers_;
 		Playback                   playback_;
 
@@ -132,10 +145,13 @@ class MainWindow : public Gtk::ApplicationWindow {
 		// name, since a rescan can hand an id to something else.
 		struct View {
 			std::string section="library";
-			std::string artist_id, artist_name;
-			std::string playlist_id, playlist_name;
+			ItemRef     artist;
+			std::string artist_name;
+			ItemRef     playlist;
+			std::string playlist_name;
 			std::string settings;
-			std::string album_id, album_title;
+			ItemRef     album;
+			std::string album_title;
 		};
 		View                       view_;
 		// Set while an album reopens by id alone: the title it must have.

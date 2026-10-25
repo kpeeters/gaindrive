@@ -1,5 +1,6 @@
 #include "playback.hh"
 #include "apiclient.hh"
+#include "clients.hh"
 #include "jsonread.hh"
 #include "settings.hh"
 #include "stamp.hh"
@@ -76,8 +77,8 @@ namespace {
 		}
 }
 
-Playback::Playback(const AppSettings& settings, WorkPool& pool)
-	: settings_(settings), pool_(pool)
+Playback::Playback(const AppSettings& settings, WorkPool& pool, const Clients& clients)
+	: settings_(settings), pool_(pool), clients_(clients)
 	{
 	player_.signal_advanced.connect(sigc::mem_fun(*this, &Playback::advanced));
 	player_.signal_ended.connect(sigc::mem_fun(*this, &Playback::ended));
@@ -106,14 +107,33 @@ Playback::~Playback()
 	picture_timer_.disconnect();
 	}
 
-void Playback::set_api(std::shared_ptr<ApiClient> api)
+void Playback::forget_server(const std::string& key)
 	{
-	if(api_ && current()) stop();
-	api_ = std::move(api);
-	queue_.clear();
-	index_ = -1;
-	auto_from_ = 0;
+	const Song *s = current();
+	if(s && s->ref.server==key) {
+		stop();
+		index_ = -1;
+		}
+	for(size_t i=queue_.size(); i-- > 0;) {
+		if(queue_[i].ref.server!=key) continue;
+		queue_.erase(queue_.begin()+long(i));
+		if(long(i)<index_) --index_;
+		if(i<auto_from_) --auto_from_;
+		}
+	next_id_.clear();
+	update_next();
 	signal_track.emit();
+	}
+
+std::shared_ptr<ApiClient> Playback::api_for(const Song& s) const
+	{
+	return clients_.get(s.ref.server);
+	}
+
+void Playback::scrobble(const Song& s)
+	{
+	if(auto api = api_for(s))
+		api->call("scrobble", {{"id", s.ref.id}, {"submission", "true"}}, [](const ApiResult&) {});
 	}
 
 void Playback::play(const std::vector<Song>& songs, size_t start_at, double offset)
@@ -199,7 +219,7 @@ void Playback::prev()
 void Playback::seek(double seconds)
 	{
 	const Song *s = current();
-	if(!s || !api_) return;
+	if(!s || !api_for(*s)) return;
 	seconds = std::max(0.0, seconds);
 	signal_seeked.emit(seconds);
 	// The receiver fetches a converted track or soundtrack from the server's
@@ -316,7 +336,7 @@ void Playback::stop_casting()
 void Playback::start(double offset)
 	{
 	const Song *s = current();
-	if(!s || !api_) return;
+	if(!s || !api_for(*s)) return;
 	scrobbled_    = false;
 	ticks_        = 0;
 	mp3_retried_  = false;
@@ -362,7 +382,7 @@ const std::string& Playback::cast_type() const
 std::string Playback::local_url() const
 	{
 	const Song *s = current();
-	if(!s || !api_) return "";
+	if(!s || !api_for(*s)) return "";
 	if(shows_picture(*s)) return video_url(*s, mp3_retried_);
 	return stream_url(*s, local_offset_, mp3_retried_);
 	}
@@ -381,7 +401,7 @@ bool Playback::shows_picture(const Song& s) const
 void Playback::video_mode_changed()
 	{
 	const Song *s = current();
-	if(!s || !s->is_video || !api_) return;
+	if(!s || !s->is_video || !api_for(*s)) return;
 	// The receiver goes on as it is: what it is sent is the server's
 	// decision, which this setting is not part of. Only the picture here
 	// comes or goes.
@@ -401,7 +421,7 @@ void Playback::set_caption(int track)
 	{
 	const Song *s = current();
 	if(!s || !s->is_video) return;
-	caption_song_  = s->ref.id;
+	caption_song_  = s->ref.server + "|" + s->ref.id;
 	caption_track_ = track;
 	if(cast_picture())
 		caster_.set_tracks(track>0 ? std::vector<int>{track} : std::vector<int>{});
@@ -410,7 +430,7 @@ void Playback::set_caption(int track)
 void Playback::cast_start(double offset)
 	{
 	const Song *s = current();
-	if(!s || !api_) return;
+	if(!s || !api_for(*s)) return;
 	picture_stop();
 	if(s->is_video) {
 		cast_film(offset);
@@ -440,7 +460,7 @@ void Playback::cast_start(double offset)
 	// connection is then cut by a proxy or by the receiver's own timeout.
 	p.push_back({"pace", "true"});
 
-	pool_.submit([this, api=api_, song=*s, p, mime, gen, offset]() mutable {
+	pool_.submit([this, api=api_for(*s), song=*s, p, mime, gen, offset]() mutable {
 		std::string token;
 		auto r = ApiClient::get_json(api->session(), "getCastToken", {{"id", song.ref.id}});
 		if(r.ok)
@@ -492,7 +512,7 @@ void Playback::cast_start(double offset)
 void Playback::cast_film(double offset)
 	{
 	const Song *s = current();
-	if(!s || !api_) return;
+	if(!s || !api_for(*s)) return;
 	// What the receiver is sent is the server's decision, the one it makes
 	// for its own casts, so a film reaches a receiver the same way whichever
 	// player sends it. Only the receiver is ours to describe.
@@ -503,10 +523,10 @@ void Playback::cast_film(double offset)
 	const auto& dev = caster_.device();
 	Params p = {{"id", s->ref.id}, {"deviceId", dev.id},
 	            {"capabilities", std::to_string(dev.capabilities)}};
-	if(caption_song_==s->ref.id && caption_track_>0)
+	if(caption_song_==s->ref.server + "|" + s->ref.id && caption_track_>0)
 		p.push_back({"trackId", std::to_string(caption_track_)});
 
-	pool_.submit([this, api=api_, song=*s, p, gen, offset]() {
+	pool_.submit([this, api=api_for(*s), song=*s, p, gen, offset]() {
 		// The server builds a soundtrack before answering, which for a long
 		// film is a while.
 		auto r = ApiClient::get_json(api->session(), "getCastLoad", p, 300);
@@ -577,7 +597,7 @@ void Playback::cast_ended()
 	if(!current()) return;
 	if(!scrobbled_) {
 		scrobbled_ = true;
-		api_->call("scrobble", {{"id", current()->ref.id}, {"submission", "true"}}, [](const ApiResult&) {});
+		scrobble(*current());
 		}
 	// No gapless on a receiver: the next track is loaded when this one ends.
 	if(index_+1<long(queue_.size())) {
@@ -596,7 +616,7 @@ void Playback::error(const std::string& e)
 		// Only the picture failed; the receiver plays on. Once as HLS, as
 		// for a film played here, then the panel saying where it went.
 		std::cout << stamp() << "Cast: local picture failed: " << e << std::endl;
-		if(s && api_ && !picture_hls_) {
+		if(s && api_for(*s) && !picture_hls_) {
 			picture_hls_     = true;
 			picture_running_ = false;
 			picture_holding_ = false;
@@ -610,13 +630,13 @@ void Playback::error(const std::string& e)
 		}
 	// The web client's fallback: what GStreamer cannot decode, the server
 	// can convert. Once per track, from where it failed.
-	if(s && api_ && !mp3_retried_ && shows_picture(*s)) {
+	if(s && api_for(*s) && !mp3_retried_ && shows_picture(*s)) {
 		mp3_retried_ = true;
 		double at = position();
 		player_.play_uri(video_url(*s, true), at, true);
 		return;
 		}
-	if(s && api_ && !mp3_retried_) {
+	if(s && api_for(*s) && !mp3_retried_) {
 		mp3_retried_ = true;
 		double at = std::floor(position());
 		local_offset_ = at;
@@ -637,9 +657,9 @@ void Playback::update_next()
 	if(caster_.active()) return;
 	// Not around a film: the player's flags are set per stream, and a
 	// gapless switch would keep the previous one's.
-	if(api_ && index_>=0 && index_+1<long(queue_.size())
+	if(index_>=0 && index_+1<long(queue_.size())
 	   && !shows_picture(queue_[size_t(index_)]) && !shows_picture(queue_[size_t(index_+1)]))
-		id = queue_[size_t(index_+1)].ref.id;
+		id = queue_[size_t(index_+1)].ref.server + "|" + queue_[size_t(index_+1)].ref.id;
 	if(id==next_id_) return;
 	next_id_ = id;
 	player_.set_next_uri(id.empty() ? "" : stream_url(queue_[size_t(index_+1)]));
@@ -650,7 +670,7 @@ void Playback::advanced()
 	// The gapless successor started; the queue catches up with the player.
 	if(!current()) return;
 	if(!scrobbled_)
-		api_->call("scrobble", {{"id", current()->ref.id}, {"submission", "true"}}, [](const ApiResult&) {});
+		scrobble(*current());
 	++index_;
 	next_id_.clear();
 	scrobbled_    = false;
@@ -674,7 +694,7 @@ void Playback::ended()
 	if(!current()) return;
 	if(!scrobbled_) {
 		scrobbled_ = true;
-		api_->call("scrobble", {{"id", current()->ref.id}, {"submission", "true"}}, [](const ApiResult&) {});
+		scrobble(*current());
 		}
 	// Only a film ends with more queued: music goes on gaplessly.
 	if(index_+1<long(queue_.size())) {
@@ -690,10 +710,10 @@ void Playback::ended()
 bool Playback::tick()
 	{
 	const Song *s = current();
-	if(!s || !api_ || !playing()) return true;
+	if(!s || !api_for(*s) || !playing()) return true;
 	if(!scrobbled_ && s->duration>0 && position()>=s->duration/2.0) {
 		scrobbled_ = true;
-		api_->call("scrobble", {{"id", s->ref.id}, {"submission", "true"}}, [](const ApiResult&) {});
+		scrobble(*s);
 		}
 	if(++ticks_%report_every==0)
 		report("playing", position());
@@ -703,10 +723,11 @@ bool Playback::tick()
 void Playback::report(const char *state, double pos)
 	{
 	const Song *s = current();
-	if(!s || !api_) return;
+	auto api = s ? api_for(*s) : nullptr;
+	if(!api) return;
 	// ignoreScrobble: play counts come from scrobble, and the server would
 	// otherwise count each play twice.
-	api_->call("reportPlayback", {
+	api->call("reportPlayback", {
 		{"mediaId", s->ref.id}, {"mediaType", "song"}, {"state", state},
 		{"positionMs", std::to_string(std::lround(pos*1000))},
 		{"ignoreScrobble", "true"}
@@ -717,8 +738,9 @@ void Playback::report_stopped_now()
 	{
 	const Song *s = current();
 	// A receiver plays on after this window closes.
-	if(!s || !api_ || !player_.playing() || caster_.active()) return;
-	ApiClient::get_json(api_->session(), "reportPlayback", {
+	auto api = s ? api_for(*s) : nullptr;
+	if(!api || !player_.playing() || caster_.active()) return;
+	ApiClient::get_json(api->session(), "reportPlayback", {
 		{"mediaId", s->ref.id}, {"mediaType", "song"}, {"state", "stopped"},
 		{"positionMs", std::to_string(std::lround(position()*1000))},
 		{"ignoreScrobble", "true"}
@@ -728,6 +750,8 @@ void Playback::report_stopped_now()
 std::string Playback::stream_url(const Song& s, double offset, bool mp3) const
 	{
 	if(shows_picture(s)) return video_url(s, mp3);
+	auto api = api_for(s);
+	if(!api) return "";
 	// No `pace`: unlike a Cast receiver, playbin reads steadily as it plays,
 	// so the connection never sits idle long enough for a proxy to cut it.
 	Params p = {{"id", s.ref.id}};
@@ -752,11 +776,13 @@ std::string Playback::stream_url(const Song& s, double offset, bool mp3) const
 	// Without a cap, the original file: GStreamer decodes whatever is stored.
 	if(offset>0)
 		p.push_back({"timeOffset", std::to_string(long(offset))});
-	return api_->url("stream", p);
+	return api->url("stream", p);
 	}
 
 std::string Playback::video_url(const Song& s, bool hls) const
 	{
+	auto api = api_for(s);
+	if(!api) return "";
 	// No quality cap: it is an audio bitrate, and the web client does not
 	// apply it to films either.
 	Params p = {{"id", s.ref.id}};
@@ -767,21 +793,21 @@ std::string Playback::video_url(const Song& s, bool hls) const
 		if(!s.audio_codec.empty())
 			declared += ",audio/" + s.audio_codec;
 		p.push_back({"playable", declared});
-		return api_->url("stream", p);
+		return api->url("stream", p);
 		}
 	if(!hls && s.transcoded_suffix.empty())
-		return api_->url("stream", p);
+		return api->url("stream", p);
 	// HLS seeks without the server encoding from the start, unlike a
 	// converted stream.view. Opus and FLAC soundtracks are copied rather
 	// than converted to AAC, as GStreamer plays both from MP4.
 	p.push_back({"audioCodecs", "opus,flac"});
-	return api_->url("hls", p);
+	return api->url("hls", p);
 	}
 
 void Playback::picture_follow(double offset)
 	{
 	const Song *s = current();
-	bool want = s && api_ && caster_.active() && shows_picture(*s) && !cast_screen_
+	bool want = s && api_for(*s) && caster_.active() && shows_picture(*s) && !cast_screen_
 	            && settings_.cast_local_video && player_.paintable();
 	if(!want) {
 		picture_stop();

@@ -13,6 +13,7 @@
 #include <vector>
 
 class ApiClient;
+class Clients;
 class CoverImage;
 class CoverStore;
 class Playback;
@@ -24,14 +25,13 @@ class WorkPool;
 // when the card opened, as there, so the label and the link agree.
 class TrackInfo : public Gtk::Box {
 	public:
-		TrackInfo(CoverStore& covers, Playback& playback, WorkPool& pool);
+		TrackInfo(CoverStore& covers, Playback& playback, WorkPool& pool, const Clients& clients);
 		~TrackInfo() override;
 
-		void set_api(std::shared_ptr<ApiClient> api);
 		// Fills the card in for what plays now.
 		void refresh();
-		// The id of the track it shows, so a queue change alone need not
-		// refresh it.
+		// The track it shows, as "server|id", so a queue change alone need
+		// not refresh it.
 		const std::string& shown() const;
 		void set_narrow(bool narrow);
 
@@ -45,7 +45,7 @@ class TrackInfo : public Gtk::Box {
 
 		Playback&                   playback_;
 		WorkPool&                   pool_;
-		std::shared_ptr<ApiClient>  api_;
+		const Clients&              clients_;
 		std::unique_ptr<CoverImage> cover_;
 
 		Gtk::Box         head_, head_text_, share_row_, starts_;

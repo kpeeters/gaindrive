@@ -13,7 +13,7 @@ struct ServerConfig {
 	std::string user;
 };
 
-// servers.json in the config directory. A list although only the first
-// entry is used for now.
+// servers.json in the config directory. The order is the user's: the first
+// server with a session is the one the sections list.
 std::vector<ServerConfig> load_servers();
 void                      save_servers(const std::vector<ServerConfig>& servers);

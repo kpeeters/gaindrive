@@ -277,7 +277,7 @@ void Mpris::track_changed()
 		art_path_.clear();
 		cover_key_.clear();
 		if(s && !s->cover_art.empty()) {
-			auto tex = covers_.get(s->cover_art, art_px, cover_key_);
+			auto tex = covers_.get({s->ref.server, s->cover_art}, art_px, cover_key_);
 			if(tex) save_art(tex->gobj());
 			}
 		}

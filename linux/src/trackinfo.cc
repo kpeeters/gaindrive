@@ -1,5 +1,6 @@
 #include "trackinfo.hh"
 #include "apiclient.hh"
+#include "clients.hh"
 #include "jsonread.hh"
 #include "model.hh"
 #include "coverstore.hh"
@@ -57,10 +58,11 @@ namespace {
 		}
 }
 
-TrackInfo::TrackInfo(CoverStore& covers, Playback& playback, WorkPool& pool)
+TrackInfo::TrackInfo(CoverStore& covers, Playback& playback, WorkPool& pool, const Clients& clients)
 	: Gtk::Box(Gtk::Orientation::VERTICAL, 6),
 	  playback_(playback),
 	  pool_(pool),
+	  clients_(clients),
 	  cover_(std::make_unique<CoverImage>(covers, 64)),
 	  head_(Gtk::Orientation::HORIZONTAL, 12),
 	  head_text_(Gtk::Orientation::VERTICAL, 2),
@@ -149,12 +151,6 @@ TrackInfo::~TrackInfo()
 	alive_.reset();
 	}
 
-void TrackInfo::set_api(std::shared_ptr<ApiClient> api)
-	{
-	api_ = std::move(api);
-	shown_.clear();
-	}
-
 const std::string& TrackInfo::shown() const
 	{
 	return shown_;
@@ -169,18 +165,19 @@ void TrackInfo::refresh()
 	{
 	unsigned gen = ++gen_;
 	const Song *cur = playback_.current();
-	if(!cur || !api_) return;
+	auto api = cur ? clients_.get(cur->ref.server) : nullptr;
+	if(!api) return;
 	Song song = *cur;
-	shown_ = song.ref.id;
+	shown_ = song.ref.server + "|" + song.ref.id;
 
 	title_.set_text(song.title);
 	std::string sub = song.artist;
 	if(!song.album.empty()) sub += (sub.empty() ? "" : " · ") + song.album;
 	sub_.set_text(sub);
 	sub_.set_visible(!sub.empty());
-	cover_->show_cover(song.cover_art);
+	cover_->show_cover({song.ref.server, song.cover_art});
 
-	base_          = api_->session().base_url + "/?track=" + song.ref.id;
+	base_          = api->session().base_url + "/?track=" + song.ref.id;
 	at_seconds_    = int(playback_.position());
 	chapter_start_ = 0;
 	at_.set_active(false);
@@ -244,14 +241,14 @@ void TrackInfo::refresh()
 			});
 		};
 	show_file(song, nlohmann::json());
-	api_->call("getSong", {{"id", song.ref.id}}, [this, alive, gen, show_file, song](const ApiResult& r) {
+	api->call("getSong", {{"id", song.ref.id}}, [this, alive, gen, show_file, song](const ApiResult& r) {
 		if(alive.expired() || gen!=gen_ || !r.ok) return;
 		show_file(song, jsub(r.body, "song"));
 		});
 
 	// The chapter the snapshot falls in, for a concert film or a DJ set that
 	// is one file holding many songs. One starting at 0 is the plain link.
-	api_->call("getChapters", {{"id", song.ref.id}}, [this, alive, gen](const ApiResult& r) {
+	api->call("getChapters", {{"id", song.ref.id}}, [this, alive, gen](const ApiResult& r) {
 		if(alive.expired() || gen!=gen_ || !r.ok) return;
 		const auto& list = jsub(jsub(r.body, "chapters"), "chapter");
 		if(!list.is_array()) return;

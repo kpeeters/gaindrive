@@ -183,7 +183,8 @@ MainWindow::MainWindow()
 	: pool_(4),
 	  // Before anything built below reads it, the equaliser among them.
 	  settings_(loaded_settings()),
-	  playback_(settings_, pool_),
+	  covers_(clients_),
+	  playback_(settings_, pool_, clients_),
 	  browse_(Gtk::Orientation::VERTICAL, narrow_window),
 	  main_(Gtk::Orientation::HORIZONTAL),
 	  sidebar_(Gtk::Orientation::VERTICAL),
@@ -196,10 +197,10 @@ MainWindow::MainWindow()
 	  settings_pane_(covers_, settings_, servers_),
 	  albums_(covers_, settings_),
 	  playlist_(covers_),
-	  settings_page_(settings_, servers_),
+	  settings_page_(settings_, servers_, clients_),
 	  tracks_(covers_),
 	  bar_(covers_, playback_, settings_),
-	  info_card_(covers_, playback_, pool_),
+	  info_card_(covers_, playback_, pool_, clients_),
 	  tabs_(Gtk::Orientation::HORIZONTAL)
 	{
 	ui_init();
@@ -302,7 +303,7 @@ MainWindow::MainWindow()
 	auto view_keys = Gtk::EventControllerKey::create();
 	view_keys->signal_key_pressed().connect([this](guint keyval, guint, Gdk::ModifierType state) {
 		using M = Gdk::ModifierType;
-		if(!api_ || content_.get_visible_child_name()=="video") return false;
+		if(clients_.empty() || content_.get_visible_child_name()=="video") return false;
 		if((state & (M::CONTROL_MASK | M::ALT_MASK | M::SUPER_MASK))!=M(0)) return false;
 		bool shift = (state & M::SHIFT_MASK)==M::SHIFT_MASK;
 		int index = -1;
@@ -330,12 +331,13 @@ MainWindow::MainWindow()
 	set_child(stack_);
 
 	login_.signal_login.connect(sigc::mem_fun(*this, &MainWindow::login));
+	login_.signal_cancel.connect([this]() { stack_.set_visible_child("browse"); });
 	nav_.signal_row_selected().connect([this](Gtk::ListBoxRow *row) {
-		if(row && api_) show_section(sections[row->get_index()].name);
+		if(row && !clients_.empty()) show_section(sections[row->get_index()].name);
 		});
 	auto search = Gio::SimpleAction::create("search");
 	search->signal_activate().connect([this](const Glib::VariantBase&) {
-		if(api_) nav_.select_row(*nav_.get_row_at_index(3));
+		if(!clients_.empty()) nav_.select_row(*nav_.get_row_at_index(3));
 		});
 	add_action(search);
 
@@ -347,11 +349,11 @@ MainWindow::MainWindow()
 		p->signal_open_album.connect(sigc::mem_fun(*this, &MainWindow::open_album));
 		p->signal_open_artist.connect(sigc::mem_fun(*this, &MainWindow::open_artist));
 		p->signal_pick_playlist.connect([this](const Song& s, Gtk::Widget& anchor) {
-			pick_playlist(anchor, api_, s, [this](const ApiResult& r) { failed(r); });
+			pick_playlist(anchor, client_for(s.ref.server), s, [this](const ApiResult& r) { failed(r); });
 			});
 		}
 	albums_.signal_album.connect([this](const Album& a) {
-		open_album(a.ref.id, "");
+		open_album(a.ref, "");
 		});
 	tracks_.signal_loaded.connect(sigc::mem_fun(*this, &MainWindow::album_loaded));
 	// No resume prompt: the chapter is where to start.
@@ -365,16 +367,18 @@ MainWindow::MainWindow()
 	playlists_.signal_playlist.connect([this](const Playlist& pl) {
 		middle_.set_visible_child("playlist");
 		tracks_.clear();
-		view_.playlist_id   = pl.ref.id;
+		auto api = client_for(pl.ref.server);
+		if(!api) return;
+		view_.playlist      = pl.ref;
 		view_.playlist_name = pl.name;
-		view_.album_id.clear();
+		view_.album = {};
 		view_.album_title.clear();
-		playlist_.show_playlist(api_, pl);
+		playlist_.show_playlist(api, pl);
 		go(1);
 		});
 	settings_pane_.signal_category.connect([this](const std::string& key) {
 		middle_.set_visible_child("settings");
-		settings_page_.show(key, api_);
+		settings_page_.show(key);
 		view_.settings = key;
 		go(1);
 		});
@@ -386,6 +390,8 @@ MainWindow::MainWindow()
 		});
 	settings_page_.signal_theme.connect(sigc::mem_fun(*this, &MainWindow::apply_theme));
 	settings_page_.signal_remove_server.connect(sigc::mem_fun(*this, &MainWindow::remove_server));
+	settings_page_.signal_login_server.connect(sigc::mem_fun(*this, &MainWindow::relogin));
+	settings_page_.signal_add_server.connect(sigc::mem_fun(*this, &MainWindow::add_server));
 	// The info and equaliser cards share the corner: opening one closes the
 	// other.
 	bar_.info_button().signal_toggled().connect([this]() {
@@ -402,14 +408,14 @@ MainWindow::MainWindow()
 	info_card_.signal_close.connect([this]() { bar_.info_button().set_active(false); });
 	bar_.signal_cover.connect([this]() {
 		if(auto s = playback_.current())
-			open_album(s->album_id, "");
+			open_album({s->ref.server, s->album_id}, "");
 		});
 	playback_.signal_track.connect([this]() {
 		const Song *s = playback_.current();
 		for(auto p: all_panes())
 			p->set_playing(s ? s->ref : ItemRef{});
 		// An open info card follows the track, not every queue change.
-		if(info_card_.get_visible() && s && s->ref.id!=info_card_.shown())
+		if(info_card_.get_visible() && s && s->ref.server + "|" + s->ref.id!=info_card_.shown())
 			info_card_.refresh();
 		});
 	playback_.signal_started.connect([this]() {
@@ -418,7 +424,7 @@ MainWindow::MainWindow()
 		// and a soundtrack-only receiver leaves the subtitles to us. Not
 		// for a video played as audio only, which has nothing to show.
 		if(s && playback_.shows_picture(*s)) {
-			video_.show_film(*s, api_);
+			video_.show_film(*s, client_for(s->ref.server));
 			content_.set_visible_child("video");
 			video_.grab_focus();
 			}
@@ -443,14 +449,12 @@ MainWindow::MainWindow()
 		});
 
 	servers_ = load_servers();
-	if(!servers_.empty()) {
-		const auto& s = servers_.front();
-		if(auto tok = secret_load(s)) {
-			start_session(Session{s.key, s.url, s.user, tok->salt, tok->token});
-			return;
-			}
-		}
-	show_login("");
+	for(const auto& s: servers_)
+		if(auto tok = secret_load(s))
+			clients_.set(std::make_shared<ApiClient>(pool_, Session{s.key, s.url, s.user, tok->salt, tok->token}),
+			             clients_.all().size());
+	if(clients_.empty()) show_login("");
+	else                 open_browse();
 	}
 
 MainWindow::~MainWindow()
@@ -482,6 +486,7 @@ void MainWindow::show_login(const std::string& error)
 	{
 	if(servers_.empty()) login_.prefill("", "");
 	else                 login_.prefill(servers_.front().url, servers_.front().user);
+	login_.set_cancellable(false);
 	login_.set_busy(false);
 	login_.set_error(error);
 	stack_.set_visible_child("login");
@@ -504,53 +509,75 @@ void MainWindow::logged_in(const ApiResult& r, const Session& s)
 		}
 	// The same server and account keep their key, and with it their cache.
 	ServerConfig cfg{"", s.base_url, s.user};
-	for(const auto& old: servers_)
-		if(old.url==cfg.url && old.user==cfg.user)
-			cfg.key = old.key;
-	if(cfg.key.empty())
+	size_t pos = servers_.size();
+	for(size_t i=0; i<servers_.size(); ++i)
+		if(servers_[i].url==cfg.url && servers_[i].user==cfg.user) {
+			cfg.key = servers_[i].key;
+			pos     = i;
+			}
+	if(cfg.key.empty()) {
 		cfg.key = random_hex(8);
-	// One server for now: the one just logged in to.
-	servers_ = {cfg};
+		servers_.push_back(cfg);
+		}
 	save_servers(servers_);
 	bool stored = secret_save(cfg, StoredToken{s.salt, s.token});
 
 	Session session = s;
 	session.server_key = cfg.key;
-	start_session(session);
+	// In servers.json's order, among those with a session.
+	size_t at = 0;
+	for(size_t i=0; i<pos; ++i)
+		if(clients_.get(servers_[i].key)) ++at;
+	auto before = scope_client();
+	clients_.set(std::make_shared<ApiClient>(pool_, session), at);
+	if(scope_client()!=before) open_browse();
+	else {
+		stack_.set_visible_child("browse");
+		servers_changed();
+		}
 	if(!stored)
 		notify("The keyring did not store this login; you will be asked again next time.");
 	}
 
-void MainWindow::start_session(const Session& s)
+void MainWindow::open_browse()
 	{
-	api_ = std::make_shared<ApiClient>(pool_, s);
-	covers_.set_api(api_);
-	playback_.set_api(api_);
-	search_.set_api(api_);
-	info_card_.set_api(api_);
+	search_.set_api(scope_client());
 	for(auto p: all_panes())
 		p->clear();
-	artists_.load(api_);
+	artists_.load(scope_client());
 	restore_view();
 	stack_.set_visible_child("browse");
 	}
 
+std::shared_ptr<ApiClient> MainWindow::client_for(const std::string& key) const
+	{
+	return clients_.get(key);
+	}
+
+std::shared_ptr<ApiClient> MainWindow::scope_client() const
+	{
+	return clients_.first();
+	}
+
 void MainWindow::save_view()
 	{
-	if(!api_) return;
+	if(clients_.empty()) return;
 	// Not while the last view is still reopening: what is open then is only
 	// part of it, and a server that never answers would lose the rest.
 	if(restoring_view_ || !expect_album_.empty()) return;
 	for(auto p: all_panes())
 		if(p->restoring()) return;
-	nlohmann::json j = {{"server", api_->session().server_key}, {"section", view_.section}};
-	if(!view_.artist_id.empty())   j["artist"]   = {{"id", view_.artist_id},   {"name", view_.artist_name}};
-	if(!view_.playlist_id.empty()) j["playlist"] = {{"id", view_.playlist_id}, {"name", view_.playlist_name}};
+	nlohmann::json j = {{"section", view_.section}};
+	auto item = [](const ItemRef& ref, const char *label, const std::string& name) {
+		return nlohmann::json{{"server", ref.server}, {"id", ref.id}, {label, name}};
+		};
+	if(!view_.artist.id.empty())   j["artist"]   = item(view_.artist, "name", view_.artist_name);
+	if(!view_.playlist.id.empty()) j["playlist"] = item(view_.playlist, "name", view_.playlist_name);
 	if(!view_.settings.empty())    j["settings"] = view_.settings;
 	// The title only once it is known, so an album that never loaded is
 	// not reopened.
-	if(!view_.album_id.empty() && !view_.album_title.empty())
-		j["album"] = {{"id", view_.album_id}, {"title", view_.album_title}};
+	if(!view_.album.id.empty() && !view_.album_title.empty())
+		j["album"] = item(view_.album, "title", view_.album_title);
 	if(view_.section=="search" && !search_.query().empty())
 		j["query"] = search_.query();
 	write_config("view.json", j);
@@ -564,42 +591,44 @@ void MainWindow::restore_view()
 		bool& flag;
 		~Done() { flag = false; }
 	} done{restoring_view_};
-	// Another server's ids mean nothing here.
-	bool ours = jstr(j, "server")==api_->session().server_key;
 	std::string section = jstr(j, "section");
 	size_t index = 0;
-	if(ours)
-		for(size_t i=0; i<std::size(sections); ++i)
-			if(section==sections[i].name) index = i;
+	for(size_t i=0; i<std::size(sections); ++i)
+		if(section==sections[i].name) index = i;
 	section = sections[index].name;
 	// Selecting the row when it already is selected does nothing, so the
 	// section is shown by hand as well.
 	nav_.select_row(*nav_.get_row_at_index(int(index)));
 	show_section(section);
-	if(!ours) return;
 
+	// Each item with its server: an id means nothing on another one.
+	auto ref = [](const nlohmann::json& o) { return ItemRef{jstr(o, "server"), jstr(o, "id")}; };
+	auto same = [](const ItemRef& a, const ItemRef& b) { return a.server==b.server && a.id==b.id; };
 	const auto& artist   = jsub(j, "artist");
 	const auto& album    = jsub(j, "album");
 	const auto& playlist = jsub(j, "playlist");
-	std::string album_id = jstr(album, "id"), album_title = jstr(album, "title");
-	auto album_match = [album_id, album_title](const ListRow& r) {
-		return r.kind==ListRow::Kind::album && r.album.ref.id==album_id && r.album.title==album_title;
+	ItemRef album_ref = ref(album);
+	std::string album_title = jstr(album, "title");
+	auto album_match = [album_ref, album_title, same](const ListRow& r) {
+		return r.kind==ListRow::Kind::album && same(r.album.ref, album_ref) && r.album.title==album_title;
 		};
 	// Each level by reselecting its row once its list is there, so the
 	// usual click path opens and slides; a level that is gone, or now
 	// names something else, ends it there.
 	if(section=="library" && !jstr(artist, "id").empty()) {
-		std::string id = jstr(artist, "id"), name = jstr(artist, "name");
-		artists_.restore([id, name](const ListRow& r) {
-			return r.kind==ListRow::Kind::artist && r.artist.ref.id==id && r.artist.name==name;
-			}, [this, album_id, album_match](bool found) {
-			if(found && !album_id.empty()) albums_.restore(album_match);
+		ItemRef id = ref(artist);
+		std::string name = jstr(artist, "name");
+		artists_.restore([id, name, same](const ListRow& r) {
+			return r.kind==ListRow::Kind::artist && same(r.artist.ref, id) && r.artist.name==name;
+			}, [this, album_ref, album_match](bool found) {
+			if(found && !album_ref.id.empty()) albums_.restore(album_match);
 			});
 		}
 	else if(section=="playlists" && !jstr(playlist, "id").empty()) {
-		std::string id = jstr(playlist, "id"), name = jstr(playlist, "name");
-		playlists_.restore([id, name](const ListRow& r) {
-			return r.kind==ListRow::Kind::playlist && r.playlist.ref.id==id && r.playlist.name==name;
+		ItemRef id = ref(playlist);
+		std::string name = jstr(playlist, "name");
+		playlists_.restore([id, name, same](const ListRow& r) {
+			return r.kind==ListRow::Kind::playlist && same(r.playlist.ref, id) && r.playlist.name==name;
 			});
 		}
 	else if(section=="settings" && !jstr(j, "settings").empty()) {
@@ -612,8 +641,8 @@ void MainWindow::restore_view()
 		if(section=="search") search_.set_query(jstr(j, "query"));
 		// Not by reselecting a hit: selecting a song plays it. By id, and
 		// album_loaded checks the title.
-		if(!album_id.empty() && !album_title.empty()) {
-			open_album(album_id, "");
+		if(!album_ref.id.empty() && !album_title.empty() && client_for(album_ref.server)) {
+			open_album(album_ref, "");
 			expect_album_ = album_title;
 			}
 		}
@@ -622,16 +651,63 @@ void MainWindow::restore_view()
 void MainWindow::end_session(const std::string& error)
 	{
 	close_video();
-	playback_.set_api(nullptr);
-	api_.reset();
-	covers_.set_api(nullptr);
+	auto clients = clients_.all();
+	for(const auto& c: clients)
+		playback_.forget_server(c->session().server_key);
+	for(const auto& c: clients)
+		clients_.drop(c->session().server_key);
 	search_.set_api(nullptr);
 	close_cards();
-	info_card_.set_api(nullptr);
 	for(auto p: all_panes())
 		p->clear();
 	settings_page_.clear();
 	show_login(error);
+	}
+
+void MainWindow::add_server()
+	{
+	login_.prefill("", "");
+	login_.set_cancellable(true);
+	login_.set_busy(false);
+	login_.set_error("");
+	stack_.set_visible_child("login");
+	}
+
+void MainWindow::relogin(const std::string& key)
+	{
+	for(const auto& s: servers_)
+		if(s.key==key) {
+			login_.prefill(s.url, s.user);
+			login_.set_cancellable(!clients_.empty());
+			login_.set_busy(false);
+			login_.set_error("");
+			stack_.set_visible_child("login");
+			}
+	}
+
+void MainWindow::drop_client(const std::string& key, const std::string& message)
+	{
+	if(!clients_.get(key)) return;
+	const Song *s = playback_.current();
+	if(s && s->ref.server==key) close_video();
+	bool was_scope = scope_client()==clients_.get(key);
+	// Before the client goes: the queue still says "stopped" with it.
+	playback_.forget_server(key);
+	clients_.drop(key);
+	if(clients_.empty()) {
+		end_session(message);
+		return;
+		}
+	if(!message.empty()) notify(message);
+	if(was_scope) open_browse();
+	else          servers_changed();
+	}
+
+void MainWindow::servers_changed()
+	{
+	settings_pane_.load();
+	if(middle_.get_visible_child_name()=="settings" && view_.settings=="servers")
+		settings_page_.show("servers");
 	}
 
 void MainWindow::remove_server(const std::string& key)
@@ -660,12 +736,8 @@ void MainWindow::remove_server(const std::string& key)
 		secret_clear(*it);
 		servers_.erase(it);
 		save_servers(servers_);
-		if(api_ && api_->session().server_key==key)
-			end_session("");
-		else {
-			settings_pane_.load();
-			settings_page_.show("servers", api_);
-			}
+		if(clients_.get(key)) drop_client(key, "");
+		else                  servers_changed();
 		});
 	}
 
@@ -695,10 +767,10 @@ void MainWindow::show_section(const std::string& name)
 		p->unselect();
 
 	if(name=="library") {
-		if(!artists_.loaded()) artists_.load(api_);
+		if(!artists_.loaded()) artists_.load(scope_client());
 		}
-	else if(name=="playlists") playlists_.load(api_);
-	else if(name=="recents")   recents_.load(api_);
+	else if(name=="playlists") playlists_.load(scope_client());
+	else if(name=="recents")   recents_.load(scope_client());
 	else if(name=="search")    search_.focus_entry();
 	else if(name=="settings")  settings_pane_.load();
 	go(0);
@@ -787,25 +859,28 @@ void MainWindow::set_narrow(bool narrow)
 
 void MainWindow::open_artist(const Artist& a)
 	{
+	auto api = client_for(a.ref.server);
+	if(!api) return;
 	middle_.set_visible_child("albums");
 	tracks_.clear();
-	view_.artist_id   = a.ref.id;
+	view_.artist      = a.ref;
 	view_.artist_name = a.name;
-	view_.playlist_id.clear();
-	view_.album_id.clear();
+	view_.playlist    = {};
+	view_.album       = {};
 	view_.album_title.clear();
-	albums_.show_artist(api_, a);
+	albums_.show_artist(api, a);
 	go(1);
 	}
 
-void MainWindow::open_album(const std::string& album_id, const std::string& play_id)
+void MainWindow::open_album(const ItemRef& album, const std::string& play_id)
 	{
-	if(album_id.empty() || !api_) return;
+	auto api = client_for(album.server);
+	if(album.id.empty() || !api) return;
 	tracks_back_.clear();
 	expect_album_.clear();
-	view_.album_id = album_id;
+	view_.album = album;
 	view_.album_title.clear();
-	tracks_.show_album(api_, album_id, play_id);
+	tracks_.show_album(api, album.id, play_id);
 	go(2);
 	}
 
@@ -820,7 +895,7 @@ void MainWindow::album_loaded(const Album& a)
 		// The id now names another album: the library changed since.
 		if(!same) {
 			tracks_.clear();
-			view_.album_id.clear();
+			view_.album = {};
 			go(0);
 			return;
 			}
@@ -829,25 +904,30 @@ void MainWindow::album_loaded(const Album& a)
 	save_view();
 	tracks_back_ = a.artist;
 	update_back();
-	if(a.artist_id.empty()) return;
-	if(middle_.get_visible_child_name()=="albums" && albums_.artist_id()==a.artist_id) return;
+	auto api = client_for(a.ref.server);
+	if(a.artist_id.empty() || !api) return;
+	const ItemRef& shown = albums_.artist();
+	if(middle_.get_visible_child_name()=="albums" && shown.server==a.ref.server && shown.id==a.artist_id)
+		return;
 	Artist artist;
 	artist.ref  = {a.ref.server, a.artist_id};
 	artist.name = a.artist;
 	middle_.set_visible_child("albums");
-	albums_.show_artist(api_, artist);
+	albums_.show_artist(api, artist);
 	}
 
 void MainWindow::play(const std::vector<Song>& songs, size_t index)
 	{
-	if(index>=songs.size() || !api_) return;
+	if(index>=songs.size()) return;
 	const Song& song = songs[index];
 	// Every film, as on the web client; music only when it is long.
 	if(song.duration<resume_min_seconds && !song.is_video) {
 		playback_.play(songs, index);
 		return;
 		}
-	api_->call("getBookmarks", {}, [this, songs, index](const ApiResult& r) {
+	auto api = client_for(song.ref.server);
+	if(!api) return;
+	api->call("getBookmarks", {}, [this, songs, index](const ApiResult& r) {
 		const Song& song = songs[index];
 		double pos = 0;
 		const auto& marks = jsub(jsub(r.body, "bookmarks"), "bookmark");
@@ -879,9 +959,10 @@ void MainWindow::play(const std::vector<Song>& songs, size_t index)
 
 void MainWindow::star(ListRow::Kind kind, const ItemRef& ref, bool on)
 	{
-	if(!api_) return;
+	auto api = client_for(ref.server);
+	if(!api) return;
 	Params p = {{kind==ListRow::Kind::album ? "albumId" : "id", ref.id}};
-	api_->call(on ? "star" : "unstar", p, [this, kind, ref, on](const ApiResult& r) {
+	api->call(on ? "star" : "unstar", p, [this, kind, ref, on](const ApiResult& r) {
 		if(!r.ok) {
 			failed(r);
 			return;
@@ -967,9 +1048,17 @@ void MainWindow::apply_theme()
 void MainWindow::failed(const ApiResult& r)
 	{
 	if(r.code==auth_refused) {
-		if(!servers_.empty())
-			secret_clear(servers_.front());
-		end_session("The server no longer accepts this login. Please log in again.");
+		// Every call still in flight to it says so too; the first one acts.
+		if(!client_for(r.server)) return;
+		const ServerConfig *cfg = nullptr;
+		for(const auto& s: servers_)
+			if(s.key==r.server) cfg = &s;
+		if(!cfg) return;
+		secret_clear(*cfg);
+		ServerConfig refused = *cfg;
+		drop_client(r.server, refused.url + " no longer accepts this login. Please log in again.");
+		// The login view, if that was the last one: for this server.
+		if(clients_.empty()) login_.prefill(refused.url, refused.user);
 		return;
 		}
 	notify(r.error);

@@ -12,26 +12,25 @@
 #include <string>
 #include <unordered_map>
 
-class ApiClient;
+class Clients;
 class WorkPool;
+struct ItemRef;
 
 // Cover art from getCoverArt, cropped to its centred square: a memory LRU of decoded textures in front of a
 // disk cache in ~/.cache/gaindrive-player/covers, capped at 128 MB as on the
 // phones. Main thread only; fetching and decoding happen on the pool.
 class CoverStore {
 	public:
-		CoverStore();
+		// Covers are keyed by server, and a server's key is per account, so
+		// nothing needs clearing when a server logs in or out.
+		explicit CoverStore(const Clients& clients);
 		~CoverStore();
 
-		// Clears the memory cache too: covers are keyed by server, but a new
-		// login may be the same server with a different account.
-		void set_api(std::shared_ptr<ApiClient> api);
-
-		// The texture if it is in memory. Otherwise null, a fetch is started,
+		// `cover` is the cover id, qualified by its server. The texture if it is in memory. Otherwise null, a fetch is started,
 		// and signal_ready fires with the same key once it has landed.
 		// `index` picks one of an album's further images (getAlbumImages).
 		// With `fetch` false, only what is in memory; nothing is started.
-		Glib::RefPtr<Gdk::Texture> get(const std::string& cover_id, int px, std::string& key,
+		Glib::RefPtr<Gdk::Texture> get(const ItemRef& cover, int px, std::string& key,
 		                               int index=0, bool fetch=true);
 
 		sigc::signal<void(const std::string& key, const Glib::RefPtr<Gdk::Texture>&)> signal_ready;
@@ -50,7 +49,7 @@ class CoverStore {
 		// Its own threads, apart from the API calls': a screenful of covers
 		// queued ahead of getAlbum kept a reopened album's tracks waiting.
 		std::unique_ptr<WorkPool>              pool_;
-		std::shared_ptr<ApiClient>             api_;
+		const Clients&                         clients_;
 		std::unordered_map<std::string, Entry> memory_;
 		std::list<std::string>                 ages_;      // most recent first
 		std::set<std::string>                  pending_;
@@ -58,7 +57,6 @@ class CoverStore {
 		// answer may be kept. Without this every scroll past an artist with
 		// no portrait would ask again.
 		std::map<std::string, std::chrono::steady_clock::time_point> missing_;
-		unsigned                               epoch_=0;   // bumped by set_api
 };
 
 // A square cover of a fixed size, which fills itself in when the image lands.
@@ -78,7 +76,7 @@ class CoverImage : public Gtk::Image {
 		CoverImage(CoverStore& store, int css_px);
 		~CoverImage() override;
 
-		void show_cover(const std::string& cover_id, int index=0);
+		void show_cover(const ItemRef& cover, int index=0);
 
 	private:
 		void fetch();
@@ -91,7 +89,7 @@ class CoverImage : public Gtk::Image {
 
 		CoverStore&      store_;
 		int              css_px_;
-		std::string      cover_id_, wanted_;
+		std::string      server_, cover_id_, wanted_;
 		int              index_=0;
 		unsigned         tries_=0;
 		sigc::connection retry_;

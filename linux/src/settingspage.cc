@@ -1,5 +1,5 @@
 #include "settingspage.hh"
-#include "apiclient.hh"
+#include "clients.hh"
 #include "serverconfig.hh"
 #include "settings.hh"
 
@@ -7,10 +7,12 @@
 #include <gtkmm/checkbutton.h>
 #include <gtkmm/stringlist.h>
 
-SettingsPage::SettingsPage(AppSettings& settings, const std::vector<ServerConfig>& servers)
+SettingsPage::SettingsPage(AppSettings& settings, const std::vector<ServerConfig>& servers,
+                           const Clients& clients)
 	: Gtk::Box(Gtk::Orientation::VERTICAL),
 	  settings_(settings),
 	  servers_(servers),
+	  clients_(clients),
 	  header_(Gtk::Orientation::HORIZONTAL),
 	  content_(Gtk::Orientation::VERTICAL, 8)
 	{
@@ -54,13 +56,13 @@ Gtk::Label& SettingsPage::add_label(const std::string& text, const char *css)
 	return *l;
 	}
 
-void SettingsPage::show(const std::string& key, std::shared_ptr<ApiClient> api)
+void SettingsPage::show(const std::string& key)
 	{
 	clear();
 	if(key=="playback")        show_playback();
 	else if(key=="appearance") show_appearance();
-	else if(key=="servers")    show_servers(api);
-	else                       show_about(api);
+	else if(key=="servers")    show_servers();
+	else                       show_about();
 	}
 
 Gtk::Box* SettingsPage::add_row(const char *label, Gtk::Widget& w)
@@ -180,7 +182,7 @@ void SettingsPage::show_appearance()
 		});
 	}
 
-void SettingsPage::show_servers(std::shared_ptr<ApiClient> api)
+void SettingsPage::show_servers()
 	{
 	title_.set_text("Servers");
 	for(const auto& s: servers_) {
@@ -190,8 +192,8 @@ void SettingsPage::show_servers(std::shared_ptr<ApiClient> api)
 		auto url  = Gtk::make_managed<Gtk::Label>(s.url);
 		url->set_xalign(0);
 		url->set_ellipsize(Pango::EllipsizeMode::END);
-		bool active = api && api->session().server_key==s.key;
-		auto user = Gtk::make_managed<Gtk::Label>(s.user + (active ? " · connected" : ""));
+		bool active = clients_.get(s.key)!=nullptr;
+		auto user = Gtk::make_managed<Gtk::Label>(s.user + (active ? " · connected" : " · login refused"));
 		user->set_xalign(0);
 		user->add_css_class("dim-label");
 		text->append(*url);
@@ -202,19 +204,25 @@ void SettingsPage::show_servers(std::shared_ptr<ApiClient> api)
 		std::string key = s.key;
 		remove->signal_clicked().connect([this, key]() { signal_remove_server.emit(key); });
 		box->append(*text);
+		if(!active) {
+			auto login = Gtk::make_managed<Gtk::Button>("Log in again");
+			login->set_valign(Gtk::Align::CENTER);
+			login->signal_clicked().connect([this, key]() { signal_login_server.emit(key); });
+			box->append(*login);
+			}
 		box->append(*remove);
 		content_.append(*box);
 		}
+	auto add = Gtk::make_managed<Gtk::Button>("Add server");
+	add->set_halign(Gtk::Align::START);
+	add->signal_clicked().connect([this]() { signal_add_server.emit(); });
+	content_.append(*add);
 	add_label("Removing a server forgets its login. Log in again to add it back.", "dim-label");
 	}
 
-void SettingsPage::show_about(std::shared_ptr<ApiClient> api)
+void SettingsPage::show_about()
 	{
 	title_.set_text("About");
 	add_label("GainDrive " GAINDRIVE_VERSION, "heading");
-	if(api) {
-		add_label("Server: " + api->session().base_url);
-		add_label("Logged in as " + api->session().user);
-		}
 	add_label("Free software under the GNU GPL, version 3 or later.", "dim-label");
 	}

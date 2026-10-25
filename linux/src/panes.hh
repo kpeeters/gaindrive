@@ -36,7 +36,7 @@ class RowWidget : public Gtk::Box {
 		~RowWidget() override;
 
 		void show_heading(const std::string& text);
-		void show_item(const std::string& cover_id, const std::string& lead,
+		void show_item(const ItemRef& cover, const std::string& lead,
 		               const std::string& title, const std::string& subtitle,
 		               const std::string& trail);
 		// The list button either offers "add to playlist" or, inside a
@@ -100,7 +100,7 @@ class Pane : public Gtk::Box {
 		sigc::signal<void(ListRow::Kind, const ItemRef&, bool)> signal_star;
 		sigc::signal<void(const Song&, Gtk::Widget&)>         signal_pick_playlist;
 		// Open an album in the track pane, and play `play_id` from it if set.
-		sigc::signal<void(const std::string& album_id, const std::string& play_id)> signal_open_album;
+		sigc::signal<void(const ItemRef& album, const std::string& play_id)> signal_open_album;
 		sigc::signal<void(const Artist&)>                     signal_open_artist;
 
 	protected:
@@ -171,7 +171,7 @@ class AlbumPane : public Pane {
 		~AlbumPane() override;
 
 		void show_artist(std::shared_ptr<ApiClient> api, const Artist& artist);
-		const std::string& artist_id() const;
+		const ItemRef& artist() const;
 		void clear() override;
 
 		sigc::signal<void(const Album&)> signal_album;
@@ -189,7 +189,7 @@ class AlbumPane : public Pane {
 		Gtk::Button                sort_;
 		std::unique_ptr<InfoBlock> bio_;
 		std::vector<Album>         albums_;
-		std::string                artist_id_;
+		ItemRef                    artist_;
 		bool                       category_=false;
 };
 
