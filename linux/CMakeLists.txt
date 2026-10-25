@@ -117,6 +117,7 @@ add_executable(gaindrive-player
 	src/configfile.cc
 	src/coverstore.cc
 	src/infoblock.cc
+	src/isearch.cc
 	src/library.cc
 	src/localeq.cc
 	src/loginview.cc

@@ -4,10 +4,12 @@
 #include "settings.hh"
 
 #include <gtkmm/button.h>
-#include <gtkmm/checkbutton.h>
 #include <gtkmm/entry.h>
 #include <gtkmm/eventcontrollerfocus.h>
+#include <gtkmm/image.h>
+#include <gtkmm/listbox.h>
 #include <gtkmm/stringlist.h>
+#include <gtkmm/switch.h>
 
 SettingsPage::SettingsPage(AppSettings& settings, const std::vector<ServerConfig>& servers,
                            const Clients& clients)
@@ -16,7 +18,7 @@ SettingsPage::SettingsPage(AppSettings& settings, const std::vector<ServerConfig
 	  servers_(servers),
 	  clients_(clients),
 	  header_(Gtk::Orientation::HORIZONTAL),
-	  content_(Gtk::Orientation::VERTICAL, 8)
+	  content_(Gtk::Orientation::VERTICAL)
 	{
 	add_css_class("pane");
 	title_.set_xalign(0);
@@ -30,14 +32,16 @@ SettingsPage::SettingsPage(AppSettings& settings, const std::vector<ServerConfig
 	header_.append(back_);
 	header_.append(title_);
 	append(header_);
-	content_.set_margin_start(12);
-	content_.set_margin_end(12);
-	append(content_);
+	content_.add_css_class("settings-content");
+	scroll_.set_child(content_);
+	scroll_.set_vexpand(true);
+	scroll_.set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
+	append(scroll_);
 	}
 
 void SettingsPage::set_back(const std::string& label)
 	{
-	back_.set_label("\u2190 " + label);
+	back_.set_label("← " + label);
 	back_.set_visible(!label.empty());
 	}
 
@@ -46,16 +50,6 @@ void SettingsPage::clear()
 	title_.set_text("");
 	while(auto child = content_.get_first_child())
 		content_.remove(*child);
-	}
-
-Gtk::Label& SettingsPage::add_label(const std::string& text, const char *css)
-	{
-	auto l = Gtk::make_managed<Gtk::Label>(text);
-	l->set_xalign(0);
-	l->set_wrap(true);
-	if(css) l->add_css_class(css);
-	content_.append(*l);
-	return *l;
 	}
 
 void SettingsPage::show(const std::string& key)
@@ -67,16 +61,76 @@ void SettingsPage::show(const std::string& key)
 	else                       show_about();
 	}
 
-Gtk::Box* SettingsPage::add_row(const char *label, Gtk::Widget& w)
+Gtk::ListBox* SettingsPage::add_group(const char *title)
 	{
-	auto box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
-	auto l = Gtk::make_managed<Gtk::Label>(label);
-	l->set_xalign(0);
-	l->set_hexpand(true);
-	box->append(*l);
-	box->append(w);
-	content_.append(*box);
+	if(title) {
+		auto l = Gtk::make_managed<Gtk::Label>(title);
+		l->set_xalign(0);
+		l->add_css_class("settings-group-title");
+		content_.append(*l);
+		}
+	auto list = Gtk::make_managed<Gtk::ListBox>();
+	list->set_selection_mode(Gtk::SelectionMode::NONE);
+	list->set_show_separators(true);
+	list->add_css_class("settings-group");
+	content_.append(*list);
+	return list;
+	}
+
+Gtk::Box* SettingsPage::add_row(Gtk::ListBox *group, const std::string& title,
+                                const std::string& subtitle, Gtk::Widget *suffix)
+	{
+	auto box  = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+	auto text = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+	text->set_hexpand(true);
+	text->set_valign(Gtk::Align::CENTER);
+	auto t = Gtk::make_managed<Gtk::Label>(title);
+	t->set_xalign(0);
+	t->set_wrap(true);
+	text->append(*t);
+	if(!subtitle.empty()) {
+		auto s = Gtk::make_managed<Gtk::Label>(subtitle);
+		s->set_xalign(0);
+		s->set_wrap(true);
+		s->add_css_class("dim-label");
+		s->add_css_class("settings-subtitle");
+		text->append(*s);
+		}
+	box->append(*text);
+	if(suffix) {
+		suffix->set_valign(Gtk::Align::CENTER);
+		box->append(*suffix);
+		}
+	group->append(*box);
 	return box;
+	}
+
+void SettingsPage::add_switch_row(Gtk::ListBox *group, const std::string& title,
+                                  const std::string& subtitle, bool on,
+                                  std::function<void(bool)> changed)
+	{
+	auto sw = Gtk::make_managed<Gtk::Switch>();
+	sw->set_active(on);
+	// A click anywhere on the row flips it, as on GNOME's own.
+	auto row = dynamic_cast<Gtk::ListBoxRow*>(add_row(group, title, subtitle, sw)->get_parent());
+	if(row) {
+		row->set_activatable(true);
+		group->signal_row_activated().connect([sw, row](Gtk::ListBoxRow *r) {
+			// activate() rather than set_active(): only that slides the knob.
+			if(r==row) sw->activate();
+			});
+		}
+	sw->property_active().signal_changed().connect([sw, changed]() { changed(sw->get_active()); });
+	}
+
+void SettingsPage::add_hint(const std::string& text)
+	{
+	auto l = Gtk::make_managed<Gtk::Label>(text);
+	l->set_xalign(0);
+	l->set_wrap(true);
+	l->add_css_class("dim-label");
+	l->add_css_class("settings-hint");
+	content_.append(*l);
 	}
 
 void SettingsPage::show_playback()
@@ -100,31 +154,28 @@ void SettingsPage::show_playback()
 	auto format = Gtk::make_managed<Gtk::DropDown>(Gtk::StringList::create(fmts));
 	format->set_selected(fmt_selected);
 
-	add_row("Quality", *quality);
-	auto format_row = add_row("Convert to", *format);
+	auto group = add_group("Streaming");
+	add_row(group, "Quality", "", quality);
+	auto format_row = add_row(group, "Convert to", "", format)->get_parent();
 	format_row->set_visible(settings_.quality_cap!=0);
-	add_label("A file that fits under the limit is sent as it is; anything else is "
-	          "converted. Takes effect on the next track.", "dim-label");
+	add_hint("A file that fits under the limit is sent as it is; anything else is "
+	         "converted. Takes effect on the next track.");
 
-	auto cast_orig = Gtk::make_managed<Gtk::CheckButton>("Cast at original quality");
-	cast_orig->set_active(settings_.cast_original);
-	content_.append(*cast_orig);
-	add_label("A receiver fetches from the server itself, so the limit above need not "
-	          "apply to it. A file it cannot play is sent as FLAC either way.", "dim-label");
-	cast_orig->signal_toggled().connect([this, cast_orig]() {
-		settings_.cast_original = cast_orig->get_active();
+	auto cast = add_group("Casting");
+	add_switch_row(cast, "Cast at original quality",
+	               "A receiver fetches from the server itself, so the limit above need not "
+	               "apply to it. A file it cannot play is sent as FLAC either way.",
+	               settings_.cast_original, [this](bool on) {
+		settings_.cast_original = on;
 		settings_.save();
 		});
-
-	auto local_video = Gtk::make_managed<Gtk::CheckButton>("Keep video here when casting to a speaker");
-	local_video->set_active(settings_.cast_local_video);
-	content_.append(*local_video);
-	add_label("A speaker or amplifier that cannot show a picture is sent the soundtrack. "
-	          "With this on the film also plays here, silent and kept in step with it, "
-	          "which means streaming it to this computer as well. Takes effect on the "
-	          "next film.", "dim-label");
-	local_video->signal_toggled().connect([this, local_video]() {
-		settings_.cast_local_video = local_video->get_active();
+	add_switch_row(cast, "Keep video here when casting to a speaker",
+	               "A speaker or amplifier that cannot show a picture is sent the soundtrack. "
+	               "With this on the film also plays here, silent and kept in step with it, "
+	               "which means streaming it to this computer as well. Takes effect on the "
+	               "next film.",
+	               settings_.cast_local_video, [this](bool on) {
+		settings_.cast_local_video = on;
 		settings_.save();
 		});
 
@@ -155,8 +206,6 @@ void SettingsPage::show_appearance()
 		}
 	auto theme = Gtk::make_managed<Gtk::DropDown>(Gtk::StringList::create(theme_labels));
 	theme->set_selected(theme_selected);
-	add_row("Theme", *theme);
-	add_label("Auto leaves it to the desktop's GTK settings.", "dim-label");
 
 	std::vector<Glib::ustring> size_labels;
 	guint size_selected = 0;
@@ -166,9 +215,11 @@ void SettingsPage::show_appearance()
 		}
 	auto size = Gtk::make_managed<Gtk::DropDown>(Gtk::StringList::create(size_labels));
 	size->set_selected(size_selected);
-	add_row("Subtitle size", *size);
-	add_label("Relative to the height of the picture, so subtitles grow with the "
-	          "window and in fullscreen.", "dim-label");
+
+	auto group = add_group(nullptr);
+	add_row(group, "Theme", "Auto leaves it to the desktop's GTK settings.", theme);
+	add_row(group, "Subtitle size", "Relative to the height of the picture, so subtitles "
+	        "grow with the window and in fullscreen.", size);
 
 	theme->property_selected().signal_changed().connect([this, theme]() {
 		guint i = theme->get_selected();
@@ -187,72 +238,97 @@ void SettingsPage::show_appearance()
 void SettingsPage::show_servers()
 	{
 	title_.set_text("Servers");
+	auto group = add_group("Servers");
 	for(const auto& s: servers_) {
-		auto box  = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
-		auto text = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
-		text->set_hexpand(true);
-		auto url  = Gtk::make_managed<Gtk::Label>(s.url);
-		url->set_xalign(0);
-		url->set_ellipsize(Pango::EllipsizeMode::END);
 		bool active = clients_.get(s.key)!=nullptr;
-		auto user = Gtk::make_managed<Gtk::Label>(s.user + (active ? " · connected" : " · login refused"));
-		user->set_xalign(0);
-		user->add_css_class("dim-label");
-		// Saved when the field is left or Enter pressed, not per letter:
-		// each save reloads the lists that show the name.
+		auto box  = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+		auto text = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL, 2);
+		text->set_hexpand(true);
+		// The name reads as the row's title, and is edited in place. Saved
+		// when the field is left or Enter pressed, not per letter: each save
+		// reloads the lists that show the name.
 		auto name = Gtk::make_managed<Gtk::Entry>();
+		name->add_css_class("name-entry");
 		name->set_text(s.name);
 		name->set_placeholder_text(server_host(s.url));
 		name->set_tooltip_text("The name album rows and the server picker show");
 		auto saved = std::make_shared<std::string>(s.name);
 		auto commit = [this, name, saved, key=s.key]() {
-			std::string text = name->get_text();
-			if(text==*saved) return;
-			*saved = text;
-			signal_rename_server.emit(key, text);
+			std::string t = name->get_text();
+			if(t==*saved) return;
+			*saved = t;
+			signal_rename_server.emit(key, t);
 			};
 		name->signal_activate().connect(commit);
 		auto focus = Gtk::EventControllerFocus::create();
 		focus->signal_leave().connect(commit);
 		name->add_controller(focus);
+		auto url = Gtk::make_managed<Gtk::Label>(s.url);
+		url->set_xalign(0);
+		url->set_ellipsize(Pango::EllipsizeMode::END);
+		url->add_css_class("settings-subtitle");
+		// The user ellipsized, not the state: Bandcamp's user is a long key.
+		auto who = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 0);
+		auto user = Gtk::make_managed<Gtk::Label>(s.user);
+		user->set_xalign(0);
+		user->set_ellipsize(Pango::EllipsizeMode::MIDDLE);
+		user->add_css_class("dim-label");
+		user->add_css_class("settings-subtitle");
+		auto state = Gtk::make_managed<Gtk::Label>(active ? " · connected" : " · login refused");
+		state->add_css_class("settings-subtitle");
+		state->add_css_class(active ? "dim-label" : "error");
+		who->append(*user);
+		who->append(*state);
 		text->append(*name);
 		text->append(*url);
-		text->append(*user);
-		auto remove = Gtk::make_managed<Gtk::Button>("Remove");
-		remove->set_valign(Gtk::Align::CENTER);
-		remove->add_css_class("destructive-action");
-		std::string key = s.key;
-		remove->signal_clicked().connect([this, key]() { signal_remove_server.emit(key); });
+		text->append(*who);
 		box->append(*text);
+		std::string key = s.key;
 		if(!active) {
 			auto login = Gtk::make_managed<Gtk::Button>("Log in again");
 			login->set_valign(Gtk::Align::CENTER);
 			login->signal_clicked().connect([this, key]() { signal_login_server.emit(key); });
 			box->append(*login);
 			}
+		auto remove = Gtk::make_managed<Gtk::Button>();
+		remove->set_icon_name("gd-delete-symbolic");
+		remove->set_tooltip_text("Remove server");
+		remove->add_css_class("flat");
+		remove->add_css_class("remove-server");
+		remove->set_valign(Gtk::Align::CENTER);
+		remove->signal_clicked().connect([this, key]() { signal_remove_server.emit(key); });
 		box->append(*remove);
-		content_.append(*box);
+		group->append(*box);
 		}
-	auto add = Gtk::make_managed<Gtk::Button>("Add server");
-	add->set_halign(Gtk::Align::START);
-	add->signal_clicked().connect([this]() { signal_add_server.emit(); });
-	content_.append(*add);
-	add_label("Removing a server forgets its login. Log in again to add it back.", "dim-label");
+	// The last row adds one, as GNOME's lists do; no floating button.
+	auto add = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL, 12);
+	auto plus = Gtk::make_managed<Gtk::Image>();
+	plus->set_from_icon_name("gd-add-symbolic");
+	add->append(*plus);
+	add->append(*Gtk::make_managed<Gtk::Label>("Add server"));
+	group->append(*add);
+	if(auto row = dynamic_cast<Gtk::ListBoxRow*>(add->get_parent())) {
+		row->set_activatable(true);
+		}
+	group->signal_row_activated().connect([this, add](Gtk::ListBoxRow *row) {
+		if(row==add->get_parent()) signal_add_server.emit();
+		});
+	add_hint("Removing a server forgets its login.");
 
-	auto merge = Gtk::make_managed<Gtk::CheckButton>("Show an album once when several servers have it");
-	merge->set_active(settings_.merge_albums);
-	merge->signal_toggled().connect([this, merge]() {
-		settings_.merge_albums = merge->get_active();
+	auto library = add_group("Library");
+	add_switch_row(library, "Show an album once",
+	               "When several servers have it, the copy on the first server is opened.",
+	               settings_.merge_albums, [this](bool on) {
+		settings_.merge_albums = on;
 		settings_.save();
 		signal_merge.emit();
 		});
-	content_.append(*merge);
-	add_label("The copy on the server listed first is the one opened.", "dim-label");
 	}
 
 void SettingsPage::show_about()
 	{
 	title_.set_text("About");
-	add_label("GainDrive " GAINDRIVE_VERSION, "heading");
-	add_label("Free software under the GNU GPL, version 3 or later.", "dim-label");
+	auto group = add_group(nullptr);
+	add_row(group, "GainDrive " GAINDRIVE_VERSION,
+	        "Free software under the GNU GPL, version 3 or later.", nullptr);
 	}

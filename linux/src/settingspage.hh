@@ -4,11 +4,15 @@
 #include <gtkmm/button.h>
 #include <gtkmm/dropdown.h>
 #include <gtkmm/label.h>
+#include <gtkmm/scrolledwindow.h>
+
+#include <functional>
 
 #include <memory>
 #include <vector>
 
 class Clients;
+namespace Gtk { class ListBox; }
 struct AppSettings;
 struct ServerConfig;
 
@@ -41,15 +45,26 @@ class SettingsPage : public Gtk::Box {
 	private:
 		void show_playback();
 		void show_appearance();
-		Gtk::Box* add_row(const char *label, Gtk::Widget& w);
+		// A GNOME preference group: a bordered list, with a title above it
+		// when given one.
+		Gtk::ListBox* add_group(const char *title);
+		// A row of `group`: title, dim subtitle, `suffix` on the right.
+		// Returns the row's box.
+		Gtk::Box* add_row(Gtk::ListBox *group, const std::string& title,
+		                  const std::string& subtitle, Gtk::Widget *suffix);
+		void add_switch_row(Gtk::ListBox *group, const std::string& title,
+		                    const std::string& subtitle, bool on,
+		                    std::function<void(bool)> changed);
+		// Small dim text under a group.
+		void add_hint(const std::string& text);
 		void show_servers();
 		void show_about();
-		Gtk::Label& add_label(const std::string& text, const char *css=nullptr);
 
 		AppSettings&                     settings_;
 		const std::vector<ServerConfig>& servers_;
 		const Clients&                   clients_;
 		Gtk::Box                         header_, content_;
+		Gtk::ScrolledWindow              scroll_;
 		Gtk::Button                      back_;
 		Gtk::Label                       title_;
 };

@@ -61,6 +61,74 @@ namespace {
 		.playing .playing-mark { opacity: 1; }
 		.player-bar { padding: 8px 12px; border-top: 1px solid alpha(currentColor, 0.15); }
 		.pane-empty { padding: 12px; }
+		.isearch {
+			padding: 6px 18px; font-size: 0.9em;
+			border-top: 1px solid alpha(currentColor, 0.12);
+			background-color: @theme_base_color;
+		}
+		.isearch-label { opacity: 0.6; }
+		/* "Failing" is emacs' word; the colour says it to everyone else. */
+		.isearch.failing .isearch-label, .isearch.failing .isearch-text {
+			color: @gd_red; opacity: 1;
+		}
+		/* Settings as GNOME's preference groups: bordered, rounded lists
+		   with a small title above and hints below. On the sidebar's grey,
+		   so they stand off the white pane as GNOME's cards do off its. */
+		.settings-content { margin: 12px 18px 18px 18px; }
+		.settings-group-title { font-weight: bold; margin: 18px 4px 6px 4px; }
+		.settings-content > .settings-group-title:first-child { margin-top: 0; }
+		.settings-group {
+			border: 1px solid alpha(currentColor, 0.15);
+			border-radius: 8px;
+			background-color: @theme_bg_color;
+		}
+		.settings-group > row { padding: 10px 12px; min-height: 32px; }
+		.settings-group > row:first-child { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+		.settings-group > row:last-child { border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+		.settings-group > row:not(:selected):hover { background-color: transparent; }
+		.settings-group > row:activatable:hover { background-color: alpha(currentColor, 0.05); }
+		.settings-subtitle { font-size: 0.9em; }
+		.pane .remove-server > image { -gtk-icon-size: 30px; }
+		.video-mark { -gtk-icon-size: 16px; }
+		/* GainDrive red where the theme would put its blue accent: an on
+		   switch, the default button, a focused field. */
+		/* Image and animation too: WhiteSur paints the track with its blue
+		   gradient and animates into it, and an animation overrides every
+		   stylesheet while it runs. */
+		switch:checked {
+			background-color: @gd_red;
+			background-image: none;
+			border-color: @gd_red;
+			animation: none;
+		}
+		button.suggested-action { background-color: @gd_red; color: white; }
+		button.suggested-action:hover { background-color: shade(@gd_red, 1.1); }
+		button.suggested-action:active { background-color: shade(@gd_red, 0.9); }
+		/* WhiteSur rings a focused field with an inset shadow, others with
+		   an outline. */
+		entry:focus-within {
+			outline-color: alpha(@gd_red, 0.5);
+			box-shadow: inset 0 0 0 2px alpha(@gd_red, 0.5);
+		}
+		.settings-hint { font-size: 0.9em; margin: 6px 4px 0 4px; }
+		/* The server's name is the row's title, edited in place: no field
+		   until it is pointed at or typed in. */
+		.name-entry {
+			font-weight: bold;
+			background-color: transparent;
+			border-color: transparent;
+			box-shadow: none;
+			outline-color: transparent;
+			min-height: 0;
+			padding: 2px 4px;
+			margin-left: -4px;
+		}
+		.name-entry:hover { border-color: alpha(currentColor, 0.2); }
+		.name-entry:focus-within {
+			box-shadow: none;
+			background-color: @theme_base_color;
+			border-color: @gd_red;
+		}
 		.info-block { margin: 0 12px 12px 12px; }
 		/* The external links as tinted pills, as iOS's small bordered
 		   buttons: the theme's link button pads plain text with the
@@ -274,7 +342,10 @@ MainWindow::MainWindow()
 	content_.add(strip_, "panes");
 	content_.add(video_, "video");
 	content_.set_hexpand(true);
-	main_.append(content_);
+	content_.set_vexpand(true);
+	content_box_.append(content_);
+	content_box_.append(isearch_);
+	main_.append(content_box_);
 	main_.set_vexpand(true);
 	body_.set_child(main_);
 	// Bottom right, just above the button that opens it, as on the web.
@@ -326,6 +397,38 @@ MainWindow::MainWindow()
 		return true;
 		}, false);
 	browse_.add_controller(view_keys);
+	// The web's incremental search, Ctrl+S and Ctrl+R. Capturing, so a
+	// running search sees its keys before the focused list does; a text
+	// field keeps them, for its own editing.
+	auto isearch_keys = Gtk::EventControllerKey::create();
+	isearch_keys->signal_key_pressed().connect([this, ctl = isearch_keys.get()](guint keyval, guint, Gdk::ModifierType state) {
+		using M = Gdk::ModifierType;
+		auto focus = get_focus();
+		if(focus && GTK_IS_EDITABLE(focus->gobj())) {
+			isearch_.end(false);
+			return false;
+			}
+		// Shift on its way to a capital is not the end of the search.
+		auto ev = ctl->get_current_event();
+		if(ev && ev->is_modifier()) return false;
+		if(isearch_.on()) return isearch_.key(keyval, state);
+		if(clients_.empty() || content_.get_visible_child_name()=="video") return false;
+		if((state & (M::CONTROL_MASK | M::SHIFT_MASK | M::ALT_MASK | M::SUPER_MASK))!=M::CONTROL_MASK)
+			return false;
+		auto lower = gdk_keyval_to_lower(keyval);
+		if(lower!=GDK_KEY_s && lower!=GDK_KEY_r) return false;
+		auto pane = active_pane();
+		if(!pane) return false;
+		isearch_.start(*pane, lower==GDK_KEY_r);
+		return true;
+		}, false);
+	isearch_keys->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+	browse_.add_controller(isearch_keys);
+	// Reaching for the mouse says the search is over.
+	auto isearch_click = Gtk::GestureClick::create();
+	isearch_click->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+	isearch_click->signal_pressed().connect([this](int, double, double) { isearch_.end(false); });
+	strip_.add_controller(isearch_click);
 	auto back_button = Gtk::GestureClick::create();
 	back_button->set_button(8);
 	back_button->signal_pressed().connect([this](int, double, double) { back(); });
@@ -438,6 +541,7 @@ MainWindow::MainWindow()
 		// for a video played as audio only, which has nothing to show.
 		if(s && playback_.shows_picture(*s)) {
 			video_.show_film(*s, client_for(s->ref.server));
+			isearch_.end(false);
 			content_.set_visible_child("video");
 			video_.grab_focus();
 			}
@@ -813,8 +917,20 @@ std::vector<Pane*> MainWindow::all_panes()
 	         &albums_, &playlist_, &tracks_ };
 	}
 
+Pane *MainWindow::active_pane()
+	{
+	for(auto w = get_focus(); w; w = w->get_parent())
+		if(auto p = dynamic_cast<Pane*>(w)) return p;
+	Gtk::Stack *stacks[] = { &left_, &middle_ };
+	int d = strip_.depth();
+	if(d==2) return &tracks_;
+	if(d<0 || d>1) return nullptr;
+	return dynamic_cast<Pane*>(stacks[d]->get_visible_child());
+	}
+
 void MainWindow::show_section(const std::string& name)
 	{
+	isearch_.end(false);
 	// Whatever was still reopening from the last run gives way.
 	for(auto p: all_panes()) p->cancel_restore();
 	expect_album_.clear();

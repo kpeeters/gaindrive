@@ -2,9 +2,11 @@
 #include "apiclient.hh"
 #include "coverstore.hh"
 
+#include <gtk/gtk.h>
 #include <gtkmm/version.h>
 #include <gtkmm/gestureclick.h>
 #include <gtkmm/listitem.h>
+#include <gtkmm/root.h>
 #include <gtkmm/signallistitemfactory.h>
 
 // ---- RowWidget ----------------------------------------------------------
@@ -12,7 +14,9 @@
 RowWidget::RowWidget(CoverStore *covers, int cover_px)
 	: Gtk::Box(Gtk::Orientation::VERTICAL),
 	  item_(Gtk::Orientation::HORIZONTAL, 10),
-	  text_(Gtk::Orientation::VERTICAL)
+	  text_(Gtk::Orientation::VERTICAL),
+	  title_line_(Gtk::Orientation::HORIZONTAL, 4),
+	  sub_line_(Gtk::Orientation::HORIZONTAL, 4)
 	{
 	// The padding here rather than on the list's row, so that an extra row
 	// can do without.
@@ -43,8 +47,18 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 	subtitle_.add_css_class("dim-label");
 	text_.set_hexpand(true);
 	text_.set_valign(Gtk::Align::CENTER);
-	text_.append(title_);
-	text_.append(subtitle_);
+	for(auto mark: {&title_video_, &sub_video_}) {
+		mark->set_from_icon_name("gd-movie-symbolic");
+		mark->add_css_class("video-mark");
+		mark->set_visible(false);
+		}
+	sub_video_.add_css_class("dim-label");
+	title_line_.append(title_video_);
+	title_line_.append(title_);
+	sub_line_.append(sub_video_);
+	sub_line_.append(subtitle_);
+	text_.append(title_line_);
+	text_.append(sub_line_);
 	item_.append(text_);
 
 	// The actions before the time, as on the web, so the times line up
@@ -120,7 +134,19 @@ void RowWidget::show_item(const ItemRef& cover, const std::string& lead,
 	title_.set_text(title);
 	subtitle_.set_text(subtitle);
 	subtitle_.set_visible(!subtitle.empty());
+	sub_line_.set_visible(!subtitle.empty());
+	show_video_mark(VideoMark::none, "");
 	trail_.set_text(trail);
+	}
+
+void RowWidget::show_video_mark(VideoMark where, const std::string& tooltip)
+	{
+	title_video_.set_visible(where==VideoMark::title);
+	sub_video_.set_visible(where==VideoMark::subtitle);
+	title_video_.set_tooltip_text(tooltip);
+	sub_video_.set_tooltip_text(tooltip);
+	// An album with no year or count still has a line for its mark.
+	if(where==VideoMark::subtitle) sub_line_.set_visible(true);
 	}
 
 void RowWidget::show_actions(bool show_star, bool starred, ListButton mode, bool show_queue)
@@ -152,6 +178,34 @@ void RowWidget::set_playing(bool on)
 	if(on) add_css_class("playing");
 	else   remove_css_class("playing");
 	if(!lead_.get_visible()) mark_.set_visible(on);
+	}
+
+void RowWidget::highlight(const Glib::ustring& needle)
+	{
+	for(auto label: {&title_, &subtitle_}) {
+		Pango::AttrList attrs;
+		auto raw   = label->get_text();
+		auto lower = raw.lowercase();
+		// Pango counts in bytes, and lowercasing does not keep the byte
+		// length of every character; such a label keeps its match unpainted
+		// rather than painting the wrong span.
+		if(!needle.empty() && lower.bytes()==raw.bytes()) {
+			const auto& hay = lower.raw();
+			const auto& n   = needle.raw();
+			for(auto at = hay.find(n); at!=std::string::npos; at = hay.find(n, at+n.size())) {
+				// The web's accent, on which only white reads.
+				auto bg = Pango::Attribute::create_attr_background(0xa3a3, 0x1616, 0x2323);
+				auto fg = Pango::Attribute::create_attr_foreground(0xffff, 0xffff, 0xffff);
+				for(Pango::Attribute *a: {static_cast<Pango::Attribute*>(&bg), static_cast<Pango::Attribute*>(&fg)}) {
+					a->set_start_index(at);
+					a->set_end_index(at+n.size());
+					attrs.insert(*a);
+					}
+				}
+			}
+		// Always set: a recycled row would otherwise keep another row's marks.
+		label->set_attributes(attrs);
+		}
 	}
 
 // ---- Pane ---------------------------------------------------------------
@@ -228,6 +282,7 @@ Pane::Pane(CoverStore& covers, int cover_px, bool boxed)
 		w->row = row;
 		bind(*w, *row);
 		w->set_playing(is_playing(*row));
+		w->highlight(needle_);
 		});
 	factory->signal_unbind().connect([](const Glib::RefPtr<Gtk::ListItem>& li) {
 		if(auto w = dynamic_cast<RowWidget*>(li->get_child())) {
@@ -322,6 +377,7 @@ void Pane::rebind_all()
 			auto row = w->row;
 			bind(*w, *row);
 			w->set_playing(is_playing(*row));
+			w->highlight(needle_);
 			}
 	}
 
@@ -407,6 +463,81 @@ void Pane::apply_restore()
 	if(done) done(false);
 	}
 
+int Pane::size() const
+	{
+	return store_->get_n_items();
+	}
+
+int Pane::cursor() const
+	{
+	// The focus sits on GTK's row widget, whose child is ours, or on one of
+	// our row's buttons, inside it.
+	auto root  = get_root();
+	auto focus = root ? root->get_focus() : nullptr;
+	for(auto w = focus; w && w!=&list_; w = w->get_parent()) {
+		auto rw = dynamic_cast<const RowWidget*>(w);
+		if(!rw) rw = dynamic_cast<const RowWidget*>(w->get_first_child());
+		if(rw && rw->row) {
+			auto [found, pos] = store_->find(rw->row);
+			if(found) return pos;
+			}
+		}
+	auto sel = selection_->get_selected();
+	return sel==GTK_INVALID_LIST_POSITION ? -1 : int(sel);
+	}
+
+int Pane::find(const Glib::ustring& needle, int start, bool back, bool& wrapped) const
+	{
+	// `start` may be one past either end; the double modulo folds it back,
+	// and comparing with the raw value is what reports that step as a wrap.
+	int n = size();
+	for(int k=0; k<n; ++k) {
+		int i = (((back ? start-k : start+k) % n) + n) % n;
+		if(search_text(*store_->get_item(i)).raw().find(needle.raw())!=std::string::npos) {
+			wrapped = back ? i>start : i<start;
+			return i;
+			}
+		}
+	return -1;
+	}
+
+void Pane::focus_row(int pos)
+	{
+#if GTK_CHECK_VERSION(4,12,0)
+	gtk_list_view_scroll_to(list_.gobj(), pos, GTK_LIST_SCROLL_FOCUS, nullptr);
+#endif
+	}
+
+void Pane::set_highlight(const Glib::ustring& needle)
+	{
+	if(needle==needle_) return;
+	needle_ = needle;
+	rebind_all();
+	}
+
+Glib::ustring Pane::search_text(const ListRow& row) const
+	{
+	std::string t;
+	switch(row.kind) {
+		case ListRow::Kind::artist:   t = row.artist.name; break;
+		case ListRow::Kind::album:
+			t = row.album.title + " " + row.album.artist;
+			if(row.album.year) t += " " + std::to_string(row.album.year);
+			break;
+		case ListRow::Kind::song:
+			t = row.song.title + " " + row.song.artist + " " + row.song.album;
+			break;
+		case ListRow::Kind::playlist: t = row.playlist.name; break;
+		case ListRow::Kind::setting:  t = row.text + " " + row.detail; break;
+		case ListRow::Kind::chapter:
+			t = row.text.empty() ? "Chapter " + std::to_string(row.index) : row.text;
+			break;
+		// Headings name groups rather than being something to go to.
+		default: break;
+		}
+	return Glib::ustring(t).lowercase();
+	}
+
 void Pane::set_badge(std::function<std::string(const std::string&)> badge)
 	{
 	badge_ = std::move(badge);
@@ -436,6 +567,7 @@ void Pane::bind_song_hit(RowWidget& w, const Song& s, const std::string& trail)
 	auto where = badges(s.ref);
 	if(!where.empty()) sub += (sub.empty() ? "" : " · ") + where;
 	w.show_item({s.ref.server, s.cover_art}, "", s.title, sub, trail);
+	if(s.is_video) w.show_video_mark(RowWidget::VideoMark::title, "Video");
 	w.show_actions(true, s.starred, RowWidget::ListButton::add, true);
 	}
 
@@ -446,5 +578,15 @@ void Pane::bind_album_hit(RowWidget& w, const Album& a)
 	auto where = badges(a.ref, a.also);
 	if(!where.empty()) sub += (sub.empty() ? "" : " · ") + where;
 	w.show_item({a.ref.server, a.cover_art}, "", a.title, sub, "");
+	show_album_videos(w, a);
 	w.show_actions(true, a.starred, RowWidget::ListButton::none, false);
+	}
+
+void Pane::show_album_videos(RowWidget& w, const Album& a)
+	{
+	// A count in the tooltip, not the line: one bonus documentary does not
+	// make a folder of films.
+	if(a.video_count>0)
+		w.show_video_mark(RowWidget::VideoMark::subtitle,
+		                  a.video_count==1 ? "1 video" : std::to_string(a.video_count) + " videos");
 	}

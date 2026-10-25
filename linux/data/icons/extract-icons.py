@@ -49,6 +49,8 @@ ICONS = {
 	'copy':           ('content_copy',  False),
 	'av-timer':       ('av_timer',      False),
 	'server':         ('dns',           True),
+	'delete':         ('delete',        False),
+	'movie':          ('movie',         False),
 }
 
 def glyphsets():

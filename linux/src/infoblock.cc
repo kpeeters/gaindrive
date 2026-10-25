@@ -93,19 +93,7 @@ InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 	// At the right edge, as the web client's toggle, apart from the links.
 	more_.set_hexpand(true);
 	more_.set_halign(Gtk::Align::END);
-	more_.signal_clicked().connect([this]() {
-		bool expand = text_.get_lines()>0;
-		int from = clip_.get_height();
-		// The far end measured at the width the text has now.
-		set_clamped(!expand);
-		int min = 0, to = 0, mb, nb;
-		text_.measure(Gtk::Orientation::VERTICAL, clip_.get_width(), min, to, mb, nb);
-		// Collapsing keeps the whole text until the end, so it is not
-		// cut off before the space closes.
-		if(!expand) set_clamped(false);
-		more_.set_label(expand ? "less" : "more");
-		animate(from, to);
-		});
+	more_.signal_clicked().connect(sigc::mem_fun(*this, &InfoBlock::toggle));
 	// The text is a bigger target than the toggle. Capture, as the label
 	// claims its own clicks for selecting; a click that ends a selection is
 	// left alone, or copying a sentence would fold the bio.
@@ -114,7 +102,9 @@ InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 	click->signal_released().connect([this](int, double, double) {
 		int start, end;
 		if(!more_.get_visible() || text_.get_selection_bounds(start, end)) return;
-		more_.activate();
+		// Not more_.activate(): that flashes the button as a key press, in
+		// the theme's accent.
+		toggle();
 		});
 	clip_.add_controller(click);
 	links_.add_css_class("info-links");
@@ -167,6 +157,21 @@ void InfoBlock::animate(int from, int to)
 		clip_.set_height(-1);
 		return false;
 		});
+	}
+
+void InfoBlock::toggle()
+	{
+	bool expand = text_.get_lines()>0;
+	int from = clip_.get_height();
+	// The far end measured at the width the text has now.
+	set_clamped(!expand);
+	int min = 0, to = 0, mb, nb;
+	text_.measure(Gtk::Orientation::VERTICAL, clip_.get_width(), min, to, mb, nb);
+	// Collapsing keeps the whole text until the end, so it is not cut off
+	// before the space closes.
+	if(!expand) set_clamped(false);
+	more_.set_label(expand ? "less" : "more");
+	animate(from, to);
 	}
 
 void InfoBlock::clear()

@@ -365,12 +365,22 @@ void AlbumPane::bind(RowWidget& w, const ListRow& row)
 	auto where = badges(a.ref, a.also);
 	if(!where.empty()) meta += (meta.empty() ? "" : " · ") + where;
 	w.show_item({a.ref.server, a.cover_art}, "", a.title, meta, "");
+	show_album_videos(w, a);
 	w.show_actions(true, a.starred, RowWidget::ListButton::none, false);
 	}
 
 void AlbumPane::activated(const ListRow& row)
 	{
 	signal_album.emit(row.album);
+	}
+
+Glib::ustring AlbumPane::search_text(const ListRow& row) const
+	{
+	// The rows here are one artist's, so the name would match every one.
+	if(row.kind!=ListRow::Kind::album) return Pane::search_text(row);
+	std::string t = row.album.title;
+	if(row.album.year) t += " " + std::to_string(row.album.year);
+	return Glib::ustring(t).lowercase();
 	}
 
 // ---- TrackPane ----------------------------------------------------------
@@ -602,6 +612,18 @@ bool TrackPane::is_playing(const ListRow& row) const
 	if(row.kind!=ListRow::Kind::chapter) return Pane::is_playing(row);
 	return row.song.ref.id==chapter_film_.id && row.song.ref.server==chapter_film_.server
 	    && row.index==chapter_+1;
+	}
+
+Glib::ustring TrackPane::search_text(const ListRow& row) const
+	{
+	// One album's tracks: its title and artist would match every row, so
+	// only what bind() shows counts.
+	if(row.kind!=ListRow::Kind::song) return Pane::search_text(row);
+	const auto& s = row.song;
+	std::string t = s.title;
+	if(!s.display_album_artist.empty() && s.artist!=s.display_album_artist)
+		t += " " + s.artist;
+	return Glib::ustring(t).lowercase();
 	}
 
 void TrackPane::bind(RowWidget& w, const ListRow& row)

@@ -2,6 +2,7 @@
 
 #include "clients.hh"
 #include "coverstore.hh"
+#include "isearch.hh"
 #include "loginview.hh"
 #include "panes.hh"
 #include "panestrip.hh"
@@ -95,6 +96,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void fullscreen_changed();
 		void apply_theme();
 		std::vector<Pane*> all_panes();
+		// The pane holding the keyboard focus, else the strip's active one.
+		Pane *active_pane();
 
 		// First, so that it is destroyed last: its threads are joined while
 		// everything they might still touch is alive.
@@ -122,6 +125,11 @@ class MainWindow : public Gtk::ApplicationWindow {
 		Gtk::ScrolledWindow        queue_scroll_;
 		QueueView                  queue_;
 
+		// content_ over the incremental search's minibuffer, which takes
+		// its own height so it cannot cover the last row, the one a search
+		// is most likely to have landed on.
+		Gtk::Box                   content_box_{Gtk::Orientation::VERTICAL};
+		ISearch                    isearch_;
 		// The panes, or a film in their place.
 		Gtk::Stack                 content_;
 		VideoView                  video_;

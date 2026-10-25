@@ -53,6 +53,8 @@ class InfoBlock : public Gtk::Box {
 	private:
 		void request();
 		void set_clamped(bool clamped);
+		// "more" or "less": the text unfolds or folds back.
+		void toggle();
 		void animate(int from, int to);
 
 		std::unique_ptr<CoverImage> portrait_;

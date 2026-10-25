@@ -47,7 +47,14 @@ class RowWidget : public Gtk::Box {
 		// playlist the user owns, "remove from it".
 		enum class ListButton { none, add, remove };
 		void show_actions(bool star, bool starred, ListButton list, bool queue);
+		// The web's film mark, before the title (a video) or the subtitle
+		// (an album holding videos); show_item clears it.
+		enum class VideoMark { none, title, subtitle };
+		void show_video_mark(VideoMark where, const std::string& tooltip);
 		void set_playing(bool on);
+		// Marks each occurrence of `needle`, lowercase, in the title and
+		// subtitle; empty clears.
+		void highlight(const Glib::ustring& needle);
 		// Shows the pane's own widget in place of the row's parts, taking
 		// it from whichever row had it; drop_extra gives it back.
 		void show_extra(Gtk::Widget& w);
@@ -69,7 +76,8 @@ class RowWidget : public Gtk::Box {
 		CoverImage *cover_=nullptr;
 		Gtk::Image  mark_;
 		Gtk::Label  lead_, title_, subtitle_, trail_;
-		Gtk::Box    text_;
+		Gtk::Box    text_, title_line_, sub_line_;
+		Gtk::Image  title_video_, sub_video_;
 };
 
 // A titled, scrolling list of ListRows, as on the web client's pane strip.
@@ -101,6 +109,20 @@ class Pane : public Gtk::Box {
 		// show several; empty while they show one.
 		void set_badge(std::function<std::string(const std::string& server)> badge);
 
+		// For the incremental search. Positions are in the list, headings
+		// included; the cursor is the row with keyboard focus, else the
+		// selected one, else -1.
+		int  size() const;
+		int  cursor() const;
+		// The first row from `start` whose text holds `needle`, going back
+		// when `back`, wrapping once; -1 when none in the pane does.
+		// `wrapped` says the hit lies past an end.
+		int  find(const Glib::ustring& needle, int start, bool back, bool& wrapped) const;
+		// Moves the keyboard focus, not the selection, which would open the
+		// next pane.
+		void focus_row(int pos);
+		void set_highlight(const Glib::ustring& needle);
+
 		sigc::signal<void(const ApiResult&)>                  signal_failed;
 		sigc::signal<void(const std::vector<Song>&, size_t)>  signal_play;
 		sigc::signal<void(const Song&)>                       signal_enqueue;
@@ -121,12 +143,16 @@ class Pane : public Gtk::Box {
 		// Whether the row stands for what plays now; by default the song row
 		// of the current track.
 		virtual bool is_playing(const ListRow& row) const;
+		// What the search matches: the text the row shows, lowercase.
+		virtual Glib::ustring search_text(const ListRow& row) const;
 		void rebind_all();
 		void report(const ApiResult& r);
 
 		// The usual song row outside an album: title, "artist · album".
 		void bind_song_hit(RowWidget& w, const Song& s, const std::string& trail);
 		void bind_album_hit(RowWidget& w, const Album& a);
+		// The film mark on an album row holding videos.
+		void show_album_videos(RowWidget& w, const Album& a);
 		// The servers an item is on, as names, or empty.
 		std::string badges(const ItemRef& ref, const std::vector<ItemRef>& also={}) const;
 		// A heading, naming the server while there are several.
@@ -153,6 +179,7 @@ class Pane : public Gtk::Box {
 		std::function<bool(const ListRow&)>   restore_match_;
 		std::function<void(bool)>             restore_done_;
 		std::function<std::string(const std::string&)> badge_;
+		Glib::ustring                         needle_;
 
 		void apply_restore();
 };
@@ -205,6 +232,7 @@ class AlbumPane : public Pane {
 	protected:
 		void bind(RowWidget& w, const ListRow& row) override;
 		void activated(const ListRow& row) override;
+		Glib::ustring search_text(const ListRow& row) const override;
 
 	private:
 		void render();
@@ -242,6 +270,7 @@ class TrackPane : public Pane {
 		void bind(RowWidget& w, const ListRow& row) override;
 		void activated(const ListRow& row) override;
 		bool is_playing(const ListRow& row) const override;
+		Glib::ustring search_text(const ListRow& row) const override;
 
 	private:
 		struct Chapter {
@@ -311,6 +340,7 @@ class PlaylistPane : public Pane {
 		void bind(RowWidget& w, const ListRow& row) override;
 		void activated(const ListRow& row) override;
 		void remove_from_list(const ListRow& row) override;
+		Glib::ustring search_text(const ListRow& row) const override;
 
 	private:
 		std::shared_ptr<ApiClient> api_;

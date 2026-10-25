@@ -160,6 +160,12 @@ void PlaylistPane::activated(const ListRow& row)
 	unselect();
 	}
 
+Glib::ustring PlaylistPane::search_text(const ListRow& row) const
+	{
+	// The album is not on the row, so a match there would look like none.
+	return Glib::ustring(row.song.title + " " + row.song.artist).lowercase();
+	}
+
 void PlaylistPane::remove_from_list(const ListRow& row)
 	{
 	auto window = dynamic_cast<Gtk::Window*>(get_root());
