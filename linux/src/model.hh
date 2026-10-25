@@ -4,6 +4,7 @@
 #include <nlohmann/json_fwd.hpp>
 
 #include <string>
+#include <vector>
 
 // Every id is qualified by the server it came from: Subsonic ids are only
 // unique per server. Ids inside an item (an album's artist_id, a song's
@@ -21,6 +22,8 @@ struct Artist {
 	// A categories root lists sections (a radio show, a film collection)
 	// rather than musicians.
 	bool        category=false;
+	// The same artist on the servers after `ref`'s, when merged.
+	std::vector<ItemRef> also;
 };
 
 struct Album {
@@ -33,6 +36,8 @@ struct Album {
 	int         song_count=0;
 	int         video_count=0;
 	bool        starred=false;
+	// The same album on the servers after `ref`'s, when merged.
+	std::vector<ItemRef> also;
 };
 
 struct Song {

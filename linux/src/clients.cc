@@ -10,11 +10,6 @@ std::shared_ptr<ApiClient> Clients::get(const std::string& server_key) const
 	return {};
 	}
 
-std::shared_ptr<ApiClient> Clients::first() const
-	{
-	return list_.empty() ? nullptr : list_.front();
-	}
-
 const std::vector<std::shared_ptr<ApiClient>>& Clients::all() const
 	{
 	return list_;

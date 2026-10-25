@@ -14,8 +14,6 @@ class Clients {
 	public:
 		// Null when that server has no session.
 		std::shared_ptr<ApiClient> get(const std::string& server_key) const;
-		// Null when no server has a session.
-		std::shared_ptr<ApiClient> first() const;
 		const std::vector<std::shared_ptr<ApiClient>>& all() const;
 		bool empty() const;
 

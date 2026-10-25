@@ -121,6 +121,7 @@ add_executable(gaindrive-player
 	src/localeq.cc
 	src/loginview.cc
 	src/mainwindow.cc
+	src/merge.cc
 	src/model.cc
 	src/mpris.cc
 	src/panes.cc

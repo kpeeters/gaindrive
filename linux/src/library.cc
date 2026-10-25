@@ -2,12 +2,15 @@
 #include "apiclient.hh"
 #include "coverstore.hh"
 #include "infoblock.hh"
+#include "merge.hh"
 #include "jsonread.hh"
 #include "settings.hh"
 #include "stamp.hh"
 
 #include <algorithm>
 #include <iostream>
+#include <map>
+#include <sstream>
 #include <set>
 
 namespace {
@@ -24,6 +27,49 @@ namespace {
 ArtistPane::ArtistPane(CoverStore& covers)
 	: Pane(covers, 0, false)
 	{
+	scope_.set_icon_name("network-server-symbolic");
+	scope_.set_tooltip_text("Servers");
+	scope_.add_css_class("flat");
+	scope_.set_valign(Gtk::Align::CENTER);
+	scope_.set_visible(false);
+	scope_list_.set_margin_start(6);
+	scope_list_.set_margin_end(6);
+	scope_list_.set_margin_top(6);
+	scope_list_.set_margin_bottom(6);
+	scope_popover_.set_child(scope_list_);
+	scope_.set_popover(scope_popover_);
+	header_.append(scope_);
+	}
+
+void ArtistPane::set_servers(const std::vector<std::pair<std::string, std::string>>& servers,
+                             const std::string& chosen)
+	{
+	while(auto child = scope_list_.get_first_child())
+		scope_list_.remove(*child);
+	// Nothing to choose between with one server.
+	scope_.set_visible(servers.size()>1);
+	if(servers.size()<2) return;
+	// A choice since logged out or removed means all, as scope() reads it.
+	bool known = false;
+	for(const auto& s: servers)
+		if(s.first==chosen) known = true;
+	auto all = Gtk::make_managed<Gtk::CheckButton>("All servers");
+	all->set_active(!known);
+	scope_list_.append(*all);
+	std::vector<std::pair<Gtk::CheckButton*, std::string>> buttons = {{all, ""}};
+	for(const auto& [key, label]: servers) {
+		auto b = Gtk::make_managed<Gtk::CheckButton>(label);
+		b->set_group(*all);
+		b->set_active(key==chosen);
+		scope_list_.append(*b);
+		buttons.push_back({b, key});
+		}
+	for(const auto& [b, key]: buttons)
+		b->signal_toggled().connect([this, b=b, key=key]() {
+			if(!b->get_active()) return;
+			scope_popover_.popdown();
+			signal_scope.emit(key);
+			});
 	}
 
 bool ArtistPane::loaded() const
@@ -31,7 +77,48 @@ bool ArtistPane::loaded() const
 	return loaded_;
 	}
 
-void ArtistPane::load(std::shared_ptr<ApiClient> api)
+namespace {
+	// One server's getArtists, with each artist's letter bucket and the key
+	// it sorts by within it.
+	struct Indexed {
+		std::vector<Artist>      artists;
+		std::vector<std::string> buckets, sort_keys;
+	};
+
+	// The name as the server sorts it: without a leading "The" or such,
+	// from the response's ignoredArticles.
+	std::string sort_key(const std::string& name, const std::vector<std::string>& articles)
+		{
+		std::string folded = Glib::ustring(name).casefold();
+		for(const auto& a: articles)
+			if(folded.size()>a.size() && folded.compare(0, a.size(), a)==0 && folded[a.size()]==' ')
+				return folded.substr(a.size()+1);
+		return folded;
+		}
+
+	Indexed parse_index(const ApiResult& r, bool category)
+		{
+		Indexed out;
+		const auto& root = jsub(r.body, "artists");
+		std::vector<std::string> articles;
+		std::istringstream words(jstr(root, "ignoredArticles"));
+		for(std::string w; words >> w;)
+			articles.push_back(Glib::ustring(w).casefold());
+		const auto& index = jsub(root, "index");
+		for(size_t i=0; i<index.size(); ++i) {
+			const auto& bucket = jidx(index, i);
+			const auto& arr    = jsub(bucket, "artist");
+			for(size_t k=0; k<arr.size(); ++k) {
+				out.artists.push_back(parse_artist(r.server, jidx(arr, k), category));
+				out.buckets.push_back(jstr(bucket, "name"));
+				out.sort_keys.push_back(sort_key(out.artists.back().name, articles));
+				}
+			}
+		return out;
+		}
+}
+
+void ArtistPane::load(const std::vector<std::shared_ptr<ApiClient>>& apis)
 	{
 	clear();
 	loaded_ = true;
@@ -40,72 +127,105 @@ void ArtistPane::load(std::shared_ptr<ApiClient> api)
 	// Roots of each kind are listed apart, categories first, as on the web
 	// client. contentType is a gaindrive extension: another Subsonic server
 	// sends none, and gets one plain listing.
-	api->call("getMusicFolders", {}, [this, api, gen](const ApiResult& r) {
+	call_each(apis, "getMusicFolders", {}, [this, apis, gen](const std::vector<ApiResult>& rs) {
 		if(gen!=gen_) return;
-		if(!r.ok) {
-			loaded_ = false;
-			report(r);
-			return;
+		ServerCalls categories, artists;
+		for(size_t i=0; i<rs.size(); ++i) {
+			if(!rs[i].ok) {
+				loaded_ = false;
+				report(rs[i]);
+				continue;
+				}
+			std::set<std::string> types;
+			const auto& folders = jsub(jsub(rs[i].body, "musicFolders"), "musicFolder");
+			for(size_t k=0; k<folders.size(); ++k)
+				types.insert(jstr(jidx(folders, k), "contentType"));
+			bool typed = types.count("categories") || types.count("artists");
+			if(types.count("categories"))
+				categories.push_back({apis[i], {{"contentType", "categories"}}});
+			if(!typed)
+				artists.push_back({apis[i], {}});
+			else if(types.count("artists"))
+				artists.push_back({apis[i], {{"contentType", "artists"}}});
 			}
-		std::set<std::string> types;
-		const auto& folders = jsub(jsub(r.body, "musicFolders"), "musicFolder");
-		for(size_t i=0; i<folders.size(); ++i)
-			types.insert(jstr(jidx(folders, i), "contentType"));
-		typed_ = types.count("categories") || types.count("artists");
-		load_artists(api, gen, types.count("categories")>0,
-		             !typed_ || types.count("artists")>0, {});
+		call_each(categories, "getArtists", [this, gen, artists](const std::vector<ApiResult>& cr) {
+			if(gen!=gen_) return;
+			call_each(artists, "getArtists", [this, gen, cr](const std::vector<ApiResult>& ar) {
+				if(gen!=gen_) return;
+				show_lists(cr, ar);
+				});
+			});
 		});
 	}
 
-void ArtistPane::load_artists(std::shared_ptr<ApiClient> api, unsigned gen, bool categories,
-                              bool artists, std::vector<Glib::RefPtr<ListRow>> rows)
+void ArtistPane::show_lists(const std::vector<ApiResult>& categories,
+                            const std::vector<ApiResult>& artists)
 	{
-	if(!categories && !artists) {
-		set_rows(rows);
-		return;
-		}
-	Params p;
-	if(categories)  p.push_back({"contentType", "categories"});
-	else if(typed_) p.push_back({"contentType", "artists"});
-
-	api->call("getArtists", p, [this, api, gen, categories, artists, rows](const ApiResult& r) mutable {
-		if(gen!=gen_) return;
+	std::vector<Glib::RefPtr<ListRow>> rows;
+	// A handful of sections, so one heading over an alphabetical list
+	// rather than the server's letter buckets.
+	std::vector<std::vector<Artist>> lists;
+	for(const auto& r: categories) {
 		if(!r.ok) {
 			loaded_ = false;
 			report(r);
-			return;
+			continue;
 			}
-		const auto& server = api->session().server_key;
-		const auto& index  = jsub(jsub(r.body, "artists"), "index");
-		if(categories) {
-			// A handful of sections, so one heading over an alphabetical list
-			// rather than the server's letter buckets.
-			std::vector<Artist> list;
-			for(size_t i=0; i<index.size(); ++i) {
-				const auto& arr = jsub(jidx(index, i), "artist");
-				for(size_t k=0; k<arr.size(); ++k)
-					list.push_back(parse_artist(server, jidx(arr, k), true));
-				}
-			std::sort(list.begin(), list.end(), [](const Artist& a, const Artist& b) {
-				return compare_names(a.name, b.name)<0;
-				});
-			if(!list.empty())
-				rows.push_back(ListRow::heading("Categories"));
-			for(const auto& a: list)
-				rows.push_back(ListRow::of(a));
-			load_artists(api, gen, false, artists, std::move(rows));
-			return;
-			}
-		for(size_t i=0; i<index.size(); ++i) {
-			const auto& bucket = jidx(index, i);
-			const auto& arr    = jsub(bucket, "artist");
-			if(arr.empty()) continue;
-			rows.push_back(ListRow::heading(jstr(bucket, "name")));
-			for(size_t k=0; k<arr.size(); ++k)
-				rows.push_back(ListRow::of(parse_artist(server, jidx(arr, k), false)));
-			}
-		set_rows(rows);
+		lists.push_back(parse_index(r, true).artists);
+		}
+	auto list = merge_artists(lists);
+	std::sort(list.begin(), list.end(), [](const Artist& a, const Artist& b) {
+		return compare_names(a.name, b.name)<0;
 		});
+	if(!list.empty())
+		rows.push_back(ListRow::heading("Categories"));
+	for(const auto& a: list)
+		rows.push_back(ListRow::of(a));
+
+	std::vector<Indexed> indexes;
+	for(const auto& r: artists) {
+		if(!r.ok) {
+			loaded_ = false;
+			report(r);
+			continue;
+			}
+		indexes.push_back(parse_index(r, false));
+		}
+	// Each artist under its bucket, as the first server to list it puts it.
+	struct Placed {
+		std::string bucket, key;
+		Artist      artist;
+	};
+	std::vector<Placed> placed;
+	if(indexes.size()==1) {
+		// As the server sent it.
+		const auto& ix = indexes.front();
+		for(size_t i=0; i<ix.artists.size(); ++i)
+			placed.push_back({ix.buckets[i], ix.sort_keys[i], ix.artists[i]});
+		}
+	else {
+		std::map<std::string, std::pair<std::string, std::string>> where;
+		lists.clear();
+		for(const auto& ix: indexes) {
+			for(size_t i=0; i<ix.artists.size(); ++i)
+				where[ix.artists[i].ref.server + "|" + ix.artists[i].ref.id] = {ix.buckets[i], ix.sort_keys[i]};
+			lists.push_back(ix.artists);
+			}
+		for(auto& a: merge_artists(lists)) {
+			const auto& [bucket, key] = where[a.ref.server + "|" + a.ref.id];
+			placed.push_back({bucket, key, std::move(a)});
+			}
+		std::stable_sort(placed.begin(), placed.end(), [](const Placed& a, const Placed& b) {
+			int n = compare_names(a.bucket, b.bucket);
+			return n!=0 ? n<0 : a.key<b.key;
+			});
+		}
+	for(size_t i=0; i<placed.size(); ++i) {
+		if(i==0 || placed[i].bucket!=placed[i-1].bucket)
+			rows.push_back(ListRow::heading(placed[i].bucket));
+		rows.push_back(ListRow::of(placed[i].artist));
+		}
+	set_rows(rows);
 	}
 
 void ArtistPane::bind(RowWidget& w, const ListRow& row)
@@ -141,9 +261,11 @@ AlbumPane::AlbumPane(CoverStore& covers, AppSettings& settings)
 
 AlbumPane::~AlbumPane() = default;
 
-const ItemRef& AlbumPane::artist() const
+bool AlbumPane::shows_artist(const ItemRef& ref) const
 	{
-	return artist_;
+	for(const auto& r: artist_)
+		if(r.server==ref.server && r.id==ref.id) return true;
+	return false;
 	}
 
 std::string AlbumPane::section() const
@@ -164,31 +286,44 @@ void AlbumPane::clear()
 	Pane::clear();
 	bio_->clear();
 	sort_.set_visible(false);
-	artist_ = {};
+	artist_.clear();
 	albums_.clear();
 	}
 
-void AlbumPane::show_artist(std::shared_ptr<ApiClient> api, const Artist& artist)
+void AlbumPane::show_artist(const ServerCalls& sources, const Artist& artist)
 	{
 	clear();
+	if(sources.empty()) return;
 	unsigned gen = gen_;
-	artist_    = artist.ref;
+	for(const auto& [api, p]: sources)
+		artist_.push_back({api->session().server_key, p.front().second});
 	category_  = artist.category;
 	set_title(artist.name);
 	label_sort();
 	sort_.set_visible(true);
-	// A category is a section of the library, with nothing to look up.
+	// A category is a section of the library, with nothing to look up. The
+	// biography from the first server, as the artist's row is.
+	const auto& first = artist_.front();
 	if(!artist.category)
-		bio_->load(api, "getArtistInfo2", artist.ref.id, "artistInfo2", "biography", artist.ref.id);
-	api->call("getArtist", {{"id", artist.ref.id}}, [this, api, gen](const ApiResult& r) {
+		bio_->load(sources.front().first, "getArtistInfo2", first.id, "artistInfo2", "biography", first.id);
+	call_each(sources, "getArtist", [this, gen](const std::vector<ApiResult>& rs) {
 		if(gen!=gen_) return;
-		if(!r.ok) {
-			report(r);
-			return;
+		std::vector<std::vector<Album>> lists;
+		for(const auto& r: rs) {
+			if(!r.ok) {
+				report(r);
+				continue;
+				}
+			lists.emplace_back();
+			const auto& arr = jsub(jsub(r.body, "artist"), "album");
+			for(size_t i=0; i<arr.size(); ++i)
+				lists.back().push_back(parse_album(r.server, jidx(arr, i)));
 			}
-		const auto& arr = jsub(jsub(r.body, "artist"), "album");
-		for(size_t i=0; i<arr.size(); ++i)
-			albums_.push_back(parse_album(api->session().server_key, jidx(arr, i)));
+		if(settings_.merge_albums)
+			albums_ = merge_albums(lists);
+		else
+			for(const auto& l: lists)
+				albums_.insert(albums_.end(), l.begin(), l.end());
 		render();
 		});
 	}
@@ -226,6 +361,8 @@ void AlbumPane::bind(RowWidget& w, const ListRow& row)
 	std::string meta;
 	if(a.year)       meta = std::to_string(a.year);
 	if(a.song_count) meta += (meta.empty() ? "" : " · ") + plural(a.song_count, "track", "tracks");
+	auto where = badges(a.ref, a.also);
+	if(!where.empty()) meta += (meta.empty() ? "" : " · ") + where;
 	w.show_item({a.ref.server, a.cover_art}, "", a.title, meta, "");
 	w.show_actions(true, a.starred, RowWidget::ListButton::none, false);
 	}

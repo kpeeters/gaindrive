@@ -291,3 +291,31 @@ std::string random_hex(int nbytes)
 		}
 	return out;
 	}
+
+void call_each(const ServerCalls& calls, const std::string& endpoint,
+               std::function<void(const std::vector<ApiResult>&)> done)
+	{
+	if(calls.empty()) {
+		done({});
+		return;
+		}
+	struct Gather {
+		std::vector<ApiResult> results;
+		size_t                 left;
+	};
+	auto g = std::make_shared<Gather>(Gather{std::vector<ApiResult>(calls.size()), calls.size()});
+	for(size_t i=0; i<calls.size(); ++i)
+		calls[i].first->call(endpoint, calls[i].second, [g, i, done](const ApiResult& r) {
+			g->results[i] = r;
+			if(--g->left==0) done(g->results);
+			});
+	}
+
+void call_each(const std::vector<std::shared_ptr<ApiClient>>& apis, const std::string& endpoint,
+               const Params& params, std::function<void(const std::vector<ApiResult>&)> done)
+	{
+	ServerCalls calls;
+	for(const auto& api: apis)
+		calls.push_back({api, params});
+	call_each(calls, endpoint, std::move(done));
+	}

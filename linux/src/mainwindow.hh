@@ -59,9 +59,15 @@ class MainWindow : public Gtk::ApplicationWindow {
 		// The server list or its states changed.
 		void servers_changed();
 		std::shared_ptr<ApiClient> client_for(const std::string& key) const;
-		// The server whose lists the sections show: the first one with a
-		// session.
-		std::shared_ptr<ApiClient> scope_client() const;
+		// The servers the sections list: the one picked, or all.
+		std::vector<std::shared_ptr<ApiClient>> scope() const;
+		void set_scope(const std::string& key);
+		// The lists again, for another scope or server set.
+		void reload_lists();
+		// The host, or user@host when another server shares it.
+		std::string server_label(const std::string& key) const;
+		// Those with a session, by key and label, in servers.json's order.
+		std::vector<std::pair<std::string, std::string>> server_choices() const;
 		void failed(const ApiResult& r);
 		void notify(const std::string& text);
 

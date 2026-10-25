@@ -31,6 +31,12 @@ struct AppSettings {
 	std::string subtitle_size="medium";
 	// Album order per section ("artists", "categories"): by name or by year.
 	std::map<std::string, bool> sort_by_name;
+	// The server the sections list, by ServerConfig::key; empty for all of
+	// them.
+	std::string scope;
+	// The same album on several servers shows once, from the first of them
+	// in the server list. On by default, as on the phones.
+	bool        merge_albums=true;
 	// The local equaliser, for this machine's output: on or off, the
 	// curve in whole dB per band, and curves saved under a name.
 	bool             eq_on=false;

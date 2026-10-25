@@ -99,6 +99,14 @@ class ApiClient {
 		std::shared_ptr<const Session> session_;
 };
 
+// One call to each server, and `done` once all have answered, with the
+// answers in the calls' order. For the lists that show several servers.
+using ServerCalls = std::vector<std::pair<std::shared_ptr<ApiClient>, Params>>;
+void call_each(const ServerCalls& calls, const std::string& endpoint,
+               std::function<void(const std::vector<ApiResult>&)> done);
+void call_each(const std::vector<std::shared_ptr<ApiClient>>& apis, const std::string& endpoint,
+               const Params& params, std::function<void(const std::vector<ApiResult>&)> done);
+
 // Adds https:// when no scheme was typed, and drops a trailing slash or /rest.
 std::string normalise_server_url(std::string url);
 

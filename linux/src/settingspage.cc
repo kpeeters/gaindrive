@@ -218,6 +218,16 @@ void SettingsPage::show_servers()
 	add->signal_clicked().connect([this]() { signal_add_server.emit(); });
 	content_.append(*add);
 	add_label("Removing a server forgets its login. Log in again to add it back.", "dim-label");
+
+	auto merge = Gtk::make_managed<Gtk::CheckButton>("Show an album once when several servers have it");
+	merge->set_active(settings_.merge_albums);
+	merge->signal_toggled().connect([this, merge]() {
+		settings_.merge_albums = merge->get_active();
+		settings_.save();
+		signal_merge.emit();
+		});
+	content_.append(*merge);
+	add_label("The copy on the server listed first is the one opened.", "dim-label");
 	}
 
 void SettingsPage::show_about()

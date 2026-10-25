@@ -14,6 +14,6 @@ struct ServerConfig {
 };
 
 // servers.json in the config directory. The order is the user's: the first
-// server with a session is the one the sections list.
+// server's copy of a merged artist or album is the one shown.
 std::vector<ServerConfig> load_servers();
 void                      save_servers(const std::vector<ServerConfig>& servers);

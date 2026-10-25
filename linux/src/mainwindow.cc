@@ -193,7 +193,7 @@ MainWindow::MainWindow()
 	  artists_(covers_),
 	  playlists_(covers_),
 	  recents_(covers_),
-	  search_(covers_),
+	  search_(covers_, settings_),
 	  settings_pane_(covers_, settings_, servers_),
 	  albums_(covers_, settings_),
 	  playlist_(covers_),
@@ -382,8 +382,14 @@ MainWindow::MainWindow()
 		view_.settings = key;
 		go(1);
 		});
-	for(auto p: all_panes())
+	for(auto p: all_panes()) {
 		p->signal_back.connect(sigc::mem_fun(*this, &MainWindow::back));
+		p->set_badge([this](const std::string& key) {
+			return scope().size()>1 ? server_label(key) : std::string();
+			});
+		}
+	artists_.signal_scope.connect(sigc::mem_fun(*this, &MainWindow::set_scope));
+	settings_page_.signal_merge.connect(sigc::mem_fun(*this, &MainWindow::reload_lists));
 	settings_page_.signal_back.connect(sigc::mem_fun(*this, &MainWindow::back));
 	settings_page_.signal_changed.connect([this]() {
 		settings_pane_.load();
@@ -528,12 +534,13 @@ void MainWindow::logged_in(const ApiResult& r, const Session& s)
 	size_t at = 0;
 	for(size_t i=0; i<pos; ++i)
 		if(clients_.get(servers_[i].key)) ++at;
-	auto before = scope_client();
+	bool first = clients_.empty();
 	clients_.set(std::make_shared<ApiClient>(pool_, session), at);
-	if(scope_client()!=before) open_browse();
+	if(first) open_browse();
 	else {
 		stack_.set_visible_child("browse");
 		servers_changed();
+		reload_lists();
 		}
 	if(!stored)
 		notify("The keyring did not store this login; you will be asked again next time.");
@@ -541,12 +548,31 @@ void MainWindow::logged_in(const ApiResult& r, const Session& s)
 
 void MainWindow::open_browse()
 	{
-	search_.set_api(scope_client());
 	for(auto p: all_panes())
 		p->clear();
-	artists_.load(scope_client());
+	artists_.set_servers(server_choices(), settings_.scope);
+	search_.set_scope(scope());
+	artists_.load(scope());
 	restore_view();
 	stack_.set_visible_child("browse");
+	}
+
+void MainWindow::reload_lists()
+	{
+	// What is open in the other panes stays: it is on a server still there.
+	artists_.set_servers(server_choices(), settings_.scope);
+	search_.set_scope(scope());
+	artists_.load(scope());
+	auto section = left_.get_visible_child_name();
+	if(section=="playlists")    playlists_.load(scope());
+	else if(section=="recents") recents_.load(scope());
+	}
+
+void MainWindow::set_scope(const std::string& key)
+	{
+	settings_.scope = key;
+	settings_.save();
+	reload_lists();
 	}
 
 std::shared_ptr<ApiClient> MainWindow::client_for(const std::string& key) const
@@ -554,9 +580,36 @@ std::shared_ptr<ApiClient> MainWindow::client_for(const std::string& key) const
 	return clients_.get(key);
 	}
 
-std::shared_ptr<ApiClient> MainWindow::scope_client() const
+std::vector<std::shared_ptr<ApiClient>> MainWindow::scope() const
 	{
-	return clients_.first();
+	// A server since removed or logged out: all of them, as on the phones.
+	if(auto api = clients_.get(settings_.scope)) return {api};
+	return clients_.all();
+	}
+
+std::string MainWindow::server_label(const std::string& key) const
+	{
+	auto host = [](const std::string& url) {
+		auto from = url.find("://");
+		from = from==std::string::npos ? 0 : from+3;
+		return url.substr(from, url.find('/', from)-from);
+		};
+	for(const auto& s: servers_) {
+		if(s.key!=key) continue;
+		std::string h = host(s.url);
+		for(const auto& o: servers_)
+			if(o.key!=key && host(o.url)==h) return s.user + "@" + h;
+		return h;
+		}
+	return "";
+	}
+
+std::vector<std::pair<std::string, std::string>> MainWindow::server_choices() const
+	{
+	std::vector<std::pair<std::string, std::string>> out;
+	for(const auto& s: servers_)
+		if(clients_.get(s.key)) out.push_back({s.key, server_label(s.key)});
+	return out;
 	}
 
 void MainWindow::save_view()
@@ -656,7 +709,8 @@ void MainWindow::end_session(const std::string& error)
 		playback_.forget_server(c->session().server_key);
 	for(const auto& c: clients)
 		clients_.drop(c->session().server_key);
-	search_.set_api(nullptr);
+	search_.set_query("");
+	search_.set_scope({});
 	close_cards();
 	for(auto p: all_panes())
 		p->clear();
@@ -690,7 +744,6 @@ void MainWindow::drop_client(const std::string& key, const std::string& message)
 	if(!clients_.get(key)) return;
 	const Song *s = playback_.current();
 	if(s && s->ref.server==key) close_video();
-	bool was_scope = scope_client()==clients_.get(key);
 	// Before the client goes: the queue still says "stopped" with it.
 	playback_.forget_server(key);
 	clients_.drop(key);
@@ -699,8 +752,8 @@ void MainWindow::drop_client(const std::string& key, const std::string& message)
 		return;
 		}
 	if(!message.empty()) notify(message);
-	if(was_scope) open_browse();
-	else          servers_changed();
+	servers_changed();
+	reload_lists();
 	}
 
 void MainWindow::servers_changed()
@@ -767,10 +820,10 @@ void MainWindow::show_section(const std::string& name)
 		p->unselect();
 
 	if(name=="library") {
-		if(!artists_.loaded()) artists_.load(scope_client());
+		if(!artists_.loaded()) artists_.load(scope());
 		}
-	else if(name=="playlists") playlists_.load(scope_client());
-	else if(name=="recents")   recents_.load(scope_client());
+	else if(name=="playlists") playlists_.load(scope());
+	else if(name=="recents")   recents_.load(scope());
 	else if(name=="search")    search_.focus_entry();
 	else if(name=="settings")  settings_pane_.load();
 	go(0);
@@ -859,8 +912,13 @@ void MainWindow::set_narrow(bool narrow)
 
 void MainWindow::open_artist(const Artist& a)
 	{
-	auto api = client_for(a.ref.server);
-	if(!api) return;
+	// The same artist on every server it was merged from.
+	ServerCalls sources;
+	std::vector<ItemRef> refs = {a.ref};
+	refs.insert(refs.end(), a.also.begin(), a.also.end());
+	for(const auto& r: refs)
+		if(auto api = client_for(r.server)) sources.push_back({api, {{"id", r.id}}});
+	if(sources.empty()) return;
 	middle_.set_visible_child("albums");
 	tracks_.clear();
 	view_.artist      = a.ref;
@@ -868,7 +926,7 @@ void MainWindow::open_artist(const Artist& a)
 	view_.playlist    = {};
 	view_.album       = {};
 	view_.album_title.clear();
-	albums_.show_artist(api, a);
+	albums_.show_artist(sources, a);
 	go(1);
 	}
 
@@ -906,14 +964,13 @@ void MainWindow::album_loaded(const Album& a)
 	update_back();
 	auto api = client_for(a.ref.server);
 	if(a.artist_id.empty() || !api) return;
-	const ItemRef& shown = albums_.artist();
-	if(middle_.get_visible_child_name()=="albums" && shown.server==a.ref.server && shown.id==a.artist_id)
+	if(middle_.get_visible_child_name()=="albums" && albums_.shows_artist({a.ref.server, a.artist_id}))
 		return;
 	Artist artist;
 	artist.ref  = {a.ref.server, a.artist_id};
 	artist.name = a.artist;
 	middle_.set_visible_child("albums");
-	albums_.show_artist(api, artist);
+	albums_.show_artist({{api, {{"id", a.artist_id}}}}, artist);
 	}
 
 void MainWindow::play(const std::vector<Song>& songs, size_t index)
@@ -1061,7 +1118,8 @@ void MainWindow::failed(const ApiResult& r)
 		if(clients_.empty()) login_.prefill(refused.url, refused.user);
 		return;
 		}
-	notify(r.error);
+	// Which server, when there is more than one to ask.
+	notify(servers_.size()>1 ? server_label(r.server) + ": " + r.error : r.error);
 	}
 
 void MainWindow::notify(const std::string& text)

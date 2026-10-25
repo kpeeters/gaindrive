@@ -65,6 +65,9 @@ void AppSettings::load()
 	if(sorts.is_object())
 		for(const auto& [k, v]: sorts.items())
 			if(v.is_boolean()) sort_by_name[k] = v.get<bool>();
+	scope = jstr(j, "scope");
+	const auto& ma = jsub(j, "mergeDuplicateAlbums");
+	merge_albums = !ma.is_boolean() || ma.get<bool>();
 	const auto& on = jsub(j, "eqOn");
 	eq_on = on.is_boolean() && on.get<bool>();
 	eq_gains = read_curve(jsub(j, "eqGains"));
@@ -97,6 +100,7 @@ void AppSettings::save() const
 		{"castLocalVideo", cast_local_video}, {"castSyncMs", cast_sync_ms},
 		{"theme", theme}, {"subtitleSize", subtitle_size},
 		{"sortByName", sort_by_name},
+		{"scope", scope}, {"mergeDuplicateAlbums", merge_albums},
 		{"eqOn", eq_on}, {"eqGains", eq_gains}, {"eqSlots", eq_slots},
 		{"wiimSlots", wiim_slots}
 		});

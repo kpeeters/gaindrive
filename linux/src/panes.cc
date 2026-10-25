@@ -407,10 +407,34 @@ void Pane::apply_restore()
 	if(done) done(false);
 	}
 
+void Pane::set_badge(std::function<std::string(const std::string&)> badge)
+	{
+	badge_ = std::move(badge);
+	}
+
+std::string Pane::badges(const ItemRef& ref, const std::vector<ItemRef>& also) const
+	{
+	if(!badge_ || !row_badges_) return "";
+	std::string out = badge_(ref.server);
+	for(const auto& r: also) {
+		auto b = badge_(r.server);
+		if(!b.empty()) out += ", " + b;
+		}
+	return out;
+	}
+
+std::string Pane::heading_on(const std::string& text, const std::string& server) const
+	{
+	auto b = badge_ ? badge_(server) : "";
+	return b.empty() ? text : text + " · " + b;
+	}
+
 void Pane::bind_song_hit(RowWidget& w, const Song& s, const std::string& trail)
 	{
 	std::string sub = s.artist;
 	if(!s.album.empty()) sub += (sub.empty() ? "" : " · ") + s.album;
+	auto where = badges(s.ref);
+	if(!where.empty()) sub += (sub.empty() ? "" : " · ") + where;
 	w.show_item({s.ref.server, s.cover_art}, "", s.title, sub, trail);
 	w.show_actions(true, s.starred, RowWidget::ListButton::add, true);
 	}
@@ -419,6 +443,8 @@ void Pane::bind_album_hit(RowWidget& w, const Album& a)
 	{
 	std::string sub = a.artist;
 	if(a.year) sub += (sub.empty() ? "" : " · ") + std::to_string(a.year);
+	auto where = badges(a.ref, a.also);
+	if(!where.empty()) sub += (sub.empty() ? "" : " · ") + where;
 	w.show_item({a.ref.server, a.cover_art}, "", a.title, sub, "");
 	w.show_actions(true, a.starred, RowWidget::ListButton::none, false);
 	}

@@ -33,6 +33,8 @@ class SettingsPage : public Gtk::Box {
 		// "Log in again" on a server whose login was refused, by its key.
 		sigc::signal<void(const std::string&)> signal_login_server;
 		sigc::signal<void()>                   signal_add_server;
+		// Album merging was turned on or off, so the lists are out of date.
+		sigc::signal<void()>                   signal_merge;
 
 	private:
 		void show_playback();

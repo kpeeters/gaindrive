@@ -1,8 +1,12 @@
 #pragma once
 
+#include "apiclient.hh"
 #include "model.hh"
 
 #include <giomm/liststore.h>
+#include <gtkmm/checkbutton.h>
+#include <gtkmm/menubutton.h>
+#include <gtkmm/popover.h>
 #include <gtkmm/box.h>
 #include <gtkmm/button.h>
 #include <gtkmm/image.h>
@@ -93,6 +97,9 @@ class Pane : public Gtk::Box {
 		// narrow strip; empty hides it.
 		void set_back(const std::string& label);
 		sigc::signal<void()>                                  signal_back;
+		// The name of a server, for rows and headings while the sections
+		// show several; empty while they show one.
+		void set_badge(std::function<std::string(const std::string& server)> badge);
 
 		sigc::signal<void(const ApiResult&)>                  signal_failed;
 		sigc::signal<void(const std::vector<Song>&, size_t)>  signal_play;
@@ -120,6 +127,10 @@ class Pane : public Gtk::Box {
 		// The usual song row outside an album: title, "artist · album".
 		void bind_song_hit(RowWidget& w, const Song& s, const std::string& trail);
 		void bind_album_hit(RowWidget& w, const Album& a);
+		// The servers an item is on, as names, or empty.
+		std::string badges(const ItemRef& ref, const std::vector<ItemRef>& also={}) const;
+		// A heading, naming the server while there are several.
+		std::string heading_on(const std::string& text, const std::string& server) const;
 
 		CoverStore&                           covers_;
 		Gtk::Box                              header_;
@@ -127,6 +138,8 @@ class Pane : public Gtk::Box {
 		Gtk::Label                            title_;
 		Gtk::Box                              top_, bottom_;
 		unsigned                              gen_=0;
+		// Off where headings already name each server.
+		bool                                  row_badges_=true;
 
 	private:
 		std::shared_ptr<std::set<RowWidget*>> widgets_;
@@ -139,6 +152,7 @@ class Pane : public Gtk::Box {
 		ItemRef                               playing_;
 		std::function<bool(const ListRow&)>   restore_match_;
 		std::function<void(bool)>             restore_done_;
+		std::function<std::string(const std::string&)> badge_;
 
 		void apply_restore();
 };
@@ -149,20 +163,29 @@ class ArtistPane : public Pane {
 	public:
 		explicit ArtistPane(CoverStore& covers);
 
-		void load(std::shared_ptr<ApiClient> api);
+		// Every server in `apis`, the same artist on several as one row.
+		void load(const std::vector<std::shared_ptr<ApiClient>>& apis);
 		bool loaded() const;
+		// The scope's popover, by key and name; hidden with fewer than two.
+		// `chosen` is the key picked, empty for all servers.
+		void set_servers(const std::vector<std::pair<std::string, std::string>>& servers,
+		                 const std::string& chosen);
+
+		// A scope picked: a server's key, or empty for all.
+		sigc::signal<void(const std::string&)> signal_scope;
 
 	protected:
 		void bind(RowWidget& w, const ListRow& row) override;
 		void activated(const ListRow& row) override;
 
 	private:
-		void load_artists(std::shared_ptr<ApiClient> api, unsigned gen, bool categories,
-		                  bool artists, std::vector<Glib::RefPtr<ListRow>> rows);
+		void show_lists(const std::vector<ApiResult>& categories,
+		                const std::vector<ApiResult>& artists);
 
-		// Whether the server sorts its roots by contentType (gaindrive does).
-		bool typed_=false;
-		bool loaded_=false;
+		bool            loaded_=false;
+		Gtk::MenuButton scope_;
+		Gtk::Popover    scope_popover_;
+		Gtk::Box        scope_list_{Gtk::Orientation::VERTICAL, 2};
 };
 
 class AlbumPane : public Pane {
@@ -170,8 +193,11 @@ class AlbumPane : public Pane {
 		AlbumPane(CoverStore& covers, AppSettings& settings);
 		~AlbumPane() override;
 
-		void show_artist(std::shared_ptr<ApiClient> api, const Artist& artist);
-		const ItemRef& artist() const;
+		// getArtist from each server the artist is on: a client with
+		// {{"id", the artist's id there}}, the first server first.
+		void show_artist(const ServerCalls& sources, const Artist& artist);
+		// Whether the albums shown are this artist's, on any of its servers.
+		bool shows_artist(const ItemRef& ref) const;
 		void clear() override;
 
 		sigc::signal<void(const Album&)> signal_album;
@@ -189,7 +215,7 @@ class AlbumPane : public Pane {
 		Gtk::Button                sort_;
 		std::unique_ptr<InfoBlock> bio_;
 		std::vector<Album>         albums_;
-		ItemRef                    artist_;
+		std::vector<ItemRef>       artist_;
 		bool                       category_=false;
 };
 
@@ -259,7 +285,8 @@ class PlaylistsPane : public Pane {
 	public:
 		explicit PlaylistsPane(CoverStore& covers);
 
-		void load(std::shared_ptr<ApiClient> api);
+		// Each server's playlists and starred items under its own headings.
+		void load(const std::vector<std::shared_ptr<ApiClient>>& apis);
 		void star_changed(ListRow::Kind kind, const ItemRef& ref, bool on) override;
 
 		sigc::signal<void(const Playlist&)> signal_playlist;
@@ -269,7 +296,7 @@ class PlaylistsPane : public Pane {
 		void activated(const ListRow& row) override;
 
 	private:
-		std::shared_ptr<ApiClient> api_;
+		std::vector<std::shared_ptr<ApiClient>> apis_;
 };
 
 // One playlist's tracks, in the middle pane.
@@ -296,7 +323,8 @@ class RecentsPane : public Pane {
 	public:
 		explicit RecentsPane(CoverStore& covers);
 
-		void load(std::shared_ptr<ApiClient> api);
+		// Each server's under its own headings: each knows only its own plays.
+		void load(const std::vector<std::shared_ptr<ApiClient>>& apis);
 
 	protected:
 		void bind(RowWidget& w, const ListRow& row) override;
@@ -305,9 +333,10 @@ class RecentsPane : public Pane {
 
 class SearchPane : public Pane {
 	public:
-		explicit SearchPane(CoverStore& covers);
+		SearchPane(CoverStore& covers, const AppSettings& settings);
 
-		void set_api(std::shared_ptr<ApiClient> api);
+		// The servers searched; the search runs again on them.
+		void set_scope(const std::vector<std::shared_ptr<ApiClient>>& apis);
 		void focus_entry();
 		void clear() override;
 		// The search text; setting it runs the search, as typing does.
@@ -320,9 +349,11 @@ class SearchPane : public Pane {
 
 	private:
 		void run();
+		void show_results(const std::vector<ApiResult>& results);
 
+		const AppSettings&         settings_;
 		Gtk::SearchEntry           entry_;
-		std::shared_ptr<ApiClient> api_;
+		std::vector<std::shared_ptr<ApiClient>> apis_;
 };
 
 class SettingsPane : public Pane {
