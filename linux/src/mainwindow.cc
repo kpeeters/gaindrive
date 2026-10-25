@@ -91,20 +91,26 @@ namespace {
 		/* Material Symbols leave a wide margin inside the em, so at the
 		   default 16px they look much smaller than theme icons. */
 		.pane button > image, .sidebar button > image { -gtk-icon-size: 20px; }
+		/* Filled, so the full foreground reads as black beside the
+		   outlined icons; dimmed as Material's top bar dims its actions. */
+		.pane .scope-button image { -gtk-icon-size: 40px; opacity: 0.65; }
 		/* Direct children only: the cast popover hangs off the bar too. */
 		.player-row > button > image,
 		.player-row > menubutton > button image { -gtk-icon-size: 48px; }
 		.player-row > .bar-extra image { -gtk-icon-size: 32px; }
 		/* A checked (open or on) button keeps the flat look: the theme's
 		   dark fill would hide a red icon. Red says what is on. The theme's
-		   light text for that fill goes too, or a plain icon vanishes. */
+		   light text for that fill goes too, or a plain icon vanishes.
+		   The same for the server picker, so open buttons look alike. */
 		.player-row > .bar-extra:checked,
-		.player-row > .bar-extra > button:checked {
+		.player-row > .bar-extra > button:checked,
+		.pane .scope-button > button:checked {
 			background-color: transparent;
 			color: @theme_fg_color;
 		}
 		.player-row > .bar-extra:checked:hover,
-		.player-row > .bar-extra > button:checked:hover { background-color: alpha(currentColor, 0.07); }
+		.player-row > .bar-extra > button:checked:hover,
+		.pane .scope-button > button:checked:hover { background-color: alpha(currentColor, 0.07); }
 		.player-bar .casting image { color: @gd_red; }
 		.info-card .card-title { font-weight: bold; font-size: 1.15em; }
 		.info-card .card-section {
@@ -398,6 +404,7 @@ MainWindow::MainWindow()
 	settings_page_.signal_remove_server.connect(sigc::mem_fun(*this, &MainWindow::remove_server));
 	settings_page_.signal_login_server.connect(sigc::mem_fun(*this, &MainWindow::relogin));
 	settings_page_.signal_add_server.connect(sigc::mem_fun(*this, &MainWindow::add_server));
+	settings_page_.signal_rename_server.connect(sigc::mem_fun(*this, &MainWindow::rename_server));
 	// The info and equaliser cards share the corner: opening one closes the
 	// other.
 	bar_.info_button().signal_toggled().connect([this]() {
@@ -514,7 +521,7 @@ void MainWindow::logged_in(const ApiResult& r, const Session& s)
 		return;
 		}
 	// The same server and account keep their key, and with it their cache.
-	ServerConfig cfg{"", s.base_url, s.user};
+	ServerConfig cfg{"", s.base_url, s.user, ""};
 	size_t pos = servers_.size();
 	for(size_t i=0; i<servers_.size(); ++i)
 		if(servers_[i].url==cfg.url && servers_[i].user==cfg.user) {
@@ -589,19 +596,25 @@ std::vector<std::shared_ptr<ApiClient>> MainWindow::scope() const
 
 std::string MainWindow::server_label(const std::string& key) const
 	{
-	auto host = [](const std::string& url) {
-		auto from = url.find("://");
-		from = from==std::string::npos ? 0 : from+3;
-		return url.substr(from, url.find('/', from)-from);
-		};
 	for(const auto& s: servers_) {
 		if(s.key!=key) continue;
-		std::string h = host(s.url);
+		if(!s.name.empty()) return s.name;
+		std::string h = server_host(s.url);
 		for(const auto& o: servers_)
-			if(o.key!=key && host(o.url)==h) return s.user + "@" + h;
+			if(o.key!=key && server_host(o.url)==h) return s.user + "@" + h;
 		return h;
 		}
 	return "";
+	}
+
+void MainWindow::rename_server(const std::string& key, const std::string& name)
+	{
+	for(auto& s: servers_)
+		if(s.key==key) s.name = name;
+	save_servers(servers_);
+	// Not the servers page itself, whose entry this came from.
+	settings_pane_.load();
+	reload_lists();
 	}
 
 std::vector<std::pair<std::string, std::string>> MainWindow::server_choices() const

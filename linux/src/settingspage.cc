@@ -5,6 +5,8 @@
 
 #include <gtkmm/button.h>
 #include <gtkmm/checkbutton.h>
+#include <gtkmm/entry.h>
+#include <gtkmm/eventcontrollerfocus.h>
 #include <gtkmm/stringlist.h>
 
 SettingsPage::SettingsPage(AppSettings& settings, const std::vector<ServerConfig>& servers,
@@ -196,6 +198,24 @@ void SettingsPage::show_servers()
 		auto user = Gtk::make_managed<Gtk::Label>(s.user + (active ? " · connected" : " · login refused"));
 		user->set_xalign(0);
 		user->add_css_class("dim-label");
+		// Saved when the field is left or Enter pressed, not per letter:
+		// each save reloads the lists that show the name.
+		auto name = Gtk::make_managed<Gtk::Entry>();
+		name->set_text(s.name);
+		name->set_placeholder_text(server_host(s.url));
+		name->set_tooltip_text("The name album rows and the server picker show");
+		auto saved = std::make_shared<std::string>(s.name);
+		auto commit = [this, name, saved, key=s.key]() {
+			std::string text = name->get_text();
+			if(text==*saved) return;
+			*saved = text;
+			signal_rename_server.emit(key, text);
+			};
+		name->signal_activate().connect(commit);
+		auto focus = Gtk::EventControllerFocus::create();
+		focus->signal_leave().connect(commit);
+		name->add_controller(focus);
+		text->append(*name);
 		text->append(*url);
 		text->append(*user);
 		auto remove = Gtk::make_managed<Gtk::Button>("Remove");

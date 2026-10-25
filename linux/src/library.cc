@@ -27,9 +27,10 @@ namespace {
 ArtistPane::ArtistPane(CoverStore& covers)
 	: Pane(covers, 0, false)
 	{
-	scope_.set_icon_name("network-server-symbolic");
+	scope_.set_icon_name("gd-server-symbolic");
 	scope_.set_tooltip_text("Servers");
 	scope_.add_css_class("flat");
+	scope_.add_css_class("scope-button");
 	scope_.set_valign(Gtk::Align::CENTER);
 	scope_.set_visible(false);
 	scope_list_.set_margin_start(6);

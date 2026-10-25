@@ -54,6 +54,7 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void add_server();
 		void relogin(const std::string& key);
 		void remove_server(const std::string& key);
+		void rename_server(const std::string& key, const std::string& name);
 		// One server logs out; the others carry on.
 		void drop_client(const std::string& key, const std::string& message);
 		// The server list or its states changed.

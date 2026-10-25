@@ -11,7 +11,7 @@ std::vector<ServerConfig> load_servers()
 	const auto& arr = jsub(j, "servers");
 	for(size_t i=0; i<arr.size(); ++i) {
 		const auto& s = jidx(arr, i);
-		ServerConfig c{jstr(s, "key"), jstr(s, "url"), jstr(s, "user")};
+		ServerConfig c{jstr(s, "key"), jstr(s, "url"), jstr(s, "user"), jstr(s, "name")};
 		if(!c.key.empty() && !c.url.empty())
 			out.push_back(c);
 		}
@@ -22,6 +22,13 @@ void save_servers(const std::vector<ServerConfig>& servers)
 	{
 	nlohmann::json arr = nlohmann::json::array();
 	for(const auto& s: servers)
-		arr.push_back({{"key", s.key}, {"url", s.url}, {"user", s.user}});
+		arr.push_back({{"key", s.key}, {"url", s.url}, {"user", s.user}, {"name", s.name}});
 	write_config("servers.json", {{"servers", arr}});
+	}
+
+std::string server_host(const std::string& url)
+	{
+	auto from = url.find("://");
+	from = from==std::string::npos ? 0 : from+3;
+	return url.substr(from, url.find('/', from)-from);
 	}
