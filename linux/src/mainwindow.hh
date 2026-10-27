@@ -19,7 +19,6 @@
 #include <memory>
 
 #include <gtkmm/applicationwindow.h>
-#include <gtkmm/headerbar.h>
 #include <gtkmm/label.h>
 #include <gtkmm/listbox.h>
 #include <gtkmm/overlay.h>
@@ -121,7 +120,6 @@ class MainWindow : public Gtk::ApplicationWindow {
 		std::vector<ServerConfig>  servers_;
 		Playback                   playback_;
 
-		Gtk::HeaderBar             header_;
 		Gtk::Stack                 stack_;
 		LoginView                  login_;
 

@@ -195,7 +195,10 @@ void AlbumEditor::start(std::shared_ptr<ApiClient> api, const Album& album,
 	tracks.set_visible(true);
 	save_.set_sensitive(true);
 	cancel_.set_sensitive(true);
-	name_.grab_focus();
+	// Focus for typing at once, but no selection: a stray key would
+	// otherwise replace the whole title.
+	name_.grab_focus_without_selecting();
+	name_.set_position(-1);
 	}
 
 void AlbumEditor::add_year_all(int grid_row, int disc)

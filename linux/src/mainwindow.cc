@@ -110,6 +110,11 @@ namespace {
 			outline-color: alpha(@gd_red, 0.5);
 			box-shadow: inset 0 0 0 2px alpha(@gd_red, 0.5);
 		}
+		/* Selected text in fields, text views and selectable labels. */
+		text > selection, textview > text > selection, label > selection {
+			background-color: @gd_red;
+			color: white;
+		}
 		.settings-hint { font-size: 0.9em; margin: 6px 4px 0 4px; }
 		/* The upload form's cards hold fields rather than rows. */
 		.upload-card { padding: 12px; }
@@ -330,7 +335,6 @@ MainWindow::MainWindow()
 		save_view();
 		return false;
 		}, false);
-	set_titlebar(header_);
 
 	// Notices about failed requests, above everything else.
 	notice_text_.set_wrap(true);
