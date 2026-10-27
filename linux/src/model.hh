@@ -36,6 +36,8 @@ struct Album {
 	int         song_count=0;
 	int         video_count=0;
 	bool        starred=false;
+	// The server's answer to "may this account edit it", from getAlbum only.
+	bool        writable=false;
 	// The same album on the servers after `ref`'s, when merged.
 	std::vector<ItemRef> also;
 };
@@ -50,6 +52,7 @@ struct Song {
 	int         track=0;
 	int         disc=1;
 	int         season=0;
+	int         year=0;
 	int         duration=0;   // seconds
 	std::string album_id;
 	std::string last_played;  // ISO 8601, from getRecentSongs only

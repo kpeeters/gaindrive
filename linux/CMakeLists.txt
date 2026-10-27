@@ -110,6 +110,7 @@ add_custom_command(
 
 add_executable(gaindrive-player
 	src/main.cc
+	src/albumedit.cc
 	src/apiclient.cc
 	src/castbutton.cc
 	src/clients.cc
@@ -139,6 +140,7 @@ add_executable(gaindrive-player
 	src/trackinfo.cc
 	src/tunebutton.cc
 	src/uithread.cc
+	src/uploads.cc
 	src/videocodecs.cc
 	src/videoview.cc
 	src/wiimpanel.cc

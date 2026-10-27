@@ -24,6 +24,9 @@
 // leftover .users.
 bool is_hidden_name(const std::filesystem::path& p);
 
+// By extension, the same test the scanner uses to pick ffprobe over TagLib.
+bool is_video_file(const std::filesystem::path& p);
+
 // The marker a producer holds while a personal upload batch is still being
 // rearranged: "<uploads>/<user>/<uuid>.inflight", beside the batch directory
 // and deliberately not inside it, because reparent_loose_media() sweeps every

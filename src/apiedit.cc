@@ -25,7 +25,9 @@
 #include <archive_entry.h>
 #include <taglib/fileref.h>
 #include <taglib/tag.h>
+#include <tfilestream.h>
 #include <tpropertymap.h>
+#include <functional>
 
 #include <iostream>
 
@@ -33,6 +35,74 @@
 #include <nlohmann/json.hpp>
 
 using namespace tinyxml2;
+
+namespace {
+
+enum class TagSave { Saved, NotTaggable, Failed };
+
+// Write tags into a copy and rename it over the original, never into the
+// file itself.  TagLib saves in place, and a tag that outgrows its padding
+// shifts the audio inside the same inode - so a stream already reading the
+// file (one is, whenever somebody edits or moves what they are listening
+// to) carries on at its old offsets into moved data.  A rename leaves that
+// reader on the old inode and gives every later open the new one.
+//
+// The copy sits beside the original so the rename stays on one filesystem
+// and is atomic; the dot keeps a concurrent scan off it (is_hidden_name),
+// and the original extension is what TagLib picks the format by.
+TagSave save_tags_replacing(const std::filesystem::path& p,
+                            const std::function<void(TagLib::FileRef&)>& edit)
+	{
+	namespace fs = std::filesystem;
+	// Probed read-only first, so that a walk over an album directory does
+	// not copy every cover and booklet only to find TagLib cannot use it.
+	{
+	TagLib::FileStream stream(p.c_str(), true /* readOnly */);
+	TagLib::FileRef    f(&stream, false /* readAudioProperties */);
+	if (f.isNull() || !f.tag()) return TagSave::NotTaggable;
+	}
+
+	const fs::path tmp = p.parent_path()
+		/ ("." + p.stem().string() + ".gdtag" + p.extension().string());
+	std::error_code ec;
+	try {
+		fs::copy_file(p, tmp, fs::copy_options::overwrite_existing, ec);
+		if (ec) {
+			std::cout << stamp() << "Tags: could not copy " << p << ": "
+			          << ec.message() << std::endl;
+			fs::remove(tmp, ec);
+			return TagSave::Failed;
+			}
+		bool saved = false;
+		{
+		TagLib::FileRef f(tmp.c_str());
+		if (!f.isNull() && f.tag()) {
+			edit(f);
+			saved = f.save();
+			}
+		}
+		if (saved) fs::rename(tmp, p, ec);
+		if (!saved || ec) {
+			std::cout << stamp() << "Tags: could not write " << p
+			          << (ec ? ": " + ec.message() : std::string()) << std::endl;
+			fs::remove(tmp, ec);
+			return TagSave::Failed;
+			}
+		return TagSave::Saved;
+		}
+	catch (const std::exception& ex) {
+		std::cout << stamp() << "Tags: exception writing " << p << ": "
+		          << ex.what() << std::endl;
+		}
+	catch (...) {
+		std::cout << stamp() << "Tags: unknown exception writing " << p
+		          << std::endl;
+		}
+	fs::remove(tmp, ec);
+	return TagSave::Failed;
+	}
+
+}
 
 void GainDrive::routes_edit()
 	{
@@ -94,19 +164,14 @@ void GainDrive::routes_edit()
 			}
 		else {
 			// Write tags first - if this fails we must not update the database.
-			try {
-				std::string song_abs = store_.abs_path(song->path);
-				if (!store_.path_is_within_root(song_abs)) {
-					std::cout << stamp(client_addr(req)) << "updateSong: refusing path outside every root: "
-					          << song_abs << std::endl;
-					err(0, "Refusing to write outside the configured roots.");
-					return;
-					}
-				TagLib::FileRef f(song_abs.c_str());
-				if (f.isNull() || !f.tag()) {
-					err(0, "Could not open file for tag editing.");
-					return;
-					}
+			std::string song_abs = store_.abs_path(song->path);
+			if (!store_.path_is_within_root(song_abs)) {
+				std::cout << stamp(client_addr(req)) << "updateSong: refusing path outside every root: "
+				          << song_abs << std::endl;
+				err(0, "Refusing to write outside the configured roots.");
+				return;
+				}
+			auto saved = save_tags_replacing(song_abs, [&](TagLib::FileRef& f) {
 				if (title)        f.tag()->setTitle(TagLib::String(*title, TagLib::String::UTF8));
 				if (track_number) f.tag()->setTrack(*track_number);
 				if (year)         f.tag()->setYear(*year);
@@ -117,13 +182,13 @@ void GainDrive::routes_edit()
 						TagLib::StringList(TagLib::String(std::to_string(*disc_number))));
 					f.file()->setProperties(props);
 					}
-				if (!f.save()) {
-					err(0, "Could not write tags to file.");
-					return;
-					}
+				});
+			if (saved == TagSave::NotTaggable) {
+				err(0, "Could not open file for tag editing.");
+				return;
 				}
-			catch (...) {
-				err(0, "Exception while writing tags to file.");
+			if (saved == TagSave::Failed) {
+				err(0, "Could not write tags to file.");
 				return;
 				}
 			}
@@ -919,9 +984,12 @@ void GainDrive::routes_edit()
 		                          && dest_root_type == "artists";
 		int tag_failures = 0;
 		auto tag_one = [&](const fs::path& p) {
-			try {
-				TagLib::FileRef f(p.c_str());
-				if (f.isNull() || !f.tag()) return;   // not a taggable file
+			// Nothing reads a video's tag back - the scanner takes a film's
+			// names from ffprobe and the filename - and the copy that
+			// save_tags_replacing() makes would be gigabytes inside this
+			// request.
+			if (is_video_file(p)) return;
+			auto saved = save_tags_replacing(p, [&](TagLib::FileRef& f) {
 				if (write_album)
 					f.tag()->setAlbum(TagLib::String(new_album, TagLib::String::UTF8));
 				// Only overwrite an artist tag that was the old folder's
@@ -937,22 +1005,9 @@ void GainDrive::routes_edit()
 						f.tag()->setArtist(
 							TagLib::String(new_folder, TagLib::String::UTF8));
 					}
-				if (!f.save()) {
-					++tag_failures;
-					std::cout << stamp() << "Move: could not write tags to "
-					          << p << std::endl;
-					}
-				}
-			catch (const std::exception& ex) {
-				++tag_failures;
-				std::cout << stamp() << "Move: exception tagging " << p
-				          << ": " << ex.what() << std::endl;
-				}
-			catch (...) {
-				++tag_failures;
-				std::cout << stamp() << "Move: unknown exception tagging "
-				          << p << std::endl;
-				}
+				});
+			// The helper has already logged why.
+			if (saved == TagSave::Failed) ++tag_failures;
 			};
 		if (write_album || write_artist) {
 			// One file or a directory of them.  The walk is not merely
@@ -961,11 +1016,16 @@ void GainDrive::routes_edit()
 			// would report tagFailures 0 having written nothing at all.
 			if (file_album)
 				tag_one(abs_target);
-			else
-				for (auto& e : fs::recursive_directory_iterator(abs_target, ec)) {
-					if (!e.is_regular_file()) continue;
-					tag_one(e.path());
-					}
+			else {
+				// Listed before any is tagged: each tag write creates and
+				// renames entries in the directory being walked, and what
+				// an iterator makes of that is unspecified.
+				std::vector<fs::path> files;
+				for (auto& e : fs::recursive_directory_iterator(abs_target, ec))
+					if (e.is_regular_file() && !is_hidden_name(e.path()))
+						files.push_back(e.path());
+				for (const auto& f : files) tag_one(f);
+				}
 			}
 
 		// An emptied source directory is gone as far as the library is

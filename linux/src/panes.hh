@@ -22,10 +22,12 @@
 #include <memory>
 #include <set>
 
+class AlbumEditor;
 class ApiClient;
 class CoverStore;
 class CoverImage;
 class InfoBlock;
+class HeightClip;
 struct ApiResult;
 struct AppSettings;
 struct ServerConfig;
@@ -47,6 +49,9 @@ class RowWidget : public Gtk::Box {
 		// playlist the user owns, "remove from it".
 		enum class ListButton { none, add, remove };
 		void show_actions(bool star, bool starred, ListButton list, bool queue);
+		// An upload's own buttons, in the uploads listing only: delete it,
+		// and move it into the shared library.
+		void show_upload_actions(bool remove, bool promote);
 		// The web's film mark, before the title (a video) or the subtitle
 		// (an album holding videos); show_item clears it.
 		enum class VideoMark { none, title, subtitle };
@@ -62,7 +67,7 @@ class RowWidget : public Gtk::Box {
 
 		// The row currently bound here.
 		Glib::RefPtr<ListRow> row;
-		Gtk::Button           star, list, queue;
+		Gtk::Button           star, list, queue, remove_upload, promote;
 		ListButton            list_mode=ListButton::none;
 		// The pane's set of live row widgets, which this one leaves when it
 		// is destroyed. GTK does not promise the child is still reachable
@@ -140,6 +145,8 @@ class Pane : public Gtk::Box {
 		virtual void bind(RowWidget& w, const ListRow& row) = 0;
 		virtual void activated(const ListRow&) {}
 		virtual void remove_from_list(const ListRow&) {}
+		// One of the upload buttons of `row`.
+		virtual void upload_action(const ListRow&, bool) {}
 		// Whether the row stands for what plays now; by default the song row
 		// of the current track.
 		virtual bool is_playing(const ListRow& row) const;
@@ -200,6 +207,10 @@ class ArtistPane : public Pane {
 
 		// A scope picked: a server's key, or empty for all.
 		sigc::signal<void(const std::string&)> signal_scope;
+		// The way into the uploads listing, shown only to an account that
+		// may upload.
+		void set_uploads_button(bool on);
+		sigc::signal<void()>                   signal_uploads;
 
 	protected:
 		void bind(RowWidget& w, const ListRow& row) override;
@@ -213,6 +224,7 @@ class ArtistPane : public Pane {
 		Gtk::MenuButton scope_;
 		Gtk::Popover    scope_popover_;
 		Gtk::Box        scope_list_{Gtk::Orientation::VERTICAL, 2};
+		Gtk::Button     uploads_;
 };
 
 class AlbumPane : public Pane {
@@ -226,13 +238,20 @@ class AlbumPane : public Pane {
 		// Whether the albums shown are this artist's, on any of its servers.
 		bool shows_artist(const ItemRef& ref) const;
 		void clear() override;
+		// The artist shown next is one in the uploads listing: its albums
+		// can be deleted, and by an admin, moved into the library.
+		void set_uploads(bool on, bool admin);
 
 		sigc::signal<void(const Album&)> signal_album;
+		// With the name of the upload's artist, its level-1 folder.
+		sigc::signal<void(const Album&, const std::string& artist)> signal_delete_upload;
+		sigc::signal<void(const Album&, const std::string& artist)> signal_promote;
 
 	protected:
 		void bind(RowWidget& w, const ListRow& row) override;
 		void activated(const ListRow& row) override;
 		Glib::ustring search_text(const ListRow& row) const override;
+		void upload_action(const ListRow& row, bool promote) override;
 
 	private:
 		void render();
@@ -244,7 +263,9 @@ class AlbumPane : public Pane {
 		std::unique_ptr<InfoBlock> bio_;
 		std::vector<Album>         albums_;
 		std::vector<ItemRef>       artist_;
+		std::string                artist_name_;
 		bool                       category_=false;
+		bool                       uploads_=false, admin_=false;
 };
 
 class TrackPane : public Pane {
@@ -256,6 +277,7 @@ class TrackPane : public Pane {
 		void show_album(std::shared_ptr<ApiClient> api, const std::string& album_id,
 		                const std::string& play_id="");
 		void clear() override;
+		void star_changed(ListRow::Kind kind, const ItemRef& ref, bool on) override;
 
 		// Marks a chapter of `film` as playing; -1 for none. 0-based, as
 		// the film's own chapter list counts.
@@ -265,6 +287,9 @@ class TrackPane : public Pane {
 		sigc::signal<void(const Album&)> signal_loaded;
 		// A chapter row was picked: play songs[index] from `start`.
 		sigc::signal<void(const std::vector<Song>&, size_t, double start)> signal_play_chapter;
+		// Saved edits the listing cannot patch in place: show the album
+		// afresh where it now is, under `artist`.
+		sigc::signal<void(const ItemRef& artist, const ItemRef& album)> signal_edited;
 
 	protected:
 		void bind(RowWidget& w, const ListRow& row) override;
@@ -279,6 +304,12 @@ class TrackPane : public Pane {
 			std::string name;
 		};
 		void show_rows();
+		void show_star();
+		// The number shown before songs_[i].
+		std::string number(size_t i) const;
+		void start_edit();
+		void end_edit();
+		void show_hero();
 
 		void show_image(int index);
 		void load_texts(std::shared_ptr<ApiClient> api, const std::string& album_id);
@@ -293,6 +324,11 @@ class TrackPane : public Pane {
 		Album                       album_;
 		std::shared_ptr<ApiClient>  api_;
 
+		// The album's own star, as the web and Android have it by the title.
+		Gtk::Button                 star_;
+		// Shown when the server says this account may change the album.
+		Gtk::Button                 edit_;
+		std::unique_ptr<AlbumEditor> editor_;
 		Gtk::Overlay                hero_box_;
 		std::unique_ptr<CoverImage> hero_;
 		Gtk::Button                 img_prev_, img_next_;
@@ -303,6 +339,7 @@ class TrackPane : public Pane {
 		Gtk::Box                    texts_, texts_nav_;
 		Gtk::Button                 text_prev_, text_next_;
 		Gtk::Label                  text_name_, text_body_;
+		std::unique_ptr<HeightClip> name_clip_, text_clip_;
 		std::vector<std::string>    text_files_;
 		size_t                      text_=0;
 };

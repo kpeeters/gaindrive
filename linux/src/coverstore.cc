@@ -247,6 +247,20 @@ Glib::RefPtr<Gdk::Texture> CoverStore::get(const ItemRef& cover, int px, std::st
 	return {};
 	}
 
+void CoverStore::forget(const ItemRef& cover)
+	{
+	auto prefix = cover.server + "|" + cover.id + "|";
+	for(auto it=ages_.begin(); it!=ages_.end(); ) {
+		if(it->starts_with(prefix)) {
+			memory_.erase(*it);
+			it = ages_.erase(it);
+			}
+		else ++it;
+		}
+	std::erase_if(missing_, [&prefix](const auto& m) { return m.first.starts_with(prefix); });
+	signal_forgotten.emit(cover);
+	}
+
 void CoverStore::remember(const std::string& key, const Glib::RefPtr<Gdk::Texture>& tex)
 	{
 	ages_.push_front(key);
@@ -270,6 +284,7 @@ CoverImage::CoverImage(CoverStore& store, int css_px)
 	// when this widget is destroyed, which a ListView does as it shrinks.
 	store_.signal_ready.connect(sigc::mem_fun(*this, &CoverImage::ready));
 	store_.signal_later.connect(sigc::mem_fun(*this, &CoverImage::later));
+	store_.signal_forgotten.connect(sigc::mem_fun(*this, &CoverImage::forgotten));
 	}
 
 CoverImage::~CoverImage()
@@ -282,6 +297,12 @@ void CoverImage::ready(const std::string& key, const Glib::RefPtr<Gdk::Texture>&
 	{
 	if(key==wanted_)
 		set(tex);
+	}
+
+void CoverImage::forgotten(const ItemRef& cover)
+	{
+	if(cover.server==server_ && cover.id==cover_id_)
+		show_cover(cover, index_);
 	}
 
 void CoverImage::show_cover(const ItemRef& cover, int index)

@@ -1,4 +1,5 @@
 #include "panes.hh"
+#include "albumedit.hh"
 #include "apiclient.hh"
 #include "coverstore.hh"
 #include "infoblock.hh"
@@ -40,6 +41,19 @@ ArtistPane::ArtistPane(CoverStore& covers)
 	scope_popover_.set_child(scope_list_);
 	scope_.set_popover(scope_popover_);
 	header_.append(scope_);
+	uploads_.set_icon_name("gd-uploads-symbolic");
+	uploads_.set_tooltip_text("Uploads");
+	uploads_.add_css_class("flat");
+	uploads_.add_css_class("uploads-button");
+	uploads_.set_valign(Gtk::Align::CENTER);
+	uploads_.set_visible(false);
+	uploads_.signal_clicked().connect([this]() { signal_uploads.emit(); });
+	header_.append(uploads_);
+	}
+
+void ArtistPane::set_uploads_button(bool on)
+	{
+	uploads_.set_visible(on);
 	}
 
 void ArtistPane::set_servers(const std::vector<std::pair<std::string, std::string>>& servers,
@@ -299,6 +313,7 @@ void AlbumPane::show_artist(const ServerCalls& sources, const Artist& artist)
 	for(const auto& [api, p]: sources)
 		artist_.push_back({api->session().server_key, p.front().second});
 	category_  = artist.category;
+	artist_name_ = artist.name;
 	set_title(artist.name);
 	label_sort();
 	sort_.set_visible(true);
@@ -367,6 +382,20 @@ void AlbumPane::bind(RowWidget& w, const ListRow& row)
 	w.show_item({a.ref.server, a.cover_art}, "", a.title, meta, "");
 	show_album_videos(w, a);
 	w.show_actions(true, a.starred, RowWidget::ListButton::none, false);
+	w.show_upload_actions(uploads_, uploads_ && admin_);
+	}
+
+void AlbumPane::set_uploads(bool on, bool admin)
+	{
+	uploads_ = on;
+	admin_   = admin;
+	}
+
+void AlbumPane::upload_action(const ListRow& row, bool promote)
+	{
+	if(row.kind!=ListRow::Kind::album) return;
+	if(promote) signal_promote.emit(row.album, artist_name_);
+	else        signal_delete_upload.emit(row.album, artist_name_);
 	}
 
 void AlbumPane::activated(const ListRow& row)
@@ -387,11 +416,53 @@ Glib::ustring AlbumPane::search_text(const ListRow& row) const
 
 TrackPane::TrackPane(CoverStore& covers)
 	: Pane(covers, 0, true),
+	  editor_(std::make_unique<AlbumEditor>()),
 	  hero_(std::make_unique<CoverImage>(covers, 320)),
 	  notes_(std::make_unique<InfoBlock>(covers, 0)),
 	  texts_(Gtk::Orientation::VERTICAL, 6),
-	  texts_nav_(Gtk::Orientation::HORIZONTAL, 6)
+	  texts_nav_(Gtk::Orientation::HORIZONTAL, 6),
+	  name_clip_(std::make_unique<HeightClip>(text_name_)),
+	  text_clip_(std::make_unique<HeightClip>(text_body_))
 	{
+	star_.add_css_class("flat");
+	star_.add_css_class("row-action");
+	star_.add_css_class("album-star");
+	star_.set_valign(Gtk::Align::CENTER);
+	star_.signal_clicked().connect([this]() {
+		signal_star.emit(ListRow::Kind::album, album_.ref, !album_.starred);
+		});
+	header_.append(star_);
+
+	// Edit mode, as on the web: the title gives way to the album and artist
+	// fields, Edit to Save and Cancel, the listing to a grid of fields.
+	edit_.set_label("Edit");
+	edit_.add_css_class("flat");
+	edit_.set_valign(Gtk::Align::CENTER);
+	edit_.signal_clicked().connect(sigc::mem_fun(*this, &TrackPane::start_edit));
+	header_.insert_child_after(editor_->fields, title_);
+	header_.append(edit_);
+	header_.append(editor_->buttons);
+	editor_->signal_preview.connect([this](const Glib::RefPtr<Gdk::Texture>& tex) {
+		if(!tex) {
+			show_hero();
+			return;
+			}
+		hero_->show_cover({});
+		hero_->set(tex);
+		});
+	editor_->signal_cancelled.connect(sigc::mem_fun(*this, &TrackPane::end_edit));
+	editor_->signal_saved.connect([this](const AlbumEditor::Saved& saved) {
+		if(saved.cover && !album_.cover_art.empty())
+			covers_.forget({album_.ref.server, album_.cover_art});
+		if(saved.reload) {
+			end_edit();
+			signal_edited.emit(saved.artist, saved.album);
+			return;
+			}
+		songs_ = saved.songs;
+		end_edit();
+		});
+
 	// The album's further images, behind arrows over the cover.
 	hero_box_.set_child(*hero_);
 	hero_box_.set_halign(Gtk::Align::CENTER);
@@ -409,31 +480,45 @@ TrackPane::TrackPane(CoverStore& covers)
 		b->add_css_class("circular");
 		hero_box_.add_overlay(*b);
 		}
+	hero_box_.add_overlay(editor_->pencil);
 	img_prev_.signal_clicked().connect([this]() { if(image_>0) show_image(image_-1); });
 	img_next_.signal_clicked().connect([this]() { if(image_+1<images_) show_image(image_+1); });
 	top_.append(hero_box_);
 	notes_->set_margin_start(12);
 	notes_->set_margin_end(12);
 	top_.append(*notes_);
+	editor_->tracks.set_margin_start(12);
+	editor_->tracks.set_margin_end(12);
+	top_.append(editor_->tracks);
 
 	text_prev_.set_icon_name("gd-chevron-left-symbolic");
 	text_prev_.add_css_class("flat");
 	text_next_.set_icon_name("gd-chevron-right-symbolic");
 	text_next_.add_css_class("flat");
 	text_name_.add_css_class("heading");
-	text_name_.set_hexpand(true);
 	text_name_.set_xalign(0);
+	// File names can be as long as the rules in them, so as the text below.
+	text_name_.set_wrap(true);
+	text_name_.set_wrap_mode(Pango::WrapMode::WORD_CHAR);
+	name_clip_->set_hexpand(true);
+	// Arrows at their own size beside a name on two lines.
+	text_prev_.set_valign(Gtk::Align::CENTER);
+	text_next_.set_valign(Gtk::Align::CENTER);
 	texts_nav_.append(text_prev_);
-	texts_nav_.append(text_name_);
+	texts_nav_.append(*name_clip_);
 	texts_nav_.append(text_next_);
 	text_body_.set_wrap(true);
+	// Text files hold rules and URLs longer than the pane; breaking those
+	// too, and the clip asking no more width than that, keeps the file
+	// from widening the pane.
+	text_body_.set_wrap_mode(Pango::WrapMode::WORD_CHAR);
 	text_body_.set_xalign(0);
 	text_body_.set_selectable(true);
 	// As InfoBlock's text: no select-all when focus wanders onto it.
 	text_body_.set_focusable(false);
 	text_body_.add_css_class("monospace");
 	texts_.append(texts_nav_);
-	texts_.append(text_body_);
+	texts_.append(*text_clip_);
 	texts_.add_css_class("liner-notes");
 	text_prev_.signal_clicked().connect([this]() { if(text_>0) show_text(text_-1); });
 	text_next_.signal_clicked().connect([this]() { if(text_+1<text_files_.size()) show_text(text_+1); });
@@ -447,6 +532,9 @@ TrackPane::~TrackPane() = default;
 void TrackPane::clear()
 	{
 	Pane::clear();
+	editor_->stop();
+	title_.set_visible(true);
+	edit_.set_visible(false);
 	hero_->show_cover({});
 	hero_box_.set_visible(false);
 	image_  = 0;
@@ -460,6 +548,25 @@ void TrackPane::clear()
 	chapters_.clear();
 	album_ = Album{};
 	api_.reset();
+	star_.set_visible(false);
+	}
+
+void TrackPane::star_changed(ListRow::Kind kind, const ItemRef& ref, bool on)
+	{
+	Pane::star_changed(kind, ref, on);
+	if(kind==ListRow::Kind::album && ref.id==album_.ref.id && ref.server==album_.ref.server) {
+		album_.starred = on;
+		show_star();
+		}
+	}
+
+void TrackPane::show_star()
+	{
+	star_.set_visible(true);
+	star_.set_icon_name(album_.starred ? "gd-star-filled-symbolic" : "gd-star-symbolic");
+	star_.set_tooltip_text(album_.starred ? "Unstar album" : "Star album");
+	if(album_.starred) star_.add_css_class("starred");
+	else               star_.remove_css_class("starred");
 	}
 
 void TrackPane::show_album(std::shared_ptr<ApiClient> api, const std::string& album_id,
@@ -479,6 +586,8 @@ void TrackPane::show_album(std::shared_ptr<ApiClient> api, const std::string& al
 		const auto& album  = jsub(r.body, "album");
 		album_ = parse_album(server, album);
 		set_title(album_.title);
+		show_star();
+		edit_.set_visible(album_.writable);
 		if(!album_.cover_art.empty()) {
 			hero_box_.set_visible(true);
 			show_image(0);
@@ -527,12 +636,11 @@ void TrackPane::show_album(std::shared_ptr<ApiClient> api, const std::string& al
 
 void TrackPane::show_rows()
 	{
+	// Chapters arriving late must not put the listing back over the fields.
+	if(editor_->editing()) return;
 	std::set<int> discs;
 	for(const auto& s: songs_) discs.insert(s.disc);
 	bool multi_disc = discs.size()>1;
-	// Untagged files all say track 0 or 1; counting is more use then.
-	bool sequential = std::all_of(songs_.begin(), songs_.end(),
-	                              [](const Song& s) { return s.track<=1; });
 
 	std::vector<Glib::RefPtr<ListRow>> rows;
 	int disc = 0;
@@ -544,8 +652,7 @@ void TrackPane::show_rows()
 			rows.push_back(ListRow::heading((s.season>0 ? "Series " : "Disc ") + std::to_string(disc)));
 			}
 		auto row = ListRow::of(s);
-		int n = sequential ? int(i)+1 : s.track;
-		row->text = n>0 ? std::to_string(n) : "";
+		row->text = number(i);
 		rows.push_back(row);
 		auto ch = chapters_.find(s.ref.id);
 		if(ch!=chapters_.end())
@@ -555,6 +662,54 @@ void TrackPane::show_rows()
 				}
 		}
 	set_rows(rows);
+	}
+
+std::string TrackPane::number(size_t i) const
+	{
+	// Untagged files all say track 0 or 1; counting is more use then.
+	bool sequential = std::all_of(songs_.begin(), songs_.end(),
+	                              [](const Song& s) { return s.track<=1; });
+	int n = sequential ? int(i)+1 : songs_[i].track;
+	return n>0 ? std::to_string(n) : "";
+	}
+
+void TrackPane::start_edit()
+	{
+	if(!api_ || editor_->editing()) return;
+	std::vector<std::string> numbers;
+	for(size_t i=0; i<songs_.size(); ++i)
+		numbers.push_back(number(i));
+	editor_->start(api_, album_, songs_, numbers);
+	title_.set_visible(false);
+	edit_.set_visible(false);
+	show_hero();
+	set_rows({});
+	}
+
+void TrackPane::end_edit()
+	{
+	editor_->stop();
+	title_.set_visible(true);
+	edit_.set_visible(album_.writable);
+	show_hero();
+	show_rows();
+	}
+
+void TrackPane::show_hero()
+	{
+	if(!album_.cover_art.empty()) {
+		hero_box_.set_visible(true);
+		show_image(editor_->editing() ? 0 : image_);
+		if(editor_->editing()) {
+			img_prev_.set_visible(false);
+			img_next_.set_visible(false);
+			}
+		return;
+		}
+	// Somewhere for the pencil to sit while there is no cover yet.
+	hero_->show_cover({});
+	if(editor_->editing()) hero_->set_from_icon_name("gd-music-note-symbolic");
+	hero_box_.set_visible(editor_->editing());
 	}
 
 void TrackPane::show_image(int index)

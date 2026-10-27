@@ -111,6 +111,22 @@ namespace {
 			box-shadow: inset 0 0 0 2px alpha(@gd_red, 0.5);
 		}
 		.settings-hint { font-size: 0.9em; margin: 6px 4px 0 4px; }
+		/* The upload form's cards hold fields rather than rows. */
+		.upload-card { padding: 12px; }
+		.upload-note { color: @gd_red; }
+		.upload-card progressbar > trough > progress {
+			background-color: @gd_red;
+			background-image: none;
+			border-color: @gd_red;
+		}
+		/* The fetch mode in red, not the theme's blue; WhiteSur paints a
+		   checked button with a gradient and light text. */
+		.upload-mode > button:checked {
+			background-color: alpha(@gd_red, 0.15);
+			background-image: none;
+			color: @gd_red;
+			box-shadow: none;
+		}
 		/* The server's name is the row's title, edited in place: no field
 		   until it is pointed at or typed in. */
 		.name-entry {
@@ -148,8 +164,10 @@ namespace {
 		.info-links button.link:hover { background-color: alpha(@gd_red, 0.2); }
 		.info-links button.link label { text-decoration: none; }
 		.liner-notes { margin: 12px; }
+		.track-edit { margin-bottom: 12px; }
+		.track-edit .edit-all { padding: 0 6px; min-height: 0; }
 		.row-action { min-width: 24px; min-height: 24px; padding: 2px; }
-		.row-action.starred { color: @accent_color; }
+		.row-action.starred { color: @gd_red; }
 		/* Selected and focused too, so the keyboard reaches them. */
 		.hover-actions .row-action { opacity: 0; transition: opacity 100ms; }
 		row:hover .hover-actions .row-action,
@@ -162,6 +180,11 @@ namespace {
 		/* Filled, so the full foreground reads as black beside the
 		   outlined icons; dimmed as Material's top bar dims its actions. */
 		.pane .scope-button image { -gtk-icon-size: 40px; opacity: 0.65; }
+		/* Half as large again as other pane buttons, as the bar's extras are:
+		   the outlined arrow is thin at 20px. */
+		.pane .uploads-button > image { -gtk-icon-size: 30px; }
+		/* The album header's star, sized as the bar's other extras. */
+		.pane .album-star > image { -gtk-icon-size: 30px; }
 		/* Direct children only: the cast popover hangs off the bar too. */
 		.player-row > button > image,
 		.player-row > menubutton > button image { -gtk-icon-size: 48px; }
@@ -235,11 +258,19 @@ namespace {
 	struct Section { const char *name, *label; };
 	const Section sections[] = {
 		{ "library",   "Library" },
+		{ "uploads",   "Uploads" },
 		{ "playlists", "Playlists" },
 		{ "recents",   "Recents" },
 		{ "search",    "Search" },
 		{ "settings",  "Settings" }
 	};
+
+	int section_index(const std::string& name)
+		{
+		for(size_t i=0; i<std::size(sections); ++i)
+			if(name==sections[i].name) return int(i);
+		return 0;
+		}
 
 	// Below this window width, the web client's phone layout: no sidebar,
 	// the sections in a bar along the bottom.
@@ -265,6 +296,7 @@ MainWindow::MainWindow()
 	  queue_(playback_),
 	  video_(playback_, settings_),
 	  artists_(covers_),
+	  uploads_(covers_, settings_),
 	  playlists_(covers_),
 	  recents_(covers_),
 	  search_(covers_, settings_),
@@ -328,6 +360,7 @@ MainWindow::MainWindow()
 	main_.append(sidebar_);
 
 	left_.add(artists_, "library");
+	left_.add(uploads_, "uploads");
 	left_.add(playlists_, "playlists");
 	left_.add(recents_, "recents");
 	left_.add(search_, "search");
@@ -361,6 +394,7 @@ MainWindow::MainWindow()
 	browse_.append(bar_);
 	build_tabs();
 	browse_.append(tabs_);
+	set_upload_server(nullptr, false);
 	browse_.signal_narrow.connect(sigc::mem_fun(*this, &MainWindow::set_narrow));
 	install_tune_closers();
 
@@ -383,17 +417,17 @@ MainWindow::MainWindow()
 		if(clients_.empty() || content_.get_visible_child_name()=="video") return false;
 		if((state & (M::CONTROL_MASK | M::ALT_MASK | M::SUPER_MASK))!=M(0)) return false;
 		bool shift = (state & M::SHIFT_MASK)==M::SHIFT_MASK;
-		int index = -1;
+		std::string name;
 		switch(gdk_keyval_to_lower(keyval)) {
-			case GDK_KEY_l:     if(shift) index = 0; break;
-			case GDK_KEY_p:     if(shift) index = 1; break;
-			case GDK_KEY_r:     if(shift) index = 2; break;
-			case GDK_KEY_s:     if(shift) index = 4; break;
-			case GDK_KEY_slash: index = 3; break;
+			case GDK_KEY_l:     if(shift) name = "library"; break;
+			case GDK_KEY_p:     if(shift) name = "playlists"; break;
+			case GDK_KEY_r:     if(shift) name = "recents"; break;
+			case GDK_KEY_s:     if(shift) name = "settings"; break;
+			case GDK_KEY_slash: name = "search"; break;
 			}
-		if(index<0) return false;
-		nav_.select_row(*nav_.get_row_at_index(index));
-		if(index==3) search_.focus_entry();
+		if(name.empty()) return false;
+		select_section(name);
+		if(name=="search") search_.focus_entry();
 		return true;
 		}, false);
 	browse_.add_controller(view_keys);
@@ -446,7 +480,7 @@ MainWindow::MainWindow()
 		});
 	auto search = Gio::SimpleAction::create("search");
 	search->signal_activate().connect([this](const Glib::VariantBase&) {
-		if(!clients_.empty()) nav_.select_row(*nav_.get_row_at_index(3));
+		if(!clients_.empty()) select_section("search");
 		});
 	add_action(search);
 
@@ -464,7 +498,24 @@ MainWindow::MainWindow()
 	albums_.signal_album.connect([this](const Album& a) {
 		open_album(a.ref, "");
 		});
+	albums_.signal_delete_upload.connect([this](const Album& a, const std::string&) {
+		delete_upload(a);
+		});
+	albums_.signal_promote.connect(sigc::mem_fun(*this, &MainWindow::promote_upload));
+	artists_.signal_uploads.connect([this]() { select_section("uploads"); });
 	tracks_.signal_loaded.connect(sigc::mem_fun(*this, &MainWindow::album_loaded));
+	// An edit can rename the album, and its artist's directory with it, or
+	// change the year its row shows; the listings it came from follow.
+	tracks_.signal_edited.connect([this](const ItemRef& artist, const ItemRef& album) {
+		if(view_.section=="library" || view_.section=="uploads") {
+			reveal_album(artist, album);
+			return;
+			}
+		// Opened from a list of another kind, which stays as it is; the
+		// artist's albums are drawn afresh with the album.
+		albums_.clear();
+		open_album(album, "");
+		});
 	// No resume prompt: the chapter is where to start.
 	tracks_.signal_play_chapter.connect([this](const std::vector<Song>& songs, size_t index, double start) {
 		const Song *now = playback_.current();
@@ -664,6 +715,7 @@ void MainWindow::open_browse()
 	artists_.set_servers(server_choices(), settings_.scope);
 	search_.set_scope(scope());
 	artists_.load(scope());
+	find_upload_server();
 	restore_view();
 	stack_.set_visible_child("browse");
 	}
@@ -674,6 +726,7 @@ void MainWindow::reload_lists()
 	artists_.set_servers(server_choices(), settings_.scope);
 	search_.set_scope(scope());
 	artists_.load(scope());
+	find_upload_server();
 	auto section = left_.get_visible_child_name();
 	if(section=="playlists")    playlists_.load(scope());
 	else if(section=="recents") recents_.load(scope());
@@ -828,6 +881,7 @@ void MainWindow::end_session(const std::string& error)
 		clients_.drop(c->session().server_key);
 	search_.set_query("");
 	search_.set_scope({});
+	set_upload_server(nullptr, false);
 	close_cards();
 	for(auto p: all_panes())
 		p->clear();
@@ -913,7 +967,7 @@ void MainWindow::remove_server(const std::string& key)
 
 std::vector<Pane*> MainWindow::all_panes()
 	{
-	return { &artists_, &playlists_, &recents_, &search_, &settings_pane_,
+	return { &artists_, &uploads_, &playlists_, &recents_, &search_, &settings_pane_,
 	         &albums_, &playlist_, &tracks_ };
 	}
 
@@ -943,11 +997,14 @@ void MainWindow::show_section(const std::string& name)
 	playlist_.clear();
 	settings_page_.clear();
 	tracks_.clear();
-	for(Pane *p: {static_cast<Pane*>(&artists_), static_cast<Pane*>(&playlists_),
+	for(Pane *p: {static_cast<Pane*>(&artists_), static_cast<Pane*>(&uploads_),
+	              static_cast<Pane*>(&playlists_),
 	              static_cast<Pane*>(&recents_), static_cast<Pane*>(&search_),
 	              static_cast<Pane*>(&settings_pane_)})
 		p->unselect();
 
+	if(name=="uploads") uploads_.load();
+	else                uploads_.leave();
 	if(name=="library") {
 		if(!artists_.loaded()) artists_.load(scope());
 		}
@@ -956,6 +1013,133 @@ void MainWindow::show_section(const std::string& name)
 	else if(name=="search")    search_.focus_entry();
 	else if(name=="settings")  settings_pane_.load();
 	go(0);
+	}
+
+void MainWindow::select_section(const std::string& name)
+	{
+	if(auto row = nav_.get_row_at_index(section_index(name))) nav_.select_row(*row);
+	}
+
+void MainWindow::find_upload_server()
+	{
+	// Only gaindrive takes uploads this way, and "type" in every answer
+	// says which server this is; uploadRole alone is standard Subsonic.
+	unsigned gen = ++upload_probe_;
+	auto apis = clients_.all();
+	ServerCalls calls;
+	for(const auto& api: apis)
+		calls.push_back({api, {{"username", api->session().user}}});
+	call_each(calls, "getUser", [this, gen, apis](const std::vector<ApiResult>& rs) {
+		if(gen!=upload_probe_) return;
+		auto role = [](const nlohmann::json& u, const char *key) {
+			const auto& v = jsub(u, key);
+			return v.is_boolean() && v.get<bool>();
+			};
+		for(size_t i=0; i<rs.size(); ++i) {
+			const auto& u = jsub(rs[i].body, "user");
+			bool admin = role(u, "adminRole");
+			if(rs[i].ok && jstr(rs[i].body, "type")=="gaindrive" && (admin || role(u, "uploadRole"))) {
+				set_upload_server(apis[i], admin);
+				return;
+				}
+			}
+		set_upload_server(nullptr, false);
+		});
+	}
+
+void MainWindow::set_upload_server(std::shared_ptr<ApiClient> api, bool admin)
+	{
+	bool on = bool(api);
+	upload_admin_ = admin;
+	uploads_.set_server(api, admin);
+	artists_.set_uploads_button(on);
+	int index = section_index("uploads");
+	if(auto row = nav_.get_row_at_index(index)) row->set_visible(on);
+	if(size_t(index)<tab_buttons_.size()) tab_buttons_[size_t(index)]->set_visible(on);
+	if(view_.section!="uploads") return;
+	if(on) uploads_.load();
+	else   select_section("library");
+	}
+
+void MainWindow::delete_upload(const Album& a)
+	{
+	auto api = client_for(a.ref.server);
+	if(!api) return;
+	confirm_delete_upload(*this, api, a, [this](const ApiResult& r) {
+		if(!r.ok) {
+			failed(r);
+			return;
+			}
+		if(view_.section!="uploads") return;
+		albums_.clear();
+		tracks_.clear();
+		uploads_.load();
+		go(0);
+		});
+	}
+
+void MainWindow::promote_upload(const Album& a, const std::string& artist)
+	{
+	auto api = client_for(a.ref.server);
+	if(!api) return;
+	promote_ = std::make_unique<PromoteDialog>(*this, api, a, artist);
+	promote_->signal_moved.connect(sigc::mem_fun(*this, &MainWindow::promoted));
+	// Not from inside its own handler.
+	promote_->signal_hide().connect([this]() {
+		Glib::signal_idle().connect_once([this]() { promote_.reset(); });
+		});
+	promote_->present();
+	}
+
+void MainWindow::promoted(const ApiResult& r)
+	{
+	if(!r.ok) {
+		// The server's own words: "already in that folder" and "outside the
+		// library" want different fixes.
+		failed(r);
+		return;
+		}
+	const auto& moved = jsub(r.body, "movedAlbum");
+	ItemRef artist{r.server, jstr(moved, "parent")};
+	ItemRef album{r.server, jstr(moved, "id")};
+	// The reply did not say where it went; the uploads listing is at least
+	// certainly no longer right.
+	if(artist.id.empty() || album.id.empty()) {
+		if(view_.section=="uploads") show_section("uploads");
+		return;
+		}
+	// It is in the shared library now, so that is where to look at it.
+	select_section("library");
+	reveal_album(artist, album);
+	}
+
+void MainWindow::reveal_album(const ItemRef& artist, const ItemRef& album)
+	{
+	auto has = [](const ItemRef& ref, const std::vector<ItemRef>& also, const ItemRef& want) {
+		if(ref.server==want.server && ref.id==want.id) return true;
+		for(const auto& o: also)
+			if(o.server==want.server && o.id==want.id) return true;
+		return false;
+		};
+	Pane *left = &artists_;
+	if(view_.section=="uploads") {
+		uploads_.load();
+		left = &uploads_;
+		}
+	else
+		artists_.load(scope());
+	left->restore([artist, has](const ListRow& row) {
+		return row.kind==ListRow::Kind::artist && has(row.artist.ref, row.artist.also, artist);
+		}, [this, album, has](bool found) {
+		// Outside the scope picked, say; the album is still worth showing.
+		if(!found) {
+			open_album(album, "");
+			return;
+			}
+		albums_.restore([album, has](const ListRow& row) {
+			return row.kind==ListRow::Kind::album && has(row.album.ref, row.album.also, album);
+			});
+		});
 	}
 
 void MainWindow::go(int depth)
@@ -1055,6 +1239,7 @@ void MainWindow::open_artist(const Artist& a)
 	view_.playlist    = {};
 	view_.album       = {};
 	view_.album_title.clear();
+	albums_.set_uploads(view_.section=="uploads", upload_admin_);
 	albums_.show_artist(sources, a);
 	go(1);
 	}
@@ -1099,6 +1284,7 @@ void MainWindow::album_loaded(const Album& a)
 	artist.ref  = {a.ref.server, a.artist_id};
 	artist.name = a.artist;
 	middle_.set_visible_child("albums");
+	albums_.set_uploads(view_.section=="uploads", upload_admin_);
 	albums_.show_artist({{api, {{"id", a.artist_id}}}}, artist);
 	}
 

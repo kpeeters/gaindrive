@@ -75,6 +75,18 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 	item_.append(trail_);
 	queue.set_icon_name("gd-add-symbolic");
 	queue.set_tooltip_text("Add to queue");
+	// After the time, which an album row does not have; apart from the
+	// others, so a delete is not one slip away from a star.
+	for(auto b: {&promote, &remove_upload}) {
+		b->add_css_class("flat");
+		b->set_valign(Gtk::Align::CENTER);
+		b->set_visible(false);
+		item_.append(*b);
+		}
+	promote.set_icon_name("gd-library-add-symbolic");
+	promote.set_tooltip_text("Move to shared library");
+	remove_upload.set_icon_name("gd-delete-symbolic");
+	remove_upload.set_tooltip_text("Delete from your uploads");
 	append(item_);
 	}
 
@@ -125,6 +137,7 @@ void RowWidget::show_item(const ItemRef& cover, const std::string& lead,
 	heading_.set_visible(false);
 	item_.set_visible(true);
 	show_actions(false, false, ListButton::none, false);
+	show_upload_actions(false, false);
 	if(cover_) cover_->show_cover(cover);
 	lead_.set_text(lead);
 	lead_.set_visible(!lead.empty());
@@ -167,10 +180,16 @@ void RowWidget::show_actions(bool show_star, bool starred, ListButton mode, bool
 		list.set_tooltip_text("Remove from playlist");
 		}
 	queue.set_visible(show_queue);
-	// A track's actions show on hover, as on the web, so a long album is
-	// not a column of icons; only tracks have the queue button.
-	if(show_queue) add_css_class("hover-actions");
-	else           remove_css_class("hover-actions");
+	// Actions show on hover, as on the web, so a long list is not a
+	// column of icons; a set star stays.
+	if(show_star || show_queue) add_css_class("hover-actions");
+	else                        remove_css_class("hover-actions");
+	}
+
+void RowWidget::show_upload_actions(bool show_remove, bool show_promote)
+	{
+	remove_upload.set_visible(show_remove);
+	promote.set_visible(show_promote);
 	}
 
 void RowWidget::set_playing(bool on)
@@ -267,6 +286,12 @@ Pane::Pane(CoverStore& covers, int cover_px, bool boxed)
 			});
 		w->queue.signal_clicked().connect([this, w]() {
 			if(w->row) signal_enqueue.emit(w->row->song);
+			});
+		w->remove_upload.signal_clicked().connect([this, w]() {
+			if(w->row) upload_action(*w->row, false);
+			});
+		w->promote.signal_clicked().connect([this, w]() {
+			if(w->row) upload_action(*w->row, true);
 			});
 		w->registry = widgets_;
 		widgets_->insert(w);

@@ -331,7 +331,7 @@ static std::string lower_ext(const fs::path& p)
 	return ext;
 	}
 
-static bool is_video_file(const fs::path& p)
+bool is_video_file(const fs::path& p)
 	{
 	return VIDEO_EXTENSIONS.count(lower_ext(p)) > 0;
 	}

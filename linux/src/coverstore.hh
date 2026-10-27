@@ -38,6 +38,12 @@ class CoverStore {
 		// the server is still looking up (a no-store 404), or no connection.
 		sigc::signal<void(const std::string& key)> signal_later;
 
+		// Drops `cover` at every size and index from memory, after it was
+		// replaced; images showing it fetch it again. The disk copy needs no
+		// dropping: its ETag no longer matches.
+		void forget(const ItemRef& cover);
+		sigc::signal<void(const ItemRef& cover)> signal_forgotten;
+
 	private:
 		void remember(const std::string& key, const Glib::RefPtr<Gdk::Texture>& tex);
 
@@ -86,6 +92,7 @@ class CoverImage : public Gtk::Image {
 		bool on_screen() const;
 		void ready(const std::string& key, const Glib::RefPtr<Gdk::Texture>& tex);
 		void later(const std::string& key);
+		void forgotten(const ItemRef& cover);
 
 		CoverStore&      store_;
 		int              css_px_;

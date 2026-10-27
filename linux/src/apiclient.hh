@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <string>
@@ -46,6 +47,27 @@ class ApiClient {
 		// getAlbumText. `done` is called on the main loop.
 		void text(const std::string& endpoint, Params params,
 		          std::function<void(bool ok, const std::string& body)> done);
+		// Any URL's body, on the pool; for one outside the server, such as
+		// a cover's preview. On failure `body` is empty.
+		void fetch(const std::string& url,
+		           std::function<void(bool ok, const std::string& body)> done);
+
+		// Posts the file at `path` to the server's /upload, streamed from
+		// disk, with `params` beside the credentials. `progress` gets the
+		// percentage sent, on the main loop; setting `cancel` stops the
+		// upload. The answer is plain JSON rather than a Subsonic response;
+		// on success the body holds its "files".
+		void upload(const std::string& path, Params params,
+		            std::function<void(int percent)> progress,
+		            std::shared_ptr<std::atomic<bool>> cancel,
+		            std::function<void(const ApiResult&)> done);
+
+		// A POST to a Subsonic endpoint, for one that takes a file, such as
+		// setCoverArt: the file at `path`, if any, as the multipart part
+		// "file", and `params` beside the credentials. `done` is called on
+		// the main loop.
+		void post_form(const std::string& endpoint, Params params, const std::string& path,
+		               std::function<void(const ApiResult&)> done);
 
 		// For URLs handed to something else, such as covers and streams.
 		std::string url(const std::string& endpoint, const Params& params) const;

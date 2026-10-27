@@ -36,6 +36,7 @@ Album parse_album(const std::string& server, const nlohmann::json& j)
 	a.year        = jint(j, "year");
 	a.song_count  = jint(j, "songCount");
 	a.video_count = jint(j, "videoCount");
+	a.writable    = jsub(j, "writable").is_boolean() && jsub(j, "writable").get<bool>();
 	return a;
 	}
 
@@ -52,6 +53,7 @@ Song parse_song(const std::string& server, const nlohmann::json& j)
 	s.disc                 = jint(j, "discNumber");
 	if(s.disc==0) s.disc   = 1;
 	s.season               = jint(j, "season");
+	s.year                 = jint(j, "year");
 	s.duration             = jint(j, "duration");
 	s.album_id             = jstr(j, "albumId");
 	if(s.album_id.empty())

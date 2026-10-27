@@ -48,9 +48,10 @@ static constexpr time_t READ_TIMEOUT_S    = 20;
 // from here and costs exactly what it cost before.
 //
 // A keep-alive socket does die - the peer or something between it and us can
-// close it while nothing is in flight - and httplib handles that itself: it
-// polls the socket before writing, and closes and reconnects when it finds it
-// gone.  So there is no retry to add here.
+// close it while nothing is in flight.  httplib polls the socket before
+// writing and reconnects when it finds it gone, but a close that has not
+// arrived yet passes that check, and the request then fails on the write or
+// the read; get_once_more() below covers that case.
 //
 // Must be called with mu_ held.  The reference stays valid after the lock is
 // released because a slot is filled once and never reset, which is what lets
@@ -66,6 +67,20 @@ static httplib::SSLClient& client_for(
 		slot->set_read_timeout(READ_TIMEOUT_S);
 		}
 	return *slot;
+	}
+
+// A GET that is retried once when it failed the way a stale kept-alive
+// socket fails.  The request never reached the peer, so a GET is safe to
+// repeat, and httplib has dropped the socket, so the retry connects afresh.
+static httplib::Result get_once_more(httplib::SSLClient& cli, const std::string& url)
+	{
+	auto r = cli.Get(url.c_str());
+	if (!r && (r.error() == httplib::Error::Read || r.error() == httplib::Error::Write)) {
+		std::cout << stamp() << "tmdb: retrying after stale connection: "
+		          << httplib::to_string(r.error()) << std::endl;
+		r = cli.Get(url.c_str());
+		}
+	return r;
 	}
 
 // How many search results to consider before giving up. TMDB sorts by
@@ -225,7 +240,7 @@ std::optional<std::string> Tmdb::get(const std::string& path,
 	}
 	std::string url = path + "?api_key=" + key
 	                + (query.empty() ? "" : "&" + query);
-	auto r = cli->Get(url.c_str());
+	auto r = get_once_more(*cli, url);
 	if (!r) {
 		std::cout << stamp() << "tmdb: no response for " << path << std::endl;
 		return std::nullopt;
@@ -528,7 +543,7 @@ std::optional<std::string> Tmdb::poster(const std::string& poster_path) const
 	}
 
 	std::string url = std::string("/t/p/") + POSTER_SIZE + poster_path;
-	auto r = cli->Get(url.c_str());
+	auto r = get_once_more(*cli, url);
 	if (!r || r->status != 200 || r->body.empty()) {
 		std::cout << stamp() << "tmdb: poster fetch failed for " << poster_path
 		          << (r ? " (HTTP " + std::to_string(r->status) + ")" : "")

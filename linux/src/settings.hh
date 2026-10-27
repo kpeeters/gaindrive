@@ -37,6 +37,11 @@ struct AppSettings {
 	// The same album on several servers shows once, from the first of them
 	// in the server list. On by default, as on the phones.
 	bool        merge_albums=true;
+	// The names an upload or a fetch is filed under, kept for the next as
+	// on the web client; empty keeps what the source says. And whether a
+	// URL is fetched as "audio" or "video".
+	std::string upload_artist, upload_album;
+	std::string fetch_mode="audio";
 	// The local equaliser, for this machine's output: on or off, the
 	// curve in whole dB per band, and curves saved under a name.
 	bool             eq_on=false;

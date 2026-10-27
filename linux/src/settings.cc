@@ -68,6 +68,9 @@ void AppSettings::load()
 	scope = jstr(j, "scope");
 	const auto& ma = jsub(j, "mergeDuplicateAlbums");
 	merge_albums = !ma.is_boolean() || ma.get<bool>();
+	upload_artist = jstr(j, "uploadArtist");
+	upload_album  = jstr(j, "uploadAlbum");
+	if(jstr(j, "fetchMode")=="video") fetch_mode = "video";
 	const auto& on = jsub(j, "eqOn");
 	eq_on = on.is_boolean() && on.get<bool>();
 	eq_gains = read_curve(jsub(j, "eqGains"));
@@ -101,6 +104,8 @@ void AppSettings::save() const
 		{"theme", theme}, {"subtitleSize", subtitle_size},
 		{"sortByName", sort_by_name},
 		{"scope", scope}, {"mergeDuplicateAlbums", merge_albums},
+		{"uploadArtist", upload_artist}, {"uploadAlbum", upload_album},
+		{"fetchMode", fetch_mode},
 		{"eqOn", eq_on}, {"eqGains", eq_gains}, {"eqSlots", eq_slots},
 		{"wiimSlots", wiim_slots}
 		});

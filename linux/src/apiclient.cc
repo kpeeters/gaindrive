@@ -6,12 +6,17 @@
 #include "workpool.hh"
 
 #include <httplib.h>
+#include <gio/gio.h>
 #include <openssl/rand.h>
 
+#include <algorithm>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 
 namespace {
@@ -40,6 +45,27 @@ namespace {
 		auto slash = url.find('/', scheme_end==std::string::npos ? 0 : scheme_end+3);
 		origin = url.substr(0, slash);
 		path   = slash==std::string::npos ? "/" : url.substr(slash);
+		}
+
+	// A Subsonic answer, `body`, into `r`, logging a refusal under `endpoint`.
+	void read_answer(const std::string& endpoint, const std::string& body, ApiResult& r)
+		{
+		auto j = nlohmann::json::parse(body, nullptr, false);
+		if(j.is_discarded() || !j.contains("subsonic-response") || !j["subsonic-response"].is_object()) {
+			r.error = "The server's answer was not a Subsonic response.";
+			std::cout << stamp() << endpoint << ": " << r.error << std::endl;
+			return;
+			}
+		r.body = std::move(j["subsonic-response"]);
+		if(jstr(r.body, "status")!="ok") {
+			const auto& e = jsub(r.body, "error");
+			r.code  = jint(e, "code");
+			r.error = jstr(e, "message");
+			if(r.error.empty()) r.error = "The server refused the request.";
+			std::cout << stamp() << endpoint << ": error " << r.code << ": " << r.error << std::endl;
+			return;
+			}
+		r.ok = true;
 		}
 
 	// One kept-alive connection per server and worker thread, so a screenful
@@ -96,11 +122,173 @@ void ApiClient::call(const std::string& endpoint, Params params,
 void ApiClient::text(const std::string& endpoint, Params params,
                      std::function<void(bool, const std::string&)> done)
 	{
-	std::string u = url(endpoint, params);
+	fetch(url(endpoint, params), std::move(done));
+	}
+
+void ApiClient::fetch(const std::string& u, std::function<void(bool, const std::string&)> done)
+	{
 	pool_.submit([u, done=std::move(done)]() {
 		std::string body, error;
 		bool ok = get_bytes(u, body, error);
+		// Not the URL, which may carry the account's token.
+		if(!ok) std::cout << stamp() << "fetch: " << error << std::endl;
 		on_ui([ok, body=std::move(body), done]() { done(ok, body); });
+		});
+	}
+
+void ApiClient::upload(const std::string& path, Params params,
+                       std::function<void(int)> progress,
+                       std::shared_ptr<std::atomic<bool>> cancel,
+                       std::function<void(const ApiResult&)> done)
+	{
+	pool_.submit([s=session_, path, params=std::move(params), progress=std::move(progress),
+	              cancel, done=std::move(done)]() {
+		ApiResult r;
+		r.server = s->server_key;
+		auto finish = [&r, &done]() {
+			if(!r.ok) std::cout << stamp() << "upload: " << r.error << std::endl;
+			on_ui([r=std::move(r), done]() { done(r); });
+			};
+		std::error_code ec;
+		auto size = std::filesystem::file_size(path, ec);
+		std::ifstream file(path, std::ios::binary);
+		if(ec || !file) {
+			r.error = "Cannot read " + path;
+			finish();
+			return;
+			}
+		// The multipart body by hand, around the file, so that its length is
+		// known: httplib's own file provider sends it chunked, which a
+		// reverse proxy may buffer whole before passing any of it on, and the
+		// progress bar would then measure the proxy.
+		std::string name = std::filesystem::path(path).filename().string();
+		for(auto& c: name)
+			if(c=='"' || c=='\r' || c=='\n') c = '_';
+		std::string boundary = "gaindrive-" + random_hex(12);
+		std::string head = "--" + boundary + "\r\n"
+		                   "Content-Disposition: form-data; name=\"file\"; filename=\"" + name + "\"\r\n"
+		                   "Content-Type: application/octet-stream\r\n\r\n";
+		std::string tail = "\r\n--" + boundary + "--\r\n";
+		size_t total = head.size() + size + tail.size();
+		auto provider = [&](size_t offset, size_t length, httplib::DataSink& sink) {
+			std::string chunk;
+			if(offset<head.size())
+				chunk = head.substr(offset, length);
+			else if(offset<head.size()+size) {
+				chunk.resize(std::min<size_t>(length, std::min<size_t>(head.size()+size-offset, 1<<16)));
+				file.seekg(std::streamoff(offset-head.size()));
+				if(!file.read(chunk.data(), std::streamsize(chunk.size()))) return false;
+				}
+			else
+				chunk = tail.substr(offset-head.size()-size, length);
+			return sink.write(chunk.data(), chunk.size());
+			};
+		int last = -1;
+		auto sent = [&](size_t current, size_t all) {
+			if(*cancel) return false;
+			int pct = all ? int(current*100/all) : 0;
+			if(pct!=last) {
+				last = pct;
+				on_ui([progress, pct]() { progress(pct); });
+				}
+			return true;
+			};
+		std::string origin, prefix;
+		split_url(s->base_url, origin, prefix);
+		if(prefix=="/") prefix.clear();
+		try {
+			httplib::Client cli(origin);
+			cli.set_connection_timeout(5);
+			cli.set_write_timeout(60);
+			// The answer comes only once the server has extracted the archive.
+			cli.set_read_timeout(600);
+			httplib::Headers headers = {{"User-Agent", "gaindrive-player/" GAINDRIVE_VERSION}};
+			auto res = cli.Post(prefix + "/upload?" + query(*s, params), headers, total, provider,
+			                    "multipart/form-data; boundary=" + boundary, sent);
+			if(!res) {
+				r.error = *cancel ? "Upload cancelled." : httplib::to_string(res.error());
+				finish();
+				return;
+				}
+			auto j = nlohmann::json::parse(res->body, nullptr, false);
+			if(jstr(j, "status")=="ok") {
+				r.ok   = true;
+				r.body = std::move(j);
+				}
+			else {
+				r.error = jstr(j, "message");
+				// A proxy's own error page, or nothing at all.
+				if(r.error.empty()) r.error = "Unexpected response (HTTP " + std::to_string(res->status) + ").";
+				}
+			}
+		catch(const std::exception& ex) {
+			r.error = ex.what();
+			}
+		finish();
+		});
+	}
+
+void ApiClient::post_form(const std::string& endpoint, Params params, const std::string& path,
+                          std::function<void(const ApiResult&)> done)
+	{
+	pool_.submit([s=session_, endpoint, params=std::move(params), path, done=std::move(done)]() {
+		ApiResult r;
+		r.server = s->server_key;
+		auto finish = [&r, &done]() {
+			on_ui([r=std::move(r), done]() { done(r); });
+			};
+		std::string body, type = "application/x-www-form-urlencoded";
+		if(!path.empty()) {
+			std::ifstream file(path, std::ios::binary);
+			std::ostringstream data;
+			if(file) data << file.rdbuf();
+			if(!file || data.str().empty()) {
+				r.error = "Cannot read " + path;
+				std::cout << stamp() << endpoint << ": " << r.error << std::endl;
+				finish();
+				return;
+				}
+			// Typed by name and content: the server takes only an image/ part,
+			// and says so only after the whole body has gone up.
+			auto guess = data.str().substr(0, 4096);
+			gchar *ct   = g_content_type_guess(path.c_str(), reinterpret_cast<const guchar*>(guess.data()),
+			                                   guess.size(), nullptr);
+			gchar *mime = ct ? g_content_type_get_mime_type(ct) : nullptr;
+			std::string part_type = mime ? mime : "application/octet-stream";
+			g_free(mime);
+			g_free(ct);
+			std::string name = std::filesystem::path(path).filename().string();
+			for(auto& c: name)
+				if(c=='"' || c=='\r' || c=='\n') c = '_';
+			std::string boundary = "gaindrive-" + random_hex(12);
+			body = "--" + boundary + "\r\n"
+			       "Content-Disposition: form-data; name=\"file\"; filename=\"" + name + "\"\r\n"
+			       "Content-Type: " + part_type + "\r\n\r\n" + data.str() + "\r\n--" + boundary + "--\r\n";
+			type = "multipart/form-data; boundary=" + boundary;
+			}
+		std::string origin, prefix;
+		split_url(s->base_url, origin, prefix);
+		if(prefix=="/") prefix.clear();
+		try {
+			httplib::Client cli(origin);
+			cli.set_connection_timeout(5);
+			cli.set_write_timeout(60);
+			// A url= is fetched by the server before it answers.
+			cli.set_read_timeout(60);
+			httplib::Headers headers = {{"User-Agent", "gaindrive-player/" GAINDRIVE_VERSION}};
+			auto res = cli.Post(prefix + "/rest/" + endpoint + ".view?" + query(*s, params), headers, body, type);
+			if(!res)
+				r.error = httplib::to_string(res.error());
+			else if(res->status!=200)
+				r.error = "Server returned HTTP " + std::to_string(res->status);
+			else
+				read_answer(endpoint, res->body, r);
+			}
+		catch(const std::exception& ex) {
+			r.error = ex.what();
+			}
+		if(!r.ok && r.code==0) std::cout << stamp() << endpoint << ": " << r.error << std::endl;
+		finish();
 		});
 	}
 
@@ -129,6 +317,15 @@ ApiClient::Fetch ApiClient::get_if_changed(const std::string& url, const std::st
 		httplib::Headers headers = {{"User-Agent", "gaindrive-player/" GAINDRIVE_VERSION}};
 		if(!etag.empty()) headers.emplace("If-None-Match", etag);
 		auto res = cli->Get(path, headers);
+		// A kept-alive socket the server closed just as we reused it passes
+		// httplib's liveness check and then fails on the write or the read.
+		// The request never reached the server, so one retry on a fresh
+		// connection is safe for a GET.
+		if(!res && (res.error()==httplib::Error::Read || res.error()==httplib::Error::Write)) {
+			std::cout << stamp() << "retrying after stale connection: "
+			          << httplib::to_string(res.error()) << std::endl;
+			res = cli->Get(path, headers);
+			}
 		if(!res) {
 			f.error = httplib::to_string(res.error());
 			cli.reset();
@@ -224,22 +421,7 @@ ApiResult ApiClient::get_json(const Session& s, const std::string& endpoint, con
 		std::cout << stamp() << endpoint << ": " << r.error << std::endl;
 		return r;
 		}
-	auto j = nlohmann::json::parse(body, nullptr, false);
-	if(j.is_discarded() || !j.contains("subsonic-response") || !j["subsonic-response"].is_object()) {
-		r.error = "The server's answer was not a Subsonic response.";
-		std::cout << stamp() << endpoint << ": " << r.error << std::endl;
-		return r;
-		}
-	r.body = std::move(j["subsonic-response"]);
-	if(jstr(r.body, "status")!="ok") {
-		const auto& e = jsub(r.body, "error");
-		r.code  = jint(e, "code");
-		r.error = jstr(e, "message");
-		if(r.error.empty()) r.error = "The server refused the request.";
-		std::cout << stamp() << endpoint << ": error " << r.code << ": " << r.error << std::endl;
-		return r;
-		}
-	r.ok = true;
+	read_answer(endpoint, body, r);
 	return r;
 	}
 

@@ -12,6 +12,7 @@
 #include "settings.hh"
 #include "settingspage.hh"
 #include "trackinfo.hh"
+#include "uploads.hh"
 #include "videoview.hh"
 #include "workpool.hh"
 
@@ -75,6 +76,18 @@ class MainWindow : public Gtk::ApplicationWindow {
 
 		// The sidebar's sections, by their stack names.
 		void show_section(const std::string& name);
+		// The same by selecting its row, as a click would.
+		void select_section(const std::string& name);
+		// The first gaindrive server taking this account's uploads, asked
+		// again whenever the servers change; the uploads section shows only
+		// while there is one.
+		void find_upload_server();
+		void set_upload_server(std::shared_ptr<ApiClient> api, bool admin);
+		void delete_upload(const Album& a);
+		void promote_upload(const Album& a, const std::string& artist);
+		void promoted(const ApiResult& r);
+		// Reloads the section's artists and opens `album` under `artist`.
+		void reveal_album(const ItemRef& artist, const ItemRef& album);
 		void open_artist(const Artist& a);
 		void open_album(const ItemRef& album, const std::string& play_id);
 		void album_loaded(const Album& a);
@@ -135,6 +148,7 @@ class MainWindow : public Gtk::ApplicationWindow {
 		VideoView                  video_;
 		Gtk::Stack                 left_, middle_;
 		ArtistPane                 artists_;
+		UploadsPane                uploads_;
 		PlaylistsPane              playlists_;
 		RecentsPane                recents_;
 		SearchPane                 search_;
@@ -173,6 +187,9 @@ class MainWindow : public Gtk::ApplicationWindow {
 		std::string                expect_album_;
 		// While restore_view() runs, before its restores are queued.
 		bool                       restoring_view_=false;
+		bool                       upload_admin_=false;
+		unsigned                   upload_probe_=0;
+		std::unique_ptr<PromoteDialog> promote_;
 		// GTK's own dark preference at startup, which "auto" goes back to.
 		bool                       gtk_dark_=false;
 		// The web's dark-theme accent, on the display while the theme is dark.

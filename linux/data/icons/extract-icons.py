@@ -51,6 +51,10 @@ ICONS = {
 	'server':         ('dns',           True),
 	'delete':         ('delete',        False),
 	'movie':          ('movie',         False),
+	'uploads':        ('upload',        False),
+	'library-add':    ('library_add',   False),
+	'edit':           ('edit',          False),
+	'music-note':     ('music_note',    False),
 }
 
 def glyphsets():
