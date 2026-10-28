@@ -391,6 +391,7 @@ void SearchPane::bind(RowWidget& w, const ListRow& row)
 			// albumCount with a search hit.
 			w.show_item(row.artist.ref, "", row.artist.name, badges(row.artist.ref, row.artist.also),
 			            row.artist.album_count>0 ? plural(row.artist.album_count, "album", "albums") : "");
+			w.round_cover();
 			break;
 		case ListRow::Kind::album:
 			bind_album_hit(w, row.album);

@@ -55,6 +55,8 @@ namespace {
 		.pane-row.extra > .info-block { margin-top: 12px; }
 		.hero { margin: 12px; }
 		.cover { border-radius: 4px; }
+		/* Artists as discs, as on the web; GTK shrinks the radius to fit. */
+		.cover.round { border-radius: 9999px; }
 		.notice { padding: 6px 12px; background-color: alpha(@error_color, 0.2); }
 		.sidebar { min-width: 255px; }
 		.playing .row-title { font-weight: bold; }
@@ -201,8 +203,9 @@ namespace {
 		   outlined icons; dimmed as Material's top bar dims its actions. */
 		.pane .scope-button image { -gtk-icon-size: 40px; opacity: 0.65; }
 		/* Half as large again as other pane buttons, as the bar's extras are:
-		   the outlined arrow is thin at 20px. */
-		.pane .uploads-button > image { -gtk-icon-size: 30px; }
+		   the outlined arrow is thin at 20px. The margin pads it out to the
+		   scope button's 40px, so both buttons are the same size. */
+		.pane .uploads-button > image { -gtk-icon-size: 30px; margin: 5px; }
 		/* The album header's star, sized as the bar's other extras. */
 		.pane .album-star > image { -gtk-icon-size: 30px; }
 		/* Direct children only: the cast popover hangs off the bar too. */
@@ -1487,6 +1490,7 @@ void MainWindow::apply_theme()
 void MainWindow::apply_text_scale()
 	{
 	Gtk::Settings::get_default()->property_gtk_xft_dpi() = int(std::lround(desktop_dpi_*settings_.text_scale));
+	covers_.set_art_scale(desktop_dpi_/(96.0*1024) * settings_.text_scale);
 	}
 
 void MainWindow::failed(const ApiResult& r)

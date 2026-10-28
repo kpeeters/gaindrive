@@ -28,6 +28,7 @@ class CoverStore;
 class CoverImage;
 class InfoBlock;
 class HeightClip;
+class WidthFit;
 struct ApiResult;
 struct AppSettings;
 struct ServerConfig;
@@ -45,6 +46,8 @@ class RowWidget : public Gtk::Box {
 		void show_item(const ItemRef& cover, const std::string& lead,
 		               const std::string& title, const std::string& subtitle,
 		               const std::string& trail);
+		// The cover as a disc, for an artist; show_item undoes it.
+		void round_cover();
 		// The list button either offers "add to playlist" or, inside a
 		// playlist the user owns, "remove from it".
 		enum class ListButton { none, add, remove };
@@ -336,6 +339,8 @@ class TrackPane : public Pane {
 		std::unique_ptr<AlbumEditor> editor_;
 		Gtk::Overlay                hero_box_;
 		std::unique_ptr<CoverImage> hero_;
+		// After hero_box_, so it lets go of it first.
+		std::unique_ptr<WidthFit>   hero_fit_;
 		Gtk::Button                 img_prev_, img_next_;
 		int                         image_=0, images_=1;
 		std::unique_ptr<InfoBlock>  notes_;

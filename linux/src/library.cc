@@ -483,7 +483,11 @@ TrackPane::TrackPane(CoverStore& covers)
 	hero_box_.add_overlay(editor_->pencil);
 	img_prev_.signal_clicked().connect([this]() { if(image_>0) show_image(image_-1); });
 	img_next_.signal_clicked().connect([this]() { if(image_+1<images_) show_image(image_+1); });
-	top_.append(hero_box_);
+	// No wider than the pane: the scaled cover would widen a narrow one
+	// past its scrollbar.
+	hero_fit_ = std::make_unique<WidthFit>(hero_box_);
+	hero_fit_->signal_width.connect([this](int width) { hero_->set_max_px(int(width*0.95)); });
+	top_.append(*hero_fit_);
 	notes_->set_margin_start(12);
 	notes_->set_margin_end(12);
 	top_.append(*notes_);

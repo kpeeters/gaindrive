@@ -44,6 +44,12 @@ class CoverStore {
 		void forget(const ItemRef& cover);
 		sigc::signal<void(const ItemRef& cover)> signal_forgotten;
 
+		// Covers are shown this much larger than their css size, to keep
+		// up with the text scale; images resize on signal_rescale.
+		double art_scale() const { return art_scale_; }
+		void   set_art_scale(double scale);
+		sigc::signal<void()> signal_rescale;
+
 	private:
 		void remember(const std::string& key, const Glib::RefPtr<Gdk::Texture>& tex);
 
@@ -63,6 +69,7 @@ class CoverStore {
 		// answer may be kept. Without this every scroll past an artist with
 		// no portrait would ask again.
 		std::map<std::string, std::chrono::steady_clock::time_point> missing_;
+		double                                 art_scale_=1.0;
 };
 
 // A square cover of a fixed size, which fills itself in when the image lands.
@@ -83,9 +90,16 @@ class CoverImage : public Gtk::Image {
 		~CoverImage() override;
 
 		void show_cover(const ItemRef& cover, int index=0);
+		// A disc rather than a rounded square, for an artist.
+		void set_round(bool on);
+		// At most `px` css pixels across, whatever the scale; 0 for no cap.
+		void set_max_px(int px);
 
 	private:
 		void fetch();
+		int  display_px() const;
+		int  fetch_px() const;
+		void rescale();
 		// Waits for the image to scroll into view, then fetches.
 		void watch();
 		void stop_watching();
@@ -95,7 +109,7 @@ class CoverImage : public Gtk::Image {
 		void forgotten(const ItemRef& cover);
 
 		CoverStore&      store_;
-		int              css_px_;
+		int              css_px_, max_px_=0;
 		std::string      server_, cover_id_, wanted_;
 		int              index_=0;
 		unsigned         tries_=0;

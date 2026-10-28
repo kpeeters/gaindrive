@@ -64,6 +64,46 @@ void HeightClip::size_allocate_vfunc(int width, int height, int)
 	child_.size_allocate(Gtk::Allocation(0, 0, width, std::max(height, min)), -1);
 	}
 
+WidthFit::WidthFit(Gtk::Widget& child)
+	: child_(child)
+	{
+	set_overflow(Gtk::Overflow::HIDDEN);
+	child_.set_parent(*this);
+	}
+
+WidthFit::~WidthFit()
+	{
+	child_.unparent();
+	}
+
+void WidthFit::measure_vfunc(Gtk::Orientation orientation, int for_size, int& minimum, int& natural,
+                             int& minimum_baseline, int& natural_baseline) const
+	{
+	child_.measure(orientation, for_size, minimum, natural, minimum_baseline, natural_baseline);
+	minimum_baseline = natural_baseline = -1;
+	if(orientation==Gtk::Orientation::HORIZONTAL) minimum = 0;
+	}
+
+void WidthFit::size_allocate_vfunc(int width, int height, int)
+	{
+	int min = 0, nat = 0, mb, nb;
+	child_.measure(Gtk::Orientation::HORIZONTAL, -1, min, nat, mb, nb);
+	child_.size_allocate(Gtk::Allocation(0, 0, std::max(width, min), height), -1);
+	if(width!=width_ && !queued_) {
+		queued_ = true;
+		Glib::signal_idle().connect_once(sigc::mem_fun(*this, &WidthFit::check));
+		}
+	}
+
+void WidthFit::check()
+	{
+	queued_ = false;
+	// Measured again: the width may have moved on meanwhile.
+	if(get_width()==width_) return;
+	width_ = get_width();
+	signal_width.emit(width_);
+	}
+
 InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 	: Gtk::Box(Gtk::Orientation::HORIZONTAL, 12),
 	  body_(Gtk::Orientation::VERTICAL, 4),
@@ -77,6 +117,7 @@ InfoBlock::InfoBlock(CoverStore& covers, int portrait_px)
 	if(portrait_px>0) {
 		portrait_ = std::make_unique<CoverImage>(covers, portrait_px);
 		portrait_->set_valign(Gtk::Align::START);
+		portrait_->set_round(true);
 		append(*portrait_);
 		}
 	text_.set_wrap(true);

@@ -129,6 +129,11 @@ void RowWidget::show_heading(const std::string& text)
 	item_.set_visible(false);
 	}
 
+void RowWidget::round_cover()
+	{
+	if(cover_) cover_->set_round(true);
+	}
+
 void RowWidget::show_item(const ItemRef& cover, const std::string& lead,
                           const std::string& title, const std::string& subtitle,
                           const std::string& trail)
@@ -138,7 +143,10 @@ void RowWidget::show_item(const ItemRef& cover, const std::string& lead,
 	item_.set_visible(true);
 	show_actions(false, false, ListButton::none, false);
 	show_upload_actions(false, false);
-	if(cover_) cover_->show_cover(cover);
+	if(cover_) {
+		cover_->set_round(false);
+		cover_->show_cover(cover);
+		}
 	lead_.set_text(lead);
 	lead_.set_visible(!lead.empty());
 	// Numbered rows keep the slot, so the numbers stay put as the track

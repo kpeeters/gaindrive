@@ -34,6 +34,30 @@ class HeightClip : public Gtk::Widget {
 		int          height_=-1;
 };
 
+// Its child at no minimum width, so a fixed-size picture does not widen a
+// narrow pane. The child is clipped until it has shrunk itself, on
+// signal_width, a frame after the width changed: shrinking during the
+// allocation would size it again from within the allocation.
+class WidthFit : public Gtk::Widget {
+	public:
+		explicit WidthFit(Gtk::Widget& child);
+		~WidthFit() override;
+
+		sigc::signal<void(int width)> signal_width;
+
+	protected:
+		void measure_vfunc(Gtk::Orientation orientation, int for_size, int& minimum, int& natural,
+		                   int& minimum_baseline, int& natural_baseline) const override;
+		void size_allocate_vfunc(int width, int height, int baseline) override;
+
+	private:
+		Gtk::Widget& child_;
+		int          width_=-1;
+		bool         queued_=false;
+
+		void check();
+};
+
 // An artist's biography or an album's notes, with Wikipedia and AllMusic
 // links, from getArtistInfo2 or getAlbumInfo2. The server looks these up in
 // the background and says `resolving` meanwhile, so the block asks again

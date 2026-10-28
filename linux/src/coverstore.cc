@@ -16,6 +16,7 @@
 #include <gdk/gdk.h>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -261,6 +262,13 @@ void CoverStore::forget(const ItemRef& cover)
 	signal_forgotten.emit(cover);
 	}
 
+void CoverStore::set_art_scale(double scale)
+	{
+	if(scale==art_scale_) return;
+	art_scale_ = scale;
+	signal_rescale.emit();
+	}
+
 void CoverStore::remember(const std::string& key, const Glib::RefPtr<Gdk::Texture>& tex)
 	{
 	ages_.push_front(key);
@@ -274,7 +282,7 @@ void CoverStore::remember(const std::string& key, const Glib::RefPtr<Gdk::Textur
 CoverImage::CoverImage(CoverStore& store, int css_px)
 	: store_(store), css_px_(css_px)
 	{
-	set_pixel_size(css_px);
+	set_pixel_size(display_px());
 	set_halign(Gtk::Align::CENTER);
 	set_valign(Gtk::Align::CENTER);
 	// Clips the cropped image to the rounded corners.
@@ -285,6 +293,40 @@ CoverImage::CoverImage(CoverStore& store, int css_px)
 	store_.signal_ready.connect(sigc::mem_fun(*this, &CoverImage::ready));
 	store_.signal_later.connect(sigc::mem_fun(*this, &CoverImage::later));
 	store_.signal_forgotten.connect(sigc::mem_fun(*this, &CoverImage::forgotten));
+	store_.signal_rescale.connect(sigc::mem_fun(*this, &CoverImage::rescale));
+	}
+
+void CoverImage::set_round(bool on)
+	{
+	if(on) add_css_class("round");
+	else   remove_css_class("round");
+	}
+
+void CoverImage::set_max_px(int px)
+	{
+	if(px==max_px_) return;
+	max_px_ = px;
+	set_pixel_size(display_px());
+	}
+
+int CoverImage::display_px() const
+	{
+	int px = int(std::lround(css_px_ * store_.art_scale()));
+	return max_px_>0 ? std::min(px, max_px_) : px;
+	}
+
+// Device pixels, at 1x or 2x the css size only: each distinct size is another
+// thumbnail the server keeps, so a scale in between is rounded up rather than
+// followed. The same rule as the web client's coverPx().
+int CoverImage::fetch_px() const
+	{
+	return display_px()*get_scale_factor()>css_px_ ? 2*css_px_ : css_px_;
+	}
+
+void CoverImage::rescale()
+	{
+	set_pixel_size(display_px());
+	if(!cover_id_.empty()) show_cover({server_, cover_id_}, index_);
 	}
 
 CoverImage::~CoverImage()
@@ -314,8 +356,7 @@ void CoverImage::show_cover(const ItemRef& cover, int index)
 	index_    = index;
 	tries_    = 0;
 	// What is in memory is shown at once, wherever the image is.
-	int px = css_px_ * (get_scale_factor()>1 ? 2 : 1);
-	if(auto tex = store_.get({server_, cover_id_}, px, wanted_, index_, false)) {
+	if(auto tex = store_.get({server_, cover_id_}, fetch_px(), wanted_, index_, false)) {
 		set(tex);
 		return;
 		}
@@ -388,11 +429,7 @@ bool CoverImage::on_screen() const
 
 void CoverImage::fetch()
 	{
-	// Device pixels, at 1x or 2x only: each distinct size is another thumbnail
-	// the server keeps, so fractional scales are rounded up rather than
-	// followed. The same rule as the web client's coverPx().
-	int px = css_px_ * (get_scale_factor()>1 ? 2 : 1);
-	auto tex = store_.get({server_, cover_id_}, px, wanted_, index_);
+	auto tex = store_.get({server_, cover_id_}, fetch_px(), wanted_, index_);
 	if(tex) set(tex);
 	else    clear();
 	}
