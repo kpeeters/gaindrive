@@ -21,6 +21,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
 #include <iostream>
 
@@ -338,6 +339,10 @@ MainWindow::MainWindow()
 	dark_css_ = Gtk::CssProvider::create();
 	dark_css_->load_from_data("@define-color gd_red #c9202f;");
 	apply_theme();
+	desktop_dpi_ = Gtk::Settings::get_default()->property_gtk_xft_dpi();
+	std::cout << stamp() << "Desktop text dpi: " << desktop_dpi_/1024.0 << std::endl;
+	if(desktop_dpi_<=0) desktop_dpi_ = 96*1024;
+	apply_text_scale();
 
 	set_title("GainDrive");
 	set_icon_name(GD_APP_ID);
@@ -454,6 +459,30 @@ MainWindow::MainWindow()
 		return true;
 		}, false);
 	browse_.add_controller(view_keys);
+	// Text size, as in a browser: Ctrl+plus, Ctrl+minus, Ctrl+0. On the
+	// window, so it works on the login page and over a film too.
+	auto zoom_keys = Gtk::EventControllerKey::create();
+	zoom_keys->signal_key_pressed().connect([this](guint keyval, guint, Gdk::ModifierType state) {
+		using M = Gdk::ModifierType;
+		if((state & (M::CONTROL_MASK | M::ALT_MASK | M::SUPER_MASK))!=M::CONTROL_MASK) return false;
+		double scale = settings_.text_scale;
+		switch(keyval) {
+			case GDK_KEY_plus: case GDK_KEY_equal: case GDK_KEY_KP_Add:
+				scale += text_scale_step; break;
+			case GDK_KEY_minus: case GDK_KEY_KP_Subtract:
+				scale -= text_scale_step; break;
+			case GDK_KEY_0: case GDK_KEY_KP_0:
+				scale = 1.0; break;
+			default:
+				return false;
+			}
+		// Rounded, so steps land back on 1.0 exactly.
+		settings_.text_scale = std::clamp(std::round(scale*100)/100, min_text_scale, max_text_scale);
+		settings_.save();
+		apply_text_scale();
+		return true;
+		}, false);
+	add_controller(zoom_keys);
 	// The web's incremental search, Ctrl+S and Ctrl+R. Capturing, so a
 	// running search sees its keys before the focused list does; a text
 	// field keeps them, for its own editing.
@@ -1453,6 +1482,11 @@ void MainWindow::apply_theme()
 			GTK_STYLE_PROVIDER_PRIORITY_APPLICATION+1);
 	else
 		Gtk::StyleProvider::remove_provider_for_display(get_display(), dark_css_);
+	}
+
+void MainWindow::apply_text_scale()
+	{
+	Gtk::Settings::get_default()->property_gtk_xft_dpi() = int(std::lround(desktop_dpi_*settings_.text_scale));
 	}
 
 void MainWindow::failed(const ApiResult& r)

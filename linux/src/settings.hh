@@ -27,6 +27,8 @@ struct AppSettings {
 	std::map<std::string, int> cast_sync_ms;
 	// "auto" leaves GTK's own light or dark choice alone; "light", "dark".
 	std::string theme="auto";
+	// The app's text size, on top of the desktop's own text scaling.
+	double      text_scale=1.0;
 	// A param of subtitle_sizes.
 	std::string subtitle_size="medium";
 	// Album order per section ("artists", "categories"): by name or by year.
@@ -60,6 +62,9 @@ struct AppSettings {
 	// The subtitle size as a fraction of the video view's height.
 	double      subtitle_fraction() const;
 };
+
+// Ctrl+plus and Ctrl+minus step the text scale within these.
+constexpr double min_text_scale = 0.7, max_text_scale = 2.0, text_scale_step = 0.05;
 
 // The local equaliser's faders run from -eq_range to +eq_range dB.
 constexpr int eq_range = 12;

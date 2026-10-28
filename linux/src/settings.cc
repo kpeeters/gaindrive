@@ -58,6 +58,8 @@ void AppSettings::load()
 	auto th = jstr(j, "theme");
 	for(const auto& t: themes)
 		if(th==t.param) theme = th;
+	const auto& ts = jsub(j, "textScale");
+	if(ts.is_number()) text_scale = std::clamp(ts.get<double>(), min_text_scale, max_text_scale);
 	auto ss = jstr(j, "subtitleSize");
 	for(const auto& z: subtitle_sizes)
 		if(ss==z.param) subtitle_size = ss;
@@ -101,7 +103,7 @@ void AppSettings::save() const
 		{"qualityCap", quality_cap}, {"transcodeFormat", format},
 		{"castOriginal", cast_original}, {"videoAudioOnly", video_audio_only},
 		{"castLocalVideo", cast_local_video}, {"castSyncMs", cast_sync_ms},
-		{"theme", theme}, {"subtitleSize", subtitle_size},
+		{"theme", theme}, {"textScale", text_scale}, {"subtitleSize", subtitle_size},
 		{"sortByName", sort_by_name},
 		{"scope", scope}, {"mergeDuplicateAlbums", merge_albums},
 		{"uploadArtist", upload_artist}, {"uploadAlbum", upload_album},

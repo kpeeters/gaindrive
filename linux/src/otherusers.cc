@@ -35,6 +35,7 @@ void OtherUsers::set_servers(std::vector<std::pair<std::shared_ptr<ApiClient>, s
 	timer_.disconnect();
 	servers_ = std::move(servers);
 	shown_.assign(servers_.size(), {});
+	lacking_.assign(servers_.size(), false);
 	rebuild();
 	if(servers_.empty()) return;
 	poll();
@@ -47,16 +48,23 @@ void OtherUsers::set_servers(std::vector<std::pair<std::shared_ptr<ApiClient>, s
 void OtherUsers::poll()
 	{
 	ServerCalls calls;
-	for(const auto& s: servers_)
-		calls.push_back({s.first, {}});
+	std::vector<size_t> which;
+	for(size_t i=0; i<servers_.size(); ++i)
+		if(!lacking_[i]) {
+			calls.push_back({servers_[i].first, {}});
+			which.push_back(i);
+			}
+	if(calls.empty()) return;
 	unsigned gen = gen_;
-	call_each(calls, "getNowPlaying", [this, gen](const std::vector<ApiResult>& rs) {
+	call_each(calls, "getNowPlaying", [this, gen, which](const std::vector<ApiResult>& rs) {
 		if(gen!=gen_) return;
-		for(size_t i=0; i<rs.size(); ++i) {
-			if(!rs[i].ok) continue;
+		for(size_t k=0; k<rs.size(); ++k) {
+			size_t i = which[k];
+			if(rs[k].foreign) lacking_[i] = true;
+			if(!rs[k].ok) continue;
 			const auto& session = servers_[i].first->session();
 			shown_[i].clear();
-			for(const auto& e: jsub(jsub(rs[i].body, "nowPlaying"), "entry")) {
+			for(const auto& e: jsub(jsub(rs[k].body, "nowPlaying"), "entry")) {
 				// The server keeps listing a paused entry; this list is
 				// what is audible.
 				std::string user = jstr(e, "username");

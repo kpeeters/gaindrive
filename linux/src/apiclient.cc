@@ -48,12 +48,19 @@ namespace {
 		}
 
 	// A Subsonic answer, `body`, into `r`, logging a refusal under `endpoint`.
-	void read_answer(const std::string& endpoint, const std::string& body, ApiResult& r)
+	void read_answer(const Session& s, const std::string& endpoint, const std::string& body, ApiResult& r)
 		{
 		auto j = nlohmann::json::parse(body, nullptr, false);
 		if(j.is_discarded() || !j.contains("subsonic-response") || !j["subsonic-response"].is_object()) {
 			r.error = "The server's answer was not a Subsonic response.";
-			std::cout << stamp() << endpoint << ": " << r.error << std::endl;
+			r.foreign = true;
+			// The start of the body tells an HTML error page from a non-JSON
+			// answer to an endpoint the server lacks.
+			std::string start = body.substr(0, 120);
+			for(auto& c: start)
+				if(c=='\n' || c=='\r') c = ' ';
+			std::cout << stamp() << s.base_url << " " << endpoint << ": " << r.error
+			          << " Body starts: " << start << std::endl;
 			return;
 			}
 		r.body = std::move(j["subsonic-response"]);
@@ -62,7 +69,7 @@ namespace {
 			r.code  = jint(e, "code");
 			r.error = jstr(e, "message");
 			if(r.error.empty()) r.error = "The server refused the request.";
-			std::cout << stamp() << endpoint << ": error " << r.code << ": " << r.error << std::endl;
+			std::cout << stamp() << s.base_url << " " << endpoint << ": error " << r.code << ": " << r.error << std::endl;
 			return;
 			}
 		r.ok = true;
@@ -244,7 +251,7 @@ void ApiClient::post_form(const std::string& endpoint, Params params, const std:
 			if(file) data << file.rdbuf();
 			if(!file || data.str().empty()) {
 				r.error = "Cannot read " + path;
-				std::cout << stamp() << endpoint << ": " << r.error << std::endl;
+				std::cout << stamp() << s->base_url << " " << endpoint << ": " << r.error << std::endl;
 				finish();
 				return;
 				}
@@ -282,12 +289,12 @@ void ApiClient::post_form(const std::string& endpoint, Params params, const std:
 			else if(res->status!=200)
 				r.error = "Server returned HTTP " + std::to_string(res->status);
 			else
-				read_answer(endpoint, res->body, r);
+				read_answer(*s, endpoint, res->body, r);
 			}
 		catch(const std::exception& ex) {
 			r.error = ex.what();
 			}
-		if(!r.ok && r.code==0) std::cout << stamp() << endpoint << ": " << r.error << std::endl;
+		if(!r.ok && r.code==0) std::cout << stamp() << s->base_url << " " << endpoint << ": " << r.error << std::endl;
 		finish();
 		});
 	}
@@ -418,10 +425,10 @@ ApiResult ApiClient::get_json(const Session& s, const std::string& endpoint, con
 	std::string url = s.base_url + "/rest/" + endpoint + ".view?" + query(s, params);
 	std::string body;
 	if(!get_bytes(url, body, r.error, read_timeout)) {
-		std::cout << stamp() << endpoint << ": " << r.error << std::endl;
+		std::cout << stamp() << s.base_url << " " << endpoint << ": " << r.error << std::endl;
 		return r;
 		}
-	read_answer(endpoint, body, r);
+	read_answer(s, endpoint, body, r);
 	return r;
 	}
 

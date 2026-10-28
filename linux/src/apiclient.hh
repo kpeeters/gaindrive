@@ -26,6 +26,8 @@ struct ApiResult {
 	// credentials were refused.
 	int            code=0;
 	std::string    error;
+	// The answer was not Subsonic at all: the server lacks the endpoint.
+	bool           foreign=false;
 	// The session's server_key, so a refusal logs out only that server.
 	std::string    server;
 	nlohmann::json body;   // the inside of "subsonic-response"

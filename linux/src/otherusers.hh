@@ -37,6 +37,8 @@ class OtherUsers : public Gtk::Box {
 		std::vector<std::pair<std::shared_ptr<ApiClient>, std::string>> servers_;
 		// Per server, so one that does not answer keeps what it showed.
 		std::vector<std::vector<Entry>> shown_;
+		// Servers without getNowPlaying (Bandcamp), left out of later polls.
+		std::vector<bool>               lacking_;
 		std::vector<Entry>              rows_;
 		Gtk::Label                      heading_;
 		Gtk::ListBox                    list_;

@@ -113,6 +113,7 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void update_back();
 		void fullscreen_changed();
 		void apply_theme();
+		void apply_text_scale();
 		std::vector<Pane*> all_panes();
 		// The pane holding the keyboard focus, else the strip's active one.
 		Pane *active_pane();
@@ -197,6 +198,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		std::unique_ptr<PromoteDialog> promote_;
 		// GTK's own dark preference at startup, which "auto" goes back to.
 		bool                       gtk_dark_=false;
+		// gtk-xft-dpi as the desktop set it, text scaling included.
+		int                        desktop_dpi_=0;
 		// The web's dark-theme accent, on the display while the theme is dark.
 		Glib::RefPtr<Gtk::CssProvider> dark_css_;
 		bool                       dark_css_on_=false;
