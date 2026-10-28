@@ -126,6 +126,7 @@ add_executable(gaindrive-player
 	src/merge.cc
 	src/model.cc
 	src/mpris.cc
+	src/otherusers.cc
 	src/panes.cc
 	src/panestrip.cc
 	src/playback.cc

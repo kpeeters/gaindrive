@@ -4,6 +4,7 @@
 #include "coverstore.hh"
 #include "isearch.hh"
 #include "loginview.hh"
+#include "otherusers.hh"
 #include "panes.hh"
 #include "panestrip.hh"
 #include "playback.hh"
@@ -66,6 +67,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void set_scope(const std::string& key);
 		// The lists again, for another scope or server set.
 		void reload_lists();
+		// Every server, not just the scope's: the others listen regardless.
+		void poll_other_users();
 		// The host, or user@host when another server shares it.
 		std::string server_label(const std::string& key) const;
 		// Those with a session, by key and label, in servers.json's order.
@@ -88,7 +91,10 @@ class MainWindow : public Gtk::ApplicationWindow {
 		// Reloads the section's artists and opens `album` under `artist`.
 		void reveal_album(const ItemRef& artist, const ItemRef& album);
 		void open_artist(const Artist& a);
-		void open_album(const ItemRef& album, const std::string& play_id);
+		// `mark_id` points at a track without playing it: what another
+		// user is listening to.
+		void open_album(const ItemRef& album, const std::string& play_id,
+		                const std::string& mark_id="");
 		void album_loaded(const Album& a);
 		void play(const std::vector<Song>& songs, size_t index);
 		void star(ListRow::Kind kind, const ItemRef& ref, bool on);
@@ -135,6 +141,7 @@ class MainWindow : public Gtk::ApplicationWindow {
 		Gtk::ListBox               nav_;
 		Gtk::ScrolledWindow        queue_scroll_;
 		QueueView                  queue_;
+		OtherUsers                 users_;
 
 		// content_ over the incremental search's minibuffer, which takes
 		// its own height so it cannot cover the last row, the one a search

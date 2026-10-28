@@ -570,13 +570,14 @@ void TrackPane::show_star()
 	}
 
 void TrackPane::show_album(std::shared_ptr<ApiClient> api, const std::string& album_id,
-                           const std::string& play_id)
+                           const std::string& play_id, const std::string& mark_id)
 	{
 	clear();
 	unsigned gen = gen_;
 	api_ = api;
+	mark_id_ = mark_id;
 	notes_->load(api, "getAlbumInfo2", album_id, "albumInfo2", "notes", "");
-	api->call("getAlbum", {{"id", album_id}}, [this, api, gen, album_id, play_id](const ApiResult& r) {
+	api->call("getAlbum", {{"id", album_id}}, [this, api, gen, album_id, play_id, mark_id](const ApiResult& r) {
 		if(gen!=gen_) return;
 		if(!r.ok) {
 			report(r);
@@ -603,6 +604,10 @@ void TrackPane::show_album(std::shared_ptr<ApiClient> api, const std::string& al
 		for(size_t i=0; i<arr.size(); ++i)
 			songs_.push_back(parse_song(server, jidx(arr, i)));
 		show_rows();
+		if(!mark_id.empty())
+			scroll_to([mark_id](const ListRow& row) {
+				return row.kind==ListRow::Kind::song && row.song.ref.id==mark_id;
+				});
 		// Films may carry chapters, listed under them once they arrive.
 		if(std::any_of(songs_.begin(), songs_.end(), [](const Song& s) { return s.is_video; }))
 			api->call("getAlbumChapters", {{"id", album_id}}, [this, gen, album_id](const ApiResult& r) {
@@ -786,6 +791,10 @@ void TrackPane::bind(RowWidget& w, const ListRow& row)
 	// Recycled widgets: the class must come off as surely as it goes on.
 	if(row.kind==ListRow::Kind::chapter) w.add_css_class("chapter");
 	else                                 w.remove_css_class("chapter");
+	if(row.kind==ListRow::Kind::song && !mark_id_.empty() && row.song.ref.id==mark_id_)
+		w.add_css_class("peer");
+	else
+		w.remove_css_class("peer");
 	if(row.kind==ListRow::Kind::heading) {
 		w.show_heading(row.text);
 		return;

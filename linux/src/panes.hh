@@ -154,6 +154,9 @@ class Pane : public Gtk::Box {
 		virtual Glib::ustring search_text(const ListRow& row) const;
 		void rebind_all();
 		void report(const ApiResult& r);
+		// Brings the first row `match` accepts into view, without selecting
+		// it, which would activate it.
+		void scroll_to(std::function<bool(const ListRow&)> match);
 
 		// The usual song row outside an album: title, "artist · album".
 		void bind_song_hit(RowWidget& w, const Song& s, const std::string& trail);
@@ -274,8 +277,9 @@ class TrackPane : public Pane {
 		~TrackPane() override;
 
 		// Everything else about the album comes from getAlbum.
+		// `mark_id` is marked as another user's track, and not played.
 		void show_album(std::shared_ptr<ApiClient> api, const std::string& album_id,
-		                const std::string& play_id="");
+		                const std::string& play_id="", const std::string& mark_id="");
 		void clear() override;
 		void star_changed(ListRow::Kind kind, const ItemRef& ref, bool on) override;
 
@@ -323,6 +327,7 @@ class TrackPane : public Pane {
 		int                         chapter_=-1;
 		Album                       album_;
 		std::shared_ptr<ApiClient>  api_;
+		std::string                 mark_id_;
 
 		// The album's own star, as the web and Android have it by the title.
 		Gtk::Button                 star_;

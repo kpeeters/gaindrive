@@ -488,6 +488,17 @@ void Pane::apply_restore()
 	if(done) done(false);
 	}
 
+void Pane::scroll_to(std::function<bool(const ListRow&)> match)
+	{
+	for(guint i=0; i<store_->get_n_items(); ++i)
+		if(match(*store_->get_item(i))) {
+#if GTKMM_CHECK_VERSION(4,12,0)
+			list_.scroll_to(i, Gtk::ListScrollFlags::NONE);
+#endif
+			return;
+			}
+	}
+
 int Pane::size() const
 	{
 	return store_->get_n_items();

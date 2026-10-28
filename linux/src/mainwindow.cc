@@ -58,6 +58,8 @@ namespace {
 		.sidebar { min-width: 255px; }
 		.playing .row-title { font-weight: bold; }
 		.playing-mark { opacity: 0; color: @gd_red; -gtk-icon-size: 20px; }
+		/* Another user's track, as the web marks it. */
+		.peer .row-title { color: @gd_red; }
 		.playing .playing-mark { opacity: 1; }
 		.player-bar { padding: 8px 12px; border-top: 1px solid alpha(currentColor, 0.15); }
 		.pane-empty { padding: 12px; }
@@ -112,6 +114,18 @@ namespace {
 		}
 		/* Selected text in fields, text views and selectable labels. */
 		text > selection, textview > text > selection, label > selection {
+			background-color: @gd_red;
+			color: white;
+		}
+		/* The drop-down's own button is checked while its list is open,
+		   which WhiteSur paints as a pressed button, in blue. */
+		dropdown > button:checked, dropdown > button:active {
+			background-color: @gd_red;
+			border-color: @gd_red;
+			color: white;
+		}
+		/* The picked entry in a drop-down's list. */
+		popover > contents listview > row:selected {
 			background-color: @gd_red;
 			color: white;
 		}
@@ -361,6 +375,11 @@ MainWindow::MainWindow()
 	queue_scroll_.set_vexpand(true);
 	queue_scroll_.set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
 	sidebar_.append(queue_scroll_);
+	// Below the queue, which takes the height between, as on the web.
+	users_.signal_open_album.connect([this](const ItemRef& album, const std::string& song_id) {
+		open_album(album, "", song_id);
+		});
+	sidebar_.append(users_);
 	main_.append(sidebar_);
 
 	left_.add(artists_, "library");
@@ -493,7 +512,9 @@ MainWindow::MainWindow()
 		p->signal_play.connect(sigc::mem_fun(*this, &MainWindow::play));
 		p->signal_enqueue.connect(sigc::mem_fun(playback_, &Playback::enqueue));
 		p->signal_star.connect(sigc::mem_fun(*this, &MainWindow::star));
-		p->signal_open_album.connect(sigc::mem_fun(*this, &MainWindow::open_album));
+		p->signal_open_album.connect([this](const ItemRef& album, const std::string& play_id) {
+			open_album(album, play_id);
+			});
 		p->signal_open_artist.connect(sigc::mem_fun(*this, &MainWindow::open_artist));
 		p->signal_pick_playlist.connect([this](const Song& s, Gtk::Widget& anchor) {
 			pick_playlist(anchor, client_for(s.ref.server), s, [this](const ApiResult& r) { failed(r); });
@@ -720,6 +741,7 @@ void MainWindow::open_browse()
 	search_.set_scope(scope());
 	artists_.load(scope());
 	find_upload_server();
+	poll_other_users();
 	restore_view();
 	stack_.set_visible_child("browse");
 	}
@@ -731,9 +753,19 @@ void MainWindow::reload_lists()
 	search_.set_scope(scope());
 	artists_.load(scope());
 	find_upload_server();
+	poll_other_users();
 	auto section = left_.get_visible_child_name();
 	if(section=="playlists")    playlists_.load(scope());
 	else if(section=="recents") recents_.load(scope());
+	}
+
+void MainWindow::poll_other_users()
+	{
+	auto apis = clients_.all();
+	std::vector<std::pair<std::shared_ptr<ApiClient>, std::string>> servers;
+	for(const auto& api: apis)
+		servers.push_back({api, apis.size()>1 ? server_label(api->session().server_key) : std::string()});
+	users_.set_servers(std::move(servers));
 	}
 
 void MainWindow::set_scope(const std::string& key)
@@ -886,6 +918,7 @@ void MainWindow::end_session(const std::string& error)
 	search_.set_query("");
 	search_.set_scope({});
 	set_upload_server(nullptr, false);
+	users_.set_servers({});
 	close_cards();
 	for(auto p: all_panes())
 		p->clear();
@@ -1248,7 +1281,8 @@ void MainWindow::open_artist(const Artist& a)
 	go(1);
 	}
 
-void MainWindow::open_album(const ItemRef& album, const std::string& play_id)
+void MainWindow::open_album(const ItemRef& album, const std::string& play_id,
+                            const std::string& mark_id)
 	{
 	auto api = client_for(album.server);
 	if(album.id.empty() || !api) return;
@@ -1256,7 +1290,7 @@ void MainWindow::open_album(const ItemRef& album, const std::string& play_id)
 	expect_album_.clear();
 	view_.album = album;
 	view_.album_title.clear();
-	tracks_.show_album(api, album.id, play_id);
+	tracks_.show_album(api, album.id, play_id, mark_id);
 	go(2);
 	}
 
