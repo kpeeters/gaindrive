@@ -40,6 +40,11 @@ CLIENT = "test"
 # e.g. "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
 LIVE_URL = None
 
+# A short playlist (a handful of entries, ideally including one deleted or
+# private video) whose owner is not already an artist in the personal listing.
+# e.g. "https://www.youtube.com/playlist?list=..."
+LIVE_PLAYLIST_URL = None
+
 # The uploads root as the *server* sees it, needed by the one test that removes
 # a batch behind the server's back. Only meaningful when the tests and the
 # server share a filesystem; that test skips when this path is not there.
@@ -326,8 +331,7 @@ def test_live_fetch_with_names():
     title parsing is not consulted.
 
     A merge test proper - two directories at one level collapsing into the typed
-    name - needs a playlist, and the built-in handler passes --no-playlist, so
-    it cannot be exercised here without an operator-written handler."""
+    name - needs a playlist; test_live_playlist covers the untyped case."""
     if LIVE_URL is None:
         raise Skip("LIVE_URL is not set")
     _require_handlers()
@@ -365,6 +369,64 @@ def test_live_fetch_with_names():
     albums = [c["title"] for c in d.get("child", []) if c.get("isDir")]
     assert albums == [album], f"expected one album named {album!r}, got {albums}"
     print("PASS  typed names are what the batch is filed under")
+
+
+def test_live_playlist():
+    """A playlist URL is one album under the playlist's owner, numbered in
+    playlist order, and entries the site refuses do not fail the job."""
+    if LIVE_PLAYLIST_URL is None:
+        raise Skip("LIVE_PLAYLIST_URL is not set")
+    hs = _require_handlers()
+    if not any(h["video"] for h in hs):
+        raise Skip("no handler offers video")
+
+    def artist_names():
+        sr = _ok(_get("getArtists.view", {"personal": "true"}))
+        return {a["name"]: a["id"]
+                for i in sr.get("artists", {}).get("index", [])
+                for a in i.get("artist", [])}
+    before = artist_names()
+
+    job = _ok(_get("fetchUrl.view", {"url": LIVE_PLAYLIST_URL,
+                                     "mode": "video"}))["fetchJob"]
+    deadline, state, me = time.time() + 1800, "queued", None
+    while time.time() < deadline:
+        sr = _ok(_get("getFetchJobs.view"))
+        me = next((j for j in sr.get("fetchJobs", {}).get("fetchJob", [])
+                   if j["id"] == job["id"]), None)
+        assert me is not None, f"job {job['id']} disappeared"
+        state = me["state"]
+        # No monotonic check, unlike test_live_fetch: a video entry downloads
+        # its picture and its sound as two streams, each 0-100%.
+        if state in ("done", "error", "cancelled"):
+            break
+        time.sleep(5)
+    assert state == "done", f"playlist fetch did not finish: {me}"
+    assert me["itemsTotal"] > 1, f"not reported as a playlist: {me}"
+    assert 0 < me["itemsOk"] <= me["itemsTotal"], me
+    if me["itemsOk"] < me["itemsTotal"]:
+        assert me["error"], f"missing entries but no message: {me}"
+    print(f"PASS  playlist fetched, {me['itemsOk']} of {me['itemsTotal']}")
+
+    after = artist_names()
+    new = set(after) - set(before)
+    assert len(new) == 1, f"expected one new artist, got {new}"
+    aid = after[new.pop()]
+    d = _ok(_get("getMusicDirectory.view", {"id": aid}))["directory"]
+    albums = [c for c in d.get("child", []) if c.get("isDir")]
+    assert len(albums) == 1, f"expected one album, got {albums}"
+    songs = _ok(_get("getMusicDirectory.view",
+                     {"id": albums[0]["id"]}))["directory"].get("child", [])
+    songs = [c for c in songs if not c.get("isDir")]
+    assert len(songs) == me["itemsOk"], \
+        f"{len(songs)} tracks for {me['itemsOk']} entries"
+    tracks = [c.get("track", 0) for c in songs]
+    assert all(t > 0 for t in tracks) and tracks == sorted(set(tracks)), \
+        f"tracks not numbered in playlist order: {tracks}"
+    titles = [c.get("title", "") for c in songs]
+    assert not any(t[:1].isdigit() and " - " in t[:6] for t in titles), \
+        f"list position left in a title: {titles}"
+    print("PASS  a playlist is one album in playlist order")
 
 
 def test_duplicate_refused():
@@ -605,6 +667,7 @@ TESTS = [
     test_removed_batch_is_pruned,
     test_live_fetch,
     test_live_fetch_with_names,
+    test_live_playlist,
     test_duplicate_refused,
     test_live_cancel,
 ]

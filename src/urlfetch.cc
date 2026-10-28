@@ -2,6 +2,8 @@
 #include "stamp.hh"
 #include "proc.hh"
 
+#include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -44,6 +46,22 @@ std::optional<int> urlfetch_progress(const std::string& line)
 	return static_cast<int>(v);
 	}
 
+std::optional<std::pair<int, int>> urlfetch_playlist_item(const std::string& line)
+	{
+	// yt-dlp's wording, unlike urlfetch_progress: a tool that phrases it
+	// differently simply never counts as a playlist, which is the old
+	// all-or-nothing behaviour rather than anything worse.
+	static const std::regex re(R"(Downloading item (\d+) of (\d+))");
+	std::smatch m;
+	if (!std::regex_search(line, m, re)) return std::nullopt;
+	try {
+		int k = std::stoi(m[1].str()), n = std::stoi(m[2].str());
+		if (k < 1 || n < 1 || k > n) return std::nullopt;
+		return std::make_pair(k, n);
+		}
+	catch (...) { return std::nullopt; }
+	}
+
 std::vector<std::string> urlfetch_expand(const std::vector<std::string>& tmpl,
                                           const std::string& url,
                                           const std::string& dir)
@@ -60,7 +78,7 @@ std::vector<std::string> urlfetch_expand(const std::vector<std::string>& tmpl,
 
 // ---- the table --------------------------------------------------------
 
-std::vector<UrlHandler> UrlFetcher::default_handlers()
+std::vector<UrlHandler> UrlFetcher::default_handlers(int playlist_max)
 	{
 	// Every flag below is load-bearing; none of it is taste.
 	//
@@ -87,10 +105,15 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	// --newline turns the tool's \r progress into whole lines and --progress
 	// asks for that progress at all, which it otherwise suppresses when its
 	// stdout is not a terminal - as it is not here.  (Nothing asks for colour
-	// to be off: a pipe already gets none.)  --no-playlist and --max-filesize
-	// are the only things bounding what one pasted URL can write into the
-	// uploads root, and the "--" is what stops a URL beginning with a dash
-	// being read as an option.
+	// to be off: a pipe already gets none.)  The "--" is what stops a URL
+	// beginning with a dash being read as an option.
+	//
+	// What one pasted URL can write into the uploads root is bounded by
+	// --max-filesize per file and by -I per playlist. --no-playlist does not
+	// do the second job: it only decides what a watch URL that also names a
+	// list means, and a bare playlist URL is fetched whole regardless. It
+	// stays so that a link copied from inside a playlist fetches the one video
+	// it shows, which is what the person pasting it was looking at.
 	//
 	// The thumbnail output costs nothing and gains a cover: cover.jpg is the
 	// first name in MediaStore's COVER_FILENAMES, so find_cover() picks it up
@@ -111,6 +134,7 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	// comments, where `chapters` is the site's own parse.
 	std::vector<std::string> common = {
 		"--newline", "--progress", "--no-playlist",
+		"-I", ":" + std::to_string(playlist_max > 0 ? playlist_max : 1),
 		"--write-thumbnail", "--convert-thumbnails", "jpg",
 		"--write-info-json", "-P", "%DIR%" };
 
@@ -175,11 +199,25 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	// not music, and a lecture or podcast really is best filed under whoever
 	// published it. An operator who would rather see them collected together
 	// can end the chain with a literal instead: %(artist|Unknown Artist)s.
-	const std::string dir_artist = "%(artist,album_artist,uploader)s";
+	//
+	// A playlist's entries are filed under the playlist and its owner first,
+	// whatever each title says, because the point of fetching one is a single
+	// album in the playlist's order: per-entry names would scatter it across
+	// as many artists as it has videos. Those fields are absent outside a
+	// playlist, so a single fetch falls straight through to the old chain.
+	// A typed artist or album still overrides both, in apply_batch_names().
+	const std::string dir_artist =
+		"%(playlist_uploader,artist,album_artist,uploader)s";
 	// A track with no album of its own is an album of one, which is what
 	// falling through to the track name means here.
-	const std::string dir_album  = "%(album,track,title)s";
-	const std::string file_stem  = "%(track,title)s";
+	const std::string dir_album  = "%(playlist_title,album,track,title)s";
+	// The playlist position as a leading "07 - ", which is the only track
+	// number a video can carry: no container gaindrive reads has a tag for
+	// it, and the scanner takes it from the name (parse_video_name()).
+	// Padding is not relied on: the scanner orders by the parsed number, not
+	// by the filename.
+	const std::string file_stem  =
+		"%(playlist_index&{} - |)s%(track,title)s";
 
 	auto with = [&](std::vector<std::string> head) {
 		std::vector<std::string> v = std::move(head);
@@ -201,20 +239,84 @@ std::vector<UrlHandler> UrlFetcher::default_handlers()
 	// this, and widening it is the operator's call, made in the config file
 	// where the consequences are written down.
 	yt.pattern = R"(https?://(www\.|m\.|music\.)?(youtube\.com|youtu\.be)/.*)";
+	// Audio carries the position as a tag as well, since a tag is what the
+	// scanner prefers for audio and the filename prefix is only its fallback.
 	yt.audio_argv = with({ "yt-dlp", "-x", "--audio-format", "opus",
-	                       "--embed-metadata", "--max-filesize", "2G" });
+	                       "--embed-metadata", "--max-filesize", "2G",
+	                       "--parse-metadata",
+	                       "playlist_index:%(track_number)s" });
 	yt.video_argv = with({ "yt-dlp", "--merge-output-format", "mp4",
 	                       "--embed-metadata", "--max-filesize", "8G" });
 	return { yt };
 	}
 
+// What a playlist fetch that lost some entries leaves behind, reduced to the
+// entries that finished. Returns how many did.
+//
+// Removed: the tool's part files (.part, .ytdl, fragments), the per-format
+// streams of a merge that never happened (Title.f137.mp4) and its .temp.
+// output, and any .info.json whose media is gone - written before the
+// download starts, it would otherwise become a chapter sidecar for nothing.
+// Counted: whatever is left that is neither metadata nor a cover.
+static int prune_partial_items(const fs::path& dir)
+	{
+	static const std::regex partial(
+		R"(.*(\.part|\.ytdl|\.part-Frag\d+)$|.*\.temp\..*|.*\.f\d+(-\d+)?\.[^.]+$)");
+	static constexpr std::string_view INFO = ".info.json";
+	auto ends_with = [](const std::string& s, std::string_view suf) {
+		return s.size() > suf.size()
+		    && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
+		};
+
+	std::error_code ec;
+	std::vector<fs::path> files;
+	for (auto& e : fs::recursive_directory_iterator(dir, ec))
+		if (e.is_regular_file(ec)) files.push_back(e.path());
+
+	std::vector<fs::path> kept;
+	for (const auto& f : files) {
+		if (std::regex_match(f.filename().string(), partial)) {
+			std::error_code rec;
+			fs::remove(f, rec);
+			}
+		else
+			kept.push_back(f);
+		}
+
+	int items = 0;
+	for (const auto& f : kept) {
+		const std::string name = f.filename().string();
+		if (ends_with(name, INFO)) {
+			const std::string base = name.substr(0, name.size() - INFO.size()) + ".";
+			bool has_media = std::any_of(kept.begin(), kept.end(),
+				[&](const fs::path& o) {
+					const std::string on = o.filename().string();
+					return o.parent_path() == f.parent_path()
+					    && on.rfind(base, 0) == 0 && !ends_with(on, INFO);
+					});
+			if (!has_media) {
+				std::error_code rec;
+				fs::remove(f, rec);
+				}
+			continue;
+			}
+		std::string ext = f.extension().string();
+		std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+		if (f.stem() == "cover" || ext == ".jpg" || ext == ".jpeg"
+		    || ext == ".png" || ext == ".webp" || ext == ".json")
+			continue;
+		items++;
+		}
+	return items;
+	}
+
 // ---- UrlFetcher -------------------------------------------------------
 
 UrlFetcher::UrlFetcher(const std::optional<std::vector<UrlHandler>>& handlers,
-                       int timeout_s)
+                       int timeout_s, int playlist_max)
 	: timeout_s_(timeout_s > 0 ? timeout_s : 2 * 60 * 60)
 	{
-	auto table = handlers ? *handlers : default_handlers();
+	auto table = handlers ? *handlers : default_handlers(playlist_max);
 
 	for (auto& h : table) {
 		if (h.name.empty()) h.name = h.pattern;
@@ -334,8 +436,9 @@ UrlFetcher::Result UrlFetcher::run(
 	else
 		opts.redirect.err.type = reproc::redirect::type::discard;
 	opts.redirect.out.type = reproc::redirect::type::pipe;
-	opts.deadline          = reproc::milliseconds(
-		static_cast<int64_t>(timeout_s_) * 1000);
+	// No opts.deadline: the limit is per item and is enforced by the read
+	// loop, since a whole-job deadline is either too short for a playlist or
+	// far too long for one stalled video.
 
 	Child child;
 	if (auto ec = child.proc.start(argv, opts)) {
@@ -364,11 +467,33 @@ UrlFetcher::Result UrlFetcher::run(
 			}
 		} unreg{ this };
 
+	using clock = std::chrono::steady_clock;
+	const auto item_limit = std::chrono::seconds(timeout_s_);
+	auto       item_start = clock::now();
+	bool       timed_out  = false;
+	// From the tool's "item k of n" lines; items stays 0 for a single video.
+	int        item = 0, items = 0;
+
 	std::string pending;
 	int         percent = 0;
 	uint8_t     buf[READ_BUF];
 	std::error_code read_ec;
 	for (;;) {
+		// Polled with a timeout rather than read straight away, so the limit is
+		// checked while the tool prints nothing - and a stalled download is
+		// exactly when it prints nothing.
+		auto [events, perr] = child.proc.poll(reproc::event::out,
+		                                      reproc::milliseconds(1000));
+		if (clock::now() - item_start > item_limit) {
+			timed_out = true;
+			// Under the mutex for the same reason cancel() takes it.
+			std::lock_guard<std::mutex> lk(mu_);
+			child.proc.kill();
+			break;
+			}
+		if (perr == std::errc::timed_out || (!perr && events == 0)) continue;
+		// Anything else - output, a closed pipe, an error - is read()'s to
+		// report.
 		auto [n, err] = child.proc.read(reproc::stream::out, buf, sizeof(buf));
 		// Check err before n: reproc wraps a negative C return value into
 		// size_t, so err is the reliable EOF/error indicator and n may be a
@@ -386,11 +511,20 @@ UrlFetcher::Result UrlFetcher::run(
 			std::string ln = pending.substr(0, pos);
 			pending.erase(0, pos + 1);
 			if (ln.empty()) continue;
+			if (auto it = urlfetch_playlist_item(ln)) {
+				item       = it->first;
+				items      = it->second;
+				item_start = clock::now();
+				percent    = 0;
+				}
 			// Keep the previous percentage when a line carries none, or the bar
 			// snaps to zero for the whole post-processing phase.
 			if (auto p = urlfetch_progress(ln)) percent = *p;
+			// One bar for the whole playlist, not one that refills per entry.
+			int overall = items > 1 ? ((item - 1) * 100 + percent) / items
+			                        : percent;
 			std::cout << stamp() << "url fetch: " << ln << std::endl;
-			if (progress) progress(percent, ln);
+			if (progress) progress(overall, ln);
 			}
 		// A very long line with no terminator must not grow without bound.
 		if (pending.size() > 64 * 1024) pending.clear();
@@ -402,7 +536,41 @@ UrlFetcher::Result UrlFetcher::run(
 	for (auto& e : fs::recursive_directory_iterator(dir, fec))
 		if (e.is_regular_file(fec)) r.files++;
 
-	if (read_ec || wec || status != 0 || r.files == 0) {
+	bool failed = timed_out || read_ec || wec || status != 0 || r.files == 0;
+
+	// A playlist almost always holds an entry that is deleted, private or
+	// blocked here, and the tool then exits non-zero after fetching the rest.
+	// Throwing those away would mean no real playlist ever arrives, so the
+	// finished entries are kept and the job says how many are missing. A
+	// single video stays all-or-nothing: there is nothing partial worth
+	// keeping.
+	if (failed && items > 1) {
+		int kept = prune_partial_items(dir);
+		if (kept > 0) {
+			r.files = 0;
+			for (auto& e : fs::recursive_directory_iterator(dir, fec))
+				if (e.is_regular_file(fec)) r.files++;
+			r.ok          = true;
+			r.items_ok    = kept;
+			r.items_total = items;
+			r.error = (timed_out ? "Timed out on item " + std::to_string(item)
+			                       + "; " : std::string())
+			        + std::to_string(kept) + " of " + std::to_string(items)
+			        + " items fetched.";
+			std::cout << stamp() << "url fetch: partial playlist, " << kept
+			          << " of " << items << " item(s) into " << dir
+			          << std::endl;
+			if (errf) {
+				std::string tail = stderr_tail(errf.get());
+				if (!tail.empty())
+					std::cout << stamp() << "url fetch: stderr: " << tail
+					          << std::endl;
+				}
+			return r;
+			}
+		}
+
+	if (failed) {
 		std::cout << stamp() << "url fetch: failed status=" << status
 		          << " files=" << r.files
 		          << (read_ec ? " read=" + read_ec.message() : "")
@@ -417,7 +585,8 @@ UrlFetcher::Result UrlFetcher::run(
 		// A clean exit that produced nothing is a failure, the same rule the
 		// transcode cache applies to a zero-byte output: there is no library
 		// entry to be made from it and reporting success would be a lie.
-		r.error = status != 0
+		r.error = timed_out ? std::string("The fetch timed out.")
+		    : status != 0
 		    ? argv.front() + " failed (exit " + std::to_string(status) + ")."
 		    : (r.files == 0 ? "The fetch produced no files."
 		                    : "The fetch could not be read.");
@@ -428,5 +597,6 @@ UrlFetcher::Result UrlFetcher::run(
 	std::cout << stamp() << "url fetch: " << r.files << " file(s) into " << dir
 	          << std::endl;
 	r.ok = true;
+	if (items > 1) r.items_ok = r.items_total = items;
 	return r;
 	}

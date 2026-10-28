@@ -2375,6 +2375,13 @@ for them -- they are written out as a sidecar beside the media, so a fetched
 concert or DJ set arrives with its markers already in place. An existing
 sidecar is never overwritten, and a fetch that reports no markers writes
 nothing rather than the empty file that would assert there are none.
+
+A playlist URL becomes one album: the built-in handler files every entry under
+the playlist's title and owner, numbered in playlist order, and fetches at
+most `url_fetch_playlist_max` entries (config, default 100). Entries the site
+refuses (deleted, private) are skipped rather than failing the job; see
+`itemsOk` in `getFetchJobs`. A watch URL that also names a playlist fetches
+only the video it shows.
 '''
 see = ["getUrlHandlers", "getFetchJobs", "cancelFetch"]
 
@@ -2476,7 +2483,7 @@ Finished jobs are kept for fifteen minutes, or the last ten per user.
   name = "percent"
   type = "int"
   on   = "fetchJob"
-  doc  = "Progress, parsed from the tool's output. A line carrying no percentage keeps the previous value rather than resetting to zero."
+  doc  = "Progress, parsed from the tool's output. A line carrying no percentage keeps the previous value rather than resetting to zero. For a playlist it covers the whole list, not the current entry."
 
   [[endpoint.field]]
   name  = "detail"
@@ -2492,13 +2499,25 @@ surfaced in an API response.
   name = "error"
   type = "string"
   on   = "fetchJob"
-  doc  = 'Why the job failed, when its state is `error`.'
+  doc  = 'Why the job failed, when its state is `error`; for a playlist that is `done` but missing entries, how many arrived.'
 
   [[endpoint.field]]
   name = "files"
   type = "int"
   on   = "fetchJob"
   doc  = 'How many media files the fetch produced.'
+
+  [[endpoint.field]]
+  name = "itemsOk"
+  type = "int"
+  on   = "fetchJob"
+  doc  = 'For a playlist, how many entries arrived; 0 for a single video.'
+
+  [[endpoint.field]]
+  name = "itemsTotal"
+  type = "int"
+  on   = "fetchJob"
+  doc  = 'For a playlist, how many entries the tool announced; 0 for a single video.'
 
   [[endpoint.field]]
   name = "started"

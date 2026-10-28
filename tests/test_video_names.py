@@ -89,6 +89,12 @@ CASES = {
     # "12 Angry Men" is a film.
     "12 Angry Men":
         {"title": "12 Angry Men", "ep": "E12", "cleaned": "as-is"},
+    # A number set off by a spaced dash is a list position (how the URL
+    # fetcher names playlist entries), so it orders and is stripped.
+    "03 - Song Title":
+        {"title": "Song Title", "ep": "E3"},
+    "Some Playlist/7 - Live at Pompeii":
+        {"title": "Live at Pompeii", "ep": "E7"},
 
     # --- series ---------------------------------------------------------
     "Planet Earth II/Season 01/Planet.Earth.II.S01E03.Jungles.1080p":

@@ -28,7 +28,8 @@ GainDrive::GainDrive(const std::string& db_path,
                      const std::vector<CastManager::CastDevice>& cast_devices,
                      const std::optional<std::vector<UrlHandler>>& url_handlers,
                      int url_fetch_timeout_s,
-                     int scan_jobs)
+                     int scan_jobs,
+                     int url_fetch_playlist_max)
 	: debug_(debug), flat_multi_disc_(flat_multi_disc), upload_dir_(upload_dir),
 	  store_(db_path, roots, user_db_path, video_art_px, video_art_frames,
 	         video_art_embedded, scan_jobs),
@@ -44,7 +45,7 @@ GainDrive::GainDrive(const std::string& db_path,
 	  // on every start.
 	  hls_(std::filesystem::path(db_path).parent_path() / "hls-sessions"),
 	  cover_cache_(store_),
-	  url_fetcher_(url_handlers, url_fetch_timeout_s),
+	  url_fetcher_(url_handlers, url_fetch_timeout_s, url_fetch_playlist_max),
 	  watcher_(store_)
 	{
 	cast_manager_.set_manual_devices(cast_devices);

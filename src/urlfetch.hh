@@ -6,6 +6,7 @@
 #include <optional>
 #include <regex>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Fetching media from a URL by running somebody else's tool.
@@ -58,6 +59,12 @@ bool urlfetch_http_url(const std::string& url);
 // output with no child process - the same bargain tmdb_pick() strikes.
 std::optional<int> urlfetch_progress(const std::string& line);
 
+// {k, n} from a line announcing item k of an n-item playlist, or nothing.
+// Free for the same reason as urlfetch_progress: it is the rule that turns a
+// per-item percentage into one bar for the whole job, and the rule that
+// decides whether a non-zero exit was one dead entry or the whole fetch.
+std::optional<std::pair<int, int>> urlfetch_playlist_item(const std::string& line);
+
 // An argv template with %URL% and %DIR% substituted.  Whole elements only: a
 // placeholder is never a substring of a larger argument, which is what makes
 // the substitution unambiguous and keeps every value a single argv element.
@@ -73,18 +80,22 @@ class UrlFetcher
 		// between "the operator said nothing" and "the operator said no" is the
 		// difference between a working default and a silent one.
 		//
-		// timeout_s bounds a single fetch.  Generous, because a film over a slow
-		// link legitimately takes an hour, but bounded, because one worker runs
-		// the queue and a tool waiting on a throttled host would otherwise stop
-		// it for ever.
+		// timeout_s bounds a single item: one video, or one entry of a
+		// playlist.  Generous, because a film over a slow link legitimately
+		// takes an hour, but bounded, because one worker runs the queue and a
+		// tool waiting on a throttled host would otherwise stop it for ever.
+		// Per item rather than per job, or a long playlist could never finish.
+		//
+		// playlist_max caps the entries of one playlist the built-in table
+		// fetches; an operator's own table carries its own cap or none.
 		explicit UrlFetcher(
 			const std::optional<std::vector<UrlHandler>>& handlers,
-			int timeout_s = 2 * 60 * 60);
+			int timeout_s = 2 * 60 * 60, int playlist_max = 100);
 		~UrlFetcher();
 
 		// The built-in table: one yt-dlp entry.  Public so --url-fetch-test and
 		// the documentation can print exactly what will run.
-		static std::vector<UrlHandler> default_handlers();
+		static std::vector<UrlHandler> default_handlers(int playlist_max);
 
 		// False when the table is empty, every pattern failed to compile or
 		// every tool is missing from PATH - in which case nothing here does
@@ -108,7 +119,11 @@ class UrlFetcher
 			{
 			bool        ok    = false;
 			int         files = 0;    // regular files left under dir
-			std::string error;        // empty when ok
+			// For a playlist only: how many entries the tool announced and
+			// how many left a file.  A playlist that lost some entries is
+			// still ok, with `error` saying how many.
+			int         items_ok = 0, items_total = 0;
+			std::string error;        // empty when everything arrived
 			};
 
 		// Runs one fetch to completion.  `progress` is called for every line the

@@ -288,6 +288,17 @@ VideoName parse_video_name(std::string_view name)
 	// renaming it, without the rules having to grow a special case. Jellyfin
 	// reads the same markers.
 	std::smatch m;
+
+	// "07 - Title" is a position in a track list or a playlist (the URL
+	// fetcher names playlist entries this way), not part of the name. The
+	// spaced dash is what makes it safe to strip where a bare leading number
+	// is not: "12 Angry Men" has none.
+	static const std::regex list_pos_re(R"(^\s*(\d{1,3})\s+(?:-|–)\s+(?=\S))");
+	int list_pos = 0;
+	if (std::regex_search(s, m, list_pos_re)) {
+		list_pos = std::stoi(m[1]);
+		s = m.suffix().str();
+		}
 	static const std::regex tmdb_re(R"(\[tmdbid[=-](\d+)\])", std::regex::icase);
 	if (std::regex_search(s, m, tmdb_re)) {
 		out.tmdb_id = m[1];
@@ -367,6 +378,7 @@ VideoName parse_video_name(std::string_view name)
 	// episode number only - see the note above.
 	static const std::regex leading(R"(^(\d{1,3})[\s._-]+\S)");
 	if (std::regex_search(s, m, leading)) out.episode = std::stoi(m[1]);
+	if (list_pos > 0) out.episode = list_pos;
 
 	// A leading number deliberately does not count as having cleaned anything:
 	// it leaves the title alone, so "12 Angry Men" is reported as-is even

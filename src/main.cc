@@ -577,9 +577,10 @@ static int run_tmdb_pick_test(const std::string& title, int year, bool tv,
 // writes too shallow to be promotable, a %DIR% that ended up inside -o.
 static int run_url_fetch_test(
 	const std::string& url,
-	const std::optional<std::vector<UrlHandler>>& handlers)
+	const std::optional<std::vector<UrlHandler>>& handlers,
+	int playlist_max)
 	{
-	UrlFetcher fetcher(handlers);
+	UrlFetcher fetcher(handlers, 2 * 60 * 60, playlist_max);
 	if (!fetcher.configured()) {
 		std::cerr << "No usable URL handlers.\n";
 		return 1;
@@ -929,6 +930,7 @@ int main(int argc, char* argv[])
 	// nullopt until the config file says otherwise - see the note at the read.
 	std::optional<std::vector<UrlHandler>> url_handlers;
 	int         url_fetch_timeout   = 2 * 60 * 60;
+	int         url_fetch_playlist_max = 100;
 
 	// Read config file; missing file is not fatal, just use defaults.
 	std::string config_path = args["config"].as<std::string>();
@@ -1054,6 +1056,8 @@ int main(int argc, char* argv[])
 				}
 			if (cfg.contains("url_fetch_timeout"))
 				url_fetch_timeout = cfg["url_fetch_timeout"].get<int>();
+			if (cfg.contains("url_fetch_playlist_max"))
+				url_fetch_playlist_max = cfg["url_fetch_playlist_max"].get<int>();
 			}
 		catch (const std::exception& e) {
 			std::cerr << "Warning: failed to parse " << config_path << ": " << e.what() << "\n";
@@ -1121,6 +1125,7 @@ int main(int argc, char* argv[])
 			c["url_handlers"] = hs;
 			}
 		c["url_fetch_timeout"] = url_fetch_timeout;
+		c["url_fetch_playlist_max"] = url_fetch_playlist_max;
 
 		c["upload_dir"]         = upload_dir;
 		c["flat_multi_disc"]    = flat_multi_disc;
@@ -1163,7 +1168,7 @@ int main(int argc, char* argv[])
 	// before the library validation, since it needs no roots and no database.
 	if (args.count("url-fetch-test"))
 		return run_url_fetch_test(args["url-fetch-test"].as<std::string>(),
-		                           url_handlers);
+		                           url_handlers, url_fetch_playlist_max);
 
 	// Before validate_roots(), unlike --install-service: a root since unmounted
 	// or deleted must not be what stops somebody removing the service that
@@ -1361,7 +1366,7 @@ int main(int argc, char* argv[])
 		             user_db_path, transcode_cache_dir, transcode_cache_mb,
 		             transcode_jobs, video_art_px, video_art_frames,
 		             video_art_embedded, cast_devices, url_handlers,
-		             url_fetch_timeout, scan_jobs);
+		             url_fetch_timeout, scan_jobs, url_fetch_playlist_max);
 		// Non-zero on a failed bind, so a supervisor restarts rather than
 		// recording a clean shutdown for a server that never served anything.
 		return gd.listen(host, port) ? 0 : 1;

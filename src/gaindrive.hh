@@ -91,7 +91,9 @@ class GainDrive {
 		          // How wide the scan reads file metadata; see
 		          // MediaStore::scan_jobs_. Appended, not inserted: every
 		          // argument here is passed positionally.
-		          int scan_jobs = 0);
+		          int scan_jobs = 0,
+		          // See UrlFetcher's constructor.
+		          int url_fetch_playlist_max = 100);
 		~GainDrive();
 		// Binds and serves. Returns false without serving if the port could
 		// not be acquired, so the caller can exit non-zero rather than treat a
@@ -601,6 +603,10 @@ class GainDrive {
 			std::string detail;      // sanitised: never an absolute path
 			std::string error;
 			int         files   = 0;
+			// A playlist's entries announced and fetched; both 0 for a single
+			// video. A playlist missing some entries is "done", with `error`
+			// saying how many arrived.
+			int         items_ok = 0, items_total = 0;
 			int64_t     started = 0, finished = 0;
 			};
 		void fetch_worker();

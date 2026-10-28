@@ -268,6 +268,8 @@ void GainDrive::routes_fetch()
 					               {"detail",   j.detail},
 					               {"error",    j.error},
 					               {"files",    j.files},
+					               {"itemsOk",    j.items_ok},
+					               {"itemsTotal", j.items_total},
 					               {"started",  j.started},
 					               {"finished", j.finished}});
 				r["fetchJobs"] = {{"fetchJob", arr}};
@@ -289,6 +291,8 @@ void GainDrive::routes_fetch()
 					e->SetAttribute("detail",   j.detail.c_str());
 					e->SetAttribute("error",    j.error.c_str());
 					e->SetAttribute("files",    j.files);
+					e->SetAttribute("itemsOk",    j.items_ok);
+					e->SetAttribute("itemsTotal", j.items_total);
 					e->SetAttribute("started",  (int64_t)j.started);
 					e->SetAttribute("finished", (int64_t)j.finished);
 					list->InsertEndChild(e);
@@ -553,10 +557,13 @@ void GainDrive::fetch_worker()
 				std::lock_guard<std::mutex> lk(fetch_mu_);
 				for (auto& j : fetch_jobs_)
 					if (j.id == id) {
-						j.state   = "scanning";
-						j.percent = 100;
-						j.files   = r.files;
-						j.detail  = "Scanning…";
+						j.state       = "scanning";
+						j.percent     = 100;
+						j.files       = r.files;
+						j.items_ok    = r.items_ok;
+						j.items_total = r.items_total;
+						j.error       = r.error;
+						j.detail      = "Scanning…";
 						break;
 						}
 				}
