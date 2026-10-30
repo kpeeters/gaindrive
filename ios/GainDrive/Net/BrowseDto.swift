@@ -54,6 +54,8 @@ struct ArtistWithAlbums: Decodable, Sendable {
 	@Loose var albumCount: Int?
 	@Loose var coverArt: String?
 	@Loose var starred: String?
+	/// A gaindrive extension: a section of a categories root, not a performer.
+	@Loose var isCategory: Bool?
 	@Listed var album: [AlbumDto] = []
 }
 

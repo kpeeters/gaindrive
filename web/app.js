@@ -3783,18 +3783,14 @@ function makeExpandable(textEl, toggle) {
 // Both are passed in rather than read from module state, for the reason
 // Route.Albums on Android takes the same two flags: an artist id says which
 // folder, never which listing it was reached through. Search, and the
-// sideways entries into viewTracks(), leave them defaulted and behave exactly
-// as before.
+// sideways entries into viewTracks(), leave them defaulted; getArtist's
+// isCategory then corrects the first.
 // `gen` is viewTracks()'s render generation when this is the pane-1 refresh it
 // does on the way in; every other caller leaves it null and takes its own.
 async function viewAlbums(artistId, artistName, isCategory = false,
                           fromUploads = false, gen = null) {
    console.log('[albums] loading artist', artistId, artistName);
    gen = beginRender(gen);
-   // The section this listing was drilled in from, keying the sort preference
-   // and stamped on the pane so the album-edit save path in viewTracks() can
-   // return to the listing that led here.
-   const section = fromUploads ? 'uploads' : isCategory ? 'categories' : 'artists';
    const pane = paneReset('pane-albums', `albums:${artistId}`);
    paneReset('pane-tracks');
 
@@ -3808,6 +3804,13 @@ async function viewAlbums(artistId, artistName, isCategory = false,
       return;
       }
    if (renderStale(gen)) return;
+   // The sideways entries leave isCategory defaulted; the server says so for
+   // them (isCategory, a gaindrive extension).
+   if (srArtist.artist?.isCategory === true) isCategory = true;
+   // The section this listing was drilled in from, keying the sort preference
+   // and stamped on the pane so the album-edit save path in viewTracks() can
+   // return to the listing that led here.
+   const section = fromUploads ? 'uploads' : isCategory ? 'categories' : 'artists';
    const albums   = srArtist.artist?.album ?? [];
    console.log('[albums] got', albums.length, 'albums');
 

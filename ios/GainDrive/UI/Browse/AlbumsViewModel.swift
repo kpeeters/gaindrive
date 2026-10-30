@@ -31,12 +31,15 @@ final class AlbumsViewModel {
 	@ObservationIgnored private let settings: SettingsStore
 	@ObservationIgnored private let refs: [ItemRef]
 	/// A section of a **categories** root: Film and Series are not performers,
-	/// so there is no portrait to fetch and no biography to wait for.
-	@ObservationIgnored private let fromCategories: Bool
+	/// so there is no portrait to fetch and no biography to wait for. From the
+	/// route when drilled in from Categories, from `getArtist` when reached
+	/// through one of its albums.
+	@ObservationIgnored private var isCategory: Bool
+	@ObservationIgnored private let fromUploads: Bool
 	/// Which section's preference the sort belongs to, derived from the route
 	/// flags the listing was drilled in from - this used to read a stored
 	/// "current chip", which could disagree with the listing on screen.
-	@ObservationIgnored private let section: LibrarySection
+	@ObservationIgnored private var section: LibrarySection
 	@ObservationIgnored private var loaded = false
 	@ObservationIgnored private var task: Task<Void, Never>?
 
@@ -48,7 +51,8 @@ final class AlbumsViewModel {
 		self.selection = selection
 		self.settings = settings
 		self.refs = refs
-		self.fromCategories = fromCategories
+		self.isCategory = fromCategories
+		self.fromUploads = fromUploads
 		let section: LibrarySection =
 			fromUploads ? .uploads : fromCategories ? .categories : .artists
 		self.section = section
@@ -110,10 +114,25 @@ final class AlbumsViewModel {
 			// lookup for one (`is_category_folder()`), so the avatar would sit
 			// as a placeholder for ever while the fetch retried a 404 - and
 			// `AlbumsView` draws no header when both of these stay nil.
-			guard !self.fromCategories, let primary = refs.first else { return }
+			guard !self.isCategory, let primary = refs.first else { return }
+			if !self.fromUploads, await library.isCategory(primary) {
+				guard !Task.isCancelled else { return }
+				self.becomeCategory()
+				return
+			}
 			self.portrait = covers.source(primary, size: CoverSize.portrait)
 			self.info = await library.artistInfo(primary)
 		}
+	}
+
+	/// Reached through one of its albums, a category looked like an artist
+	/// until `getArtist` said otherwise; its sort is the categories one.
+	private func becomeCategory() {
+		isCategory = true
+		section = .categories
+		sort = settings.albumSort(for: section)
+		guard case .ready(let items) = state else { return }
+		state = .ready(items.sorted { sort.precedes($0.album, $1.album) })
 	}
 
 	func dismissFailures() {

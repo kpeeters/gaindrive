@@ -89,9 +89,14 @@ void OtherUsers::rebuild()
 			auto user = Gtk::make_managed<Gtk::Label>(label.empty() ? e.user : e.user + " (" + label + ")");
 			user->set_xalign(0);
 			user->set_ellipsize(Pango::EllipsizeMode::END);
+			// An ellipsized label still asks for its full text as natural
+			// width, which the sidebar box would grant; cap it so the
+			// sidebar keeps its own width and the label fills that.
+			user->set_max_width_chars(1);
 			auto track = Gtk::make_managed<Gtk::Label>(e.title);
 			track->set_xalign(0);
 			track->set_ellipsize(Pango::EllipsizeMode::END);
+			track->set_max_width_chars(1);
 			track->add_css_class("dim-label");
 			box->set_tooltip_text(e.artist.empty() ? e.title : e.artist + " - " + e.title);
 			box->append(*user);

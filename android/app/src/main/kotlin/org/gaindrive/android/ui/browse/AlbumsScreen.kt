@@ -95,7 +95,7 @@ fun AlbumsScreen(
 							name = viewModel.artistName,
 							header = header,
 							albumCount = albums.size,
-							showPortrait = !viewModel.isCategory,
+							showPortrait = !header.isCategory,
 						)
 					}
 

@@ -64,6 +64,7 @@ fun ArtistWithAlbums.toDomain(server: ServerId) = Artist(
 	albumCount = if (albumCount > 0) albumCount else album.size,
 	coverArt = server.ref(coverArt ?: id),
 	starredAt = starred,
+	isCategory = isCategory,
 )
 
 fun AlbumDto.toDomain(server: ServerId) = Album(

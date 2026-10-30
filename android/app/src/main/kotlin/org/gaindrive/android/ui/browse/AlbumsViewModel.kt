@@ -5,11 +5,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -38,6 +42,14 @@ import javax.inject.Inject
 data class ArtistHeaderUi(
 	val portraitUrl: String? = null,
 	val info: ArtistInfo? = null,
+	/**
+	 * A section of a categories root. It has no portrait and no biography -
+	 * `is_category_folder()` on the server refuses the lookup - so the header
+	 * draws neither, and neither is asked for. Known from the route when
+	 * drilled in from Categories, and from `getArtist` when reached through
+	 * one of its albums.
+	 */
+	val isCategory: Boolean = false,
 )
 
 @HiltViewModel
@@ -68,28 +80,26 @@ class AlbumsViewModel @Inject constructor(
 	/** Passed down to each album, and only ever true when browsing Uploads. */
 	val fromUploads: Boolean = route.fromUploads
 
-	/**
-	 * True when this "artist" is a section of a categories root. It has no
-	 * portrait and no biography - `is_category_folder()` on the server refuses
-	 * the lookup - so the header draws neither, and neither is asked for.
-	 */
-	val isCategory: Boolean = route.fromCategories
+	private val _header = MutableStateFlow(ArtistHeaderUi(isCategory = route.fromCategories))
+	val header: StateFlow<ArtistHeaderUi> = _header.asStateFlow()
 
 	private val _albums = MutableStateFlow<Load<List<AlbumUi>>>(Load.Loading)
 
 	/**
 	 * Which section this listing was drilled in from, keying the sort
 	 * preference: a discography wants a different order than a film category.
-	 * Derived from the route flags rather than from any stored "current
-	 * section", so the key always matches the listing on screen.
+	 * Derived from the route flags and the header rather than from any stored
+	 * "current section", so the key always matches the listing on screen.
 	 */
-	private val section = when {
+	private fun section(isCategory: Boolean) = when {
 		route.fromUploads -> LibrarySection.UPLOADS
-		route.fromCategories -> LibrarySection.CATEGORIES
+		isCategory -> LibrarySection.CATEGORIES
 		else -> LibrarySection.ARTISTS
 	}
 
-	val sort: StateFlow<AlbumSort> = settings.albumSort(section)
+	@OptIn(ExperimentalCoroutinesApi::class)
+	val sort: StateFlow<AlbumSort> = _header.map { it.isCategory }.distinctUntilChanged()
+		.flatMapLatest { settings.albumSort(section(it)) }
 		.stateIn(viewModelScope, SharingStarted.Lazily, AlbumSort.DEFAULT)
 
 	/**
@@ -113,10 +123,7 @@ class AlbumsViewModel @Inject constructor(
 		}.stateIn(viewModelScope, SharingStarted.Lazily, Load.Loading)
 
 	fun setSort(order: AlbumSort) =
-		viewModelScope.launch { settings.setAlbumSort(section, order) }
-
-	private val _header = MutableStateFlow(ArtistHeaderUi())
-	val header: StateFlow<ArtistHeaderUi> = _header.asStateFlow()
+		viewModelScope.launch { settings.setAlbumSort(section(_header.value.isCategory), order) }
 
 	private val _failures = MutableStateFlow<List<ServerFailure>>(emptyList())
 	val failures: StateFlow<List<ServerFailure>> = _failures.asStateFlow()
@@ -201,7 +208,15 @@ class AlbumsViewModel @Inject constructor(
 		// Nothing to fill in for a section, and nothing to wait for: the
 		// portrait would 404 for as long as ArtistAvatar kept retrying it, and
 		// getArtistInfo2 answers empty by design.
-		if (isCategory) return@launch
+		if (_header.value.isCategory) return@launch
+		// Reached through one of its albums, a category looks like an
+		// artist; only the server knows better.
+		if (!route.fromUploads &&
+			runCatchingCancellable { library.artist(primaryRef) }.getOrNull()?.isCategory == true
+		) {
+			_header.update { it.copy(isCategory = true) }
+			return@launch
+		}
 
 		runCatchingCancellable {
 			val covers = library.coverUrls()

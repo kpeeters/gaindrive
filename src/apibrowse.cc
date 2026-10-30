@@ -372,10 +372,14 @@ void GainDrive::routes_browse()
 		                          store_.get_folder_path(artist_fid), use_json)) return;
 		auto info = store_.get_artist(artist_fid, user);
 		if (!info) { err(70, "Artist not found."); return; }
+		// isCategory is a gaindrive extension: a client that reached this
+		// folder through one of its albums has no listing to tell it so,
+		// and would show an artist's biography block for a section.
+		const bool category = store_.is_category_folder(artist_fid);
 
 		std::string body;
 		if (use_json)
-			body = subsonic_ok_json([&info](nlohmann::json& r) {
+			body = subsonic_ok_json([&info, category](nlohmann::json& r) {
 				nlohmann::json arr = nlohmann::json::array();
 				for (auto& al : info->albums) {
 					nlohmann::json entry = {
@@ -403,13 +407,15 @@ void GainDrive::routes_browse()
 					{"albumCount", info->artist.album_count},
 					{"album",      arr}
 					};
+				if (category) r["artist"]["isCategory"] = true;
 				});
 		else
-			body = subsonic_ok([&info](XMLDocument& doc, XMLElement* root) {
+			body = subsonic_ok([&info, category](XMLDocument& doc, XMLElement* root) {
 				auto* artist_el = doc.NewElement("artist");
 				artist_el->SetAttribute("id",         info->artist.id);
 				artist_el->SetAttribute("name",       info->artist.name.c_str());
 				artist_el->SetAttribute("albumCount", info->artist.album_count);
+				if (category) artist_el->SetAttribute("isCategory", true);
 				for (auto& al : info->albums) {
 					auto* el = doc.NewElement("album");
 					el->SetAttribute("id",        al.id);

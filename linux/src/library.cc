@@ -330,6 +330,14 @@ void AlbumPane::show_artist(const ServerCalls& sources, const Artist& artist)
 				report(r);
 				continue;
 				}
+			// Reached through one of its albums, a category comes as a plain
+			// artist; only the server knows better.
+			const auto& cat = jsub(jsub(r.body, "artist"), "isCategory");
+			if(!category_ && cat.is_boolean() && cat.get<bool>()) {
+				category_ = true;
+				bio_->clear();
+				label_sort();
+				}
 			lists.emplace_back();
 			const auto& arr = jsub(jsub(r.body, "artist"), "album");
 			for(size_t i=0; i<arr.size(); ++i)
@@ -486,7 +494,10 @@ TrackPane::TrackPane(CoverStore& covers)
 	// No wider than the pane: the scaled cover would widen a narrow one
 	// past its scrollbar.
 	hero_fit_ = std::make_unique<WidthFit>(hero_box_);
-	hero_fit_->signal_width.connect([this](int width) { hero_->set_max_px(int(width*0.95)); });
+	// Sized from the pane, not from the width given to the fit: that one
+	// loses the scrollbar's width when it appears, and the smaller cover
+	// that follows can make the scrollbar go away again, forever.
+	hero_fit_->signal_width.connect([this](int) { hero_->set_max_px(int(get_width()*0.95)); });
 	top_.append(*hero_fit_);
 	notes_->set_margin_start(12);
 	notes_->set_margin_end(12);

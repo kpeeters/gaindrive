@@ -253,6 +253,8 @@ data class ArtistWithAlbums(
 	val albumCount: Int = 0,
 	val coverArt: String? = null,
 	val starred: String? = null,
+	/** A gaindrive extension: a section of a categories root, not a performer. */
+	val isCategory: Boolean = false,
 	val album: List<AlbumDto> = emptyList(),
 )
 

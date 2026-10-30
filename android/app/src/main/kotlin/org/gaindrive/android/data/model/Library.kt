@@ -25,6 +25,11 @@ data class Artist(
 	 * for *its* artist, and the ids differ.
 	 */
 	val refs: List<ItemRef> = listOf(ref),
+	/**
+	 * Said by `getArtist` alone, for a listing reached through one of its
+	 * albums rather than from the Categories section. Not stored.
+	 */
+	val isCategory: Boolean = false,
 ) {
 	val isStarred: Boolean get() = starredAt != null
 

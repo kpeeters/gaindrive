@@ -592,6 +592,16 @@ final class LibraryRepository: Sendable {
 		}
 	}
 
+	/// Whether `ref` is a section of a categories root, which only `getArtist`
+	/// says for a listing reached through one of its albums. False offline,
+	/// and from a server that does not send the flag.
+	func isCategory(_ ref: ItemRef) async -> Bool {
+		guard let client = await client(for: ref.server),
+			let dto = try? await client.artist(id: ref.id)
+		else { return false }
+		return dto.isCategory ?? false
+	}
+
 	/// Mirrored, network-first, as `artistInfo`.
 	func albumNotes(_ ref: ItemRef) async -> AlbumNotes? {
 		await storedOrFetched(.albumNotes(ref)) { [self] in
