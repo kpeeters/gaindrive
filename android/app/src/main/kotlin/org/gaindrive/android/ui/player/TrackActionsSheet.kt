@@ -16,6 +16,8 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.RemoveDone
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,6 +49,7 @@ import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.data.model.StarKind
 import org.gaindrive.android.ui.Load
 import org.gaindrive.android.ui.LocalStars
+import org.gaindrive.android.ui.LocalWatched
 import org.gaindrive.android.ui.PinViewModel
 import org.gaindrive.android.ui.components.DownloadIndicator
 import org.gaindrive.android.ui.components.downloadActionLabel
@@ -67,6 +70,7 @@ fun TrackActionsSheet(
 ) {
 	val sheetState = rememberModalBottomSheetState()
 	val stars = LocalStars.current
+	val watched = LocalWatched.current
 
 	// The picker replaces the actions inside this sheet rather than opening a
 	// second one on top: stacked modal sheets fight over the scrim and leave
@@ -146,6 +150,22 @@ fun TrackActionsSheet(
 					// before the server answers.
 					stars.toggle(song.ref, StarKind.SONG, song.isStarred)
 					onDismiss()
+				}
+				// Only what the server can mark: a video, or long audio.
+				if (song.isResumable) {
+					val isWatched = watched.isWatched(song)
+					SheetAction(
+						leading = {
+							Icon(
+								if (isWatched) Icons.Default.RemoveDone else Icons.Default.CheckCircle,
+								contentDescription = null,
+							)
+						},
+						label = if (isWatched) "Mark as not watched" else "Mark as watched",
+					) {
+						watched.setWatched(listOf(song), !isWatched)
+						onDismiss()
+					}
 				}
 				SheetAction(
 					leading = { Icon(Icons.Default.Add, contentDescription = null) },

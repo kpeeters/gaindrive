@@ -4,9 +4,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,10 +17,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +53,7 @@ import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.data.model.StarKind
 import org.gaindrive.android.data.model.currentAt
+import org.gaindrive.android.ui.LocalWatched
 import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.ChapterRow
 import org.gaindrive.android.ui.components.ExternalLink
@@ -118,6 +124,11 @@ fun AlbumDetailScreen(
 	// Keyed on the artist rather than the load state, so a pull-to-refresh of
 	// the same album does not re-announce it.
 	val loadedAlbum = state.valueOrNull()?.album
+	val watched = LocalWatched.current
+	// "Mark all" is offered once there is more than one thing to mark; a film
+	// on its own has the long-press sheet.
+	val resumable = state.valueOrNull()?.songs.orEmpty().filter { it.isResumable }
+	val canMarkAll = resumable.size > 1
 	LaunchedEffect(loadedAlbum?.artistRef) {
 		val artistRef = loadedAlbum?.artistRef ?: return@LaunchedEffect
 		onArtistKnown?.invoke(artistRef, loadedAlbum.artistName)
@@ -219,7 +230,7 @@ fun AlbumDetailScreen(
 					// one-way actions and neither belongs a tap away from Pin.
 					// Delete is offered to whoever owns the upload, Move only to
 					// an admin, so the menu itself appears for either.
-					if (canPromote || viewModel.canDelete) {
+					if (canPromote || viewModel.canDelete || canMarkAll) {
 						var menuOpen by remember { mutableStateOf(false) }
 						IconButton(onClick = { menuOpen = true }) {
 							Icon(Icons.Default.MoreVert, contentDescription = "More")
@@ -228,6 +239,18 @@ fun AlbumDetailScreen(
 							expanded = menuOpen,
 							onDismissRequest = { menuOpen = false },
 						) {
+							if (canMarkAll) {
+								val anyLeft = resumable.any { !watched.isWatched(it) }
+								DropdownMenuItem(
+									text = {
+										Text(if (anyLeft) "Mark all as watched" else "Mark all as not watched")
+									},
+									onClick = {
+										menuOpen = false
+										watched.setWatched(resumable, anyLeft)
+									},
+								)
+							}
 							if (canPromote) {
 								DropdownMenuItem(
 									text = { Text("Move to library") },
@@ -352,6 +375,36 @@ fun AlbumDetailScreen(
 							style = MaterialTheme.typography.bodyMedium,
 							color = MaterialTheme.colorScheme.onSurfaceVariant,
 						)
+
+						// The first item not yet watched, at its resume point,
+						// which skips the resume prompt since the answer is
+						// already given. Only once something has been started:
+						// before that, a tap on the first row says the same.
+						val next = detail.songs.indexOfFirst {
+							it.isResumable && !watched.isWatched(it)
+						}
+						val started = detail.songs.any {
+							it.isResumable && (watched.isWatched(it) || watched.progress(it) > 0f)
+						}
+						if (next >= 0 && started) {
+							val song = detail.songs[next]
+							FilledTonalButton(
+								onClick = { player.play(detail.songs, next, watched.resumeMs(song)) },
+								modifier = Modifier.padding(top = 12.dp),
+							) {
+								Icon(
+									Icons.Default.PlayArrow,
+									contentDescription = null,
+									modifier = Modifier.size(18.dp),
+								)
+								Spacer(Modifier.width(8.dp))
+								Text(
+									"Continue: ${song.title}",
+									maxLines = 1,
+									overflow = TextOverflow.Ellipsis,
+								)
+							}
+						}
 
 						// Inside the heading rather than an item of its own:
 						// the notes arrive after the tracks are on screen, and

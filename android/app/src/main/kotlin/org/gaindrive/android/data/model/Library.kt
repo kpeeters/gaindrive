@@ -137,6 +137,14 @@ data class Song(
 	 */
 	val season: Int? = null,
 	/**
+	 * When this user finished the item, or null. Only the album and playlist
+	 * listings carry it, and the server has the last word over a mark set or
+	 * cleared since: see `WatchStore`.
+	 */
+	val watchedAt: String? = null,
+	/** Where it was left, in milliseconds; 0 when there is no resume point. */
+	val bookmarkMs: Long = 0,
+	/**
 	 * What the server will actually send if it has to convert this, or null when
 	 * it will send the file as it stands.
 	 *
@@ -158,6 +166,13 @@ data class Song(
 	val height: Int? = null,
 ) {
 	val isStarred: Boolean get() = starredAt != null
+
+	/**
+	 * Whether the server keeps a resume point and a watched mark for this: a
+	 * video, or audio long enough to be a chapter or a mix. The server's own
+	 * rule, mirrored so an ordinary song costs no request.
+	 */
+	val isResumable: Boolean get() = isVideo || duration >= 20 * 60
 
 	/**
 	 * The track's own artist when the album is not by them, and null otherwise

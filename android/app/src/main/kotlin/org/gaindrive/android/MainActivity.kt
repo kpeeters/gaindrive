@@ -28,8 +28,10 @@ import org.gaindrive.android.ui.AvailabilityViewModel
 import org.gaindrive.android.ui.GainDriveApp
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.LocalStars
+import org.gaindrive.android.ui.LocalWatched
 import org.gaindrive.android.ui.StarsViewModel
 import org.gaindrive.android.ui.TvEnvironment
+import org.gaindrive.android.ui.WatchedViewModel
 import org.gaindrive.android.ui.isTvDevice
 import org.gaindrive.android.ui.settings.SettingsViewModel
 import org.gaindrive.android.ui.theme.GainDriveTheme
@@ -103,6 +105,13 @@ class MainActivity : ComponentActivity() {
 					Toast.makeText(applicationContext, it, Toast.LENGTH_LONG).show()
 				}
 			}
+			val watched: WatchedViewModel = hiltViewModel()
+			val watchedState by watched.state.collectAsStateWithLifecycle()
+			LaunchedEffect(watched) {
+				watched.errors.collect {
+					Toast.makeText(applicationContext, it, Toast.LENGTH_LONG).show()
+				}
+			}
 
 			GainDriveTheme(mode = state.themeMode, isTv = isTv) {
 				// Inside the theme, so the TV indication wraps the themed ripple.
@@ -110,6 +119,7 @@ class MainActivity : ComponentActivity() {
 					CompositionLocalProvider(
 						LocalAvailability provides availabilityState,
 						LocalStars provides starsState,
+						LocalWatched provides watchedState,
 					) {
 						GainDriveApp(
 							settingsViewModel = viewModel,

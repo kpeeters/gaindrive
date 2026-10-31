@@ -120,6 +120,8 @@ fun SongDto.toDomain(server: ServerId, albumRef: ItemRef? = null) = Song(
 	soundtrackFormat = soundtrackFormat,
 	soundtrackContentType = soundtrackContentType,
 	season = season?.takeIf { it > 0 },
+	watchedAt = watched,
+	bookmarkMs = bookmarkPosition ?: 0,
 	transcodedContentType = transcodedContentType,
 	width = originalWidth?.takeIf { it > 0 },
 	height = originalHeight?.takeIf { it > 0 },

@@ -1,6 +1,7 @@
 package org.gaindrive.android.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.MoreVert
@@ -33,7 +35,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.data.model.Album
@@ -48,6 +53,7 @@ import org.gaindrive.android.ui.ContainerMark
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.LocalStars
+import org.gaindrive.android.ui.LocalWatched
 import org.gaindrive.android.ui.tvFocusHighlight
 
 /** Shared row composables. Every browse screen is built from these. */
@@ -319,6 +325,7 @@ fun TrackRow(
 			}
 		}
 		StarMark(song)
+		WatchMark(song)
 		VideoMark(song)
 		TrackDownloadMark(song.ref)
 		Text(
@@ -386,6 +393,49 @@ private fun StarMark(song: Song) {
 		tint = MaterialTheme.colorScheme.primary,
 		modifier = Modifier.size(16.dp),
 	)
+}
+
+/**
+ * How far an episode, film or long recording has been watched: a filled check
+ * once finished, a pie part-way, nothing before it is started. In accent like
+ * [StarMark], and set from the long-press sheet.
+ */
+@Composable
+private fun WatchMark(song: Song) {
+	if (!song.isResumable) return
+	val watched = LocalWatched.current
+	val color = MaterialTheme.colorScheme.primary
+	if (watched.isWatched(song)) {
+		Icon(
+			imageVector = Icons.Default.CheckCircle,
+			contentDescription = "Watched",
+			tint = color,
+			modifier = Modifier.size(16.dp),
+		)
+		return
+	}
+	val progress = watched.progress(song)
+	if (progress <= 0f) return
+	// Drawn rather than taken from a font: Material Symbols has only six fixed
+	// steps of this, and here any fraction costs nothing.
+	Canvas(modifier = Modifier.size(16.dp)) {
+		val ring = 1.5.dp.toPx()
+		val gap = 1.dp.toPx()
+		drawCircle(
+			color = color,
+			radius = (size.minDimension - ring) / 2,
+			style = Stroke(width = ring),
+		)
+		val inset = ring + gap
+		drawArc(
+			color = color,
+			startAngle = -90f,
+			sweepAngle = 360f * progress,
+			useCenter = true,
+			topLeft = Offset(inset, inset),
+			size = Size(size.width - 2 * inset, size.height - 2 * inset),
+		)
+	}
 }
 
 /** A song shown outside its album, so it needs artist and album for context. */

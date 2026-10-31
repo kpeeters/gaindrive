@@ -261,9 +261,9 @@ static const std::string SONG_VIDEO_COLS_SQL =
 	", s.video_codec, s.audio_codec, s.season";
 
 // The watched mark and resume point of song `s`, for the user bound to the
-// one placeholder in WATCH_JOIN_SQL. Only the album and playlist listings
-// select these: they are where an episode is picked, and where a check
-// beside each one answers "where was I in this series".
+// one placeholder in WATCH_JOIN_SQL. Only the album, directory and playlist
+// listings select these: they are where an episode is picked, and where a
+// check beside each one answers "where was I in this series".
 static const std::string WATCH_COLS_SQL =
 	", COALESCE(w.watched, ''), COALESCE(b.position, 0)";
 static const std::string WATCH_JOIN_SQL =
@@ -7234,6 +7234,11 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 			}
 		}
 
+	// The folder source on Android lists an album through here, so its rows
+	// carry the watched mark as getAlbum's do.
+	const std::string watch_col  = viewer.empty() ? ", '', 0" : WATCH_COLS_SQL;
+	const std::string watch_join = viewer.empty() ? "" : WATCH_JOIN_SQL;
+
 	// Child songs. In flat mode for album folders, also include songs from disc
 	// subfolders (one level down), ordered by disc then track. Those songs report
 	// the album folder as parent, not the disc subfolder they physically sit in -
@@ -7246,10 +7251,12 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       COALESCE(al.title, '') AS album, s.width, s.height,"
 		"       s.video_codec, s.audio_codec, s.cover_path, s.season,"
 		"       COALESCE(s.artist,'') AS track_artist"
+		+ watch_col +
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		+ watch_join +
 		" WHERE (s.folder_id = ?"
 		"    OR s.folder_id IN (SELECT id FROM folders WHERE parent_id = ?))"
 		+ song_filter +
@@ -7263,16 +7270,20 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 		"       COALESCE(al.title, '') AS album, s.width, s.height,"
 		"       s.video_codec, s.audio_codec, s.cover_path, s.season,"
 		"       COALESCE(s.artist,'') AS track_artist"
+		+ watch_col +
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
+		+ watch_join +
 		" WHERE s.folder_id = ?" + song_filter +
 		" ORDER BY s.disc_number, s.track_number, s.filename";
 
 	SQLite::Statement ssel(db_music_, flatten ? song_sql_flat : song_sql_normal);
-	ssel.bind(1, folder_id);
-	if (flatten) ssel.bind(2, folder_id);
+	int idx = 1;
+	if (!viewer.empty()) ssel.bind(idx++, viewer);   // watch_join
+	ssel.bind(idx++, folder_id);
+	if (flatten) ssel.bind(idx, folder_id);
 
 	while (ssel.executeStep()) {
 		ChildEntry e;
@@ -7303,6 +7314,8 @@ std::optional<MediaStore::DirInfo> MediaStore::get_directory(int folder_id,
 			e.cover_art_id = dir.cover_art_id;
 		e.season       = ssel.getColumn(18).getInt();
 		e.track_artist = ssel.getColumn(19).getString();
+		e.watched      = ssel.getColumn(20).getString();
+		e.bookmark_ms  = ssel.getColumn(21).getInt64();
 		dir.children.push_back(std::move(e));
 		}
 

@@ -654,10 +654,11 @@ class MediaStore {
 			// "Disc 2" in a listing. Selected by the same fragment as the two
 			// codecs above, and for the same reason.
 			int         season = 0;
-			// Per user, and selected only by get_album() and get_playlist(),
-			// the listings an episode is picked from. `watched` is the
-			// SQLite timestamp of finishing it, empty when not finished;
-			// bookmark_ms is the resume point, 0 when there is none.
+			// Per user, and selected only by get_album(), get_directory()
+			// and get_playlist(), the listings an episode is picked from.
+			// `watched` is the SQLite timestamp of finishing it, empty when
+			// not finished; bookmark_ms is the resume point, 0 when there is
+			// none.
 			std::string watched;
 			int64_t     bookmark_ms = 0;
 			// Album hits from search() only: a film turns up there as an

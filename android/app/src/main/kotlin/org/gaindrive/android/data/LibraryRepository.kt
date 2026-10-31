@@ -599,7 +599,7 @@ class LibraryRepository @Inject constructor(
 	 * the answer is 0: a missed prompt is better than a play that never starts.
 	 */
 	suspend fun resumePositionMs(song: Song): Long {
-		if (offline || !(song.isVideo || song.duration >= 20 * 60)) return 0
+		if (offline || !song.isResumable) return 0
 		return runCatchingCancellable {
 			onServer(song.ref.server) { client ->
 				client.getBookmarks().requireOk().bookmarks?.bookmark.orEmpty()
@@ -609,6 +609,12 @@ class LibraryRepository @Inject constructor(
 			Log.w(TAG, "getBookmarks failed, ${it.message}")
 			0
 		}
+	}
+
+	/** Throws on failure, for `WatchStore` to put the mark back. */
+	suspend fun setWatched(server: ServerId, ids: List<String>, watched: Boolean) {
+		requireOnline()
+		onServer(server) { client -> client.setWatched(ids, watched).requireOk() }
 	}
 
 	suspend fun setStarred(ref: ItemRef, kind: StarKind, starred: Boolean) {

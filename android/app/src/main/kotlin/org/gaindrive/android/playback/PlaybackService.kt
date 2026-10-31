@@ -37,6 +37,7 @@ import org.gaindrive.android.data.Connectivity
 import org.gaindrive.android.data.LibraryRepository
 import org.gaindrive.android.data.SettingsStore
 import org.gaindrive.android.data.StreamUrls
+import org.gaindrive.android.data.WatchStore
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.model.ItemRef
@@ -60,6 +61,10 @@ class PlaybackService : MediaLibraryService() {
 
 	@Inject
 	lateinit var library: LibraryRepository
+
+	/** Fed every report, so a listing's watched marks follow playback. */
+	@Inject
+	lateinit var watchStore: WatchStore
 
 	/**
 	 * [MediaHttp], not the shared client: the first play of anything the server
@@ -304,6 +309,13 @@ class PlaybackService : MediaLibraryService() {
 	// anything is on screen, and the service is what survives backgrounding.
 
 	private var currentRef: ItemRef? = null
+
+	/** The item behind [currentRef], for its duration and whether it is a video. */
+	private var currentItem: MediaItem? = null
+
+	/** Whether the last transition was the player moving on by itself, which
+	 * means the item before it played to its end. */
+	private var transitionAuto = false
 	private var submitted = false
 
 	/** The last state sent for [currentRef], so a restart after "stopped" is
@@ -316,11 +328,29 @@ class PlaybackService : MediaLibraryService() {
 	 * entry wrong until the next refresh. */
 	private val reportLock = Mutex()
 
-	private fun report(ref: ItemRef, state: String, positionMs: Long, on: CoroutineScope = scope) {
+	private fun report(
+		ref: ItemRef,
+		state: String,
+		positionMs: Long,
+		on: CoroutineScope = scope,
+		item: MediaItem? = currentItem.takeIf { ref == currentRef },
+	) {
 		if (ref == currentRef) reportedState = state
+		item?.let { noteWatch(ref, it, positionMs) }
 		on.launch {
 			reportLock.withLock { library.reportPlayback(ref, state, positionMs.coerceAtLeast(0)) }
 		}
+	}
+
+	/**
+	 * Tells [watchStore] what the server is about to do with this report, for
+	 * the items the server tracks at all: a video, or audio of 20 minutes or
+	 * more. The duration is the server's own figure, carried on the item.
+	 */
+	private fun noteWatch(ref: ItemRef, item: MediaItem, positionMs: Long) {
+		val durationMs = item.mediaMetadata.durationMs ?: 0L
+		if (!item.isVideo() && durationMs < LONG_AUDIO_MS) return
+		watchStore.noteProgress(ref, positionMs.coerceAtLeast(0), durationMs)
 	}
 
 	/**
@@ -330,13 +360,20 @@ class PlaybackService : MediaLibraryService() {
 	 */
 	private fun reportStoppedOnExit() {
 		val ref = currentRef ?: return
+		val item = currentItem
 		val position = activePlayer?.currentPosition ?: 0L
 		currentRef = null
 		if (reportedState == "stopped") return
-		report(ref, "stopped", position, on = CoroutineScope(Dispatchers.IO))
+		report(ref, "stopped", position, on = CoroutineScope(Dispatchers.IO), item = item)
 	}
 
 	private val scrobbler = object : Player.Listener {
+		// Called before onEvents for the same change, which is the only place
+		// the reason is told.
+		override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+			transitionAuto = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
+		}
+
 		override fun onEvents(player: Player, events: Player.Events) {
 			// Both players carry this listener; only the one the session plays
 			// through speaks for the device. The other is being paused or
@@ -345,12 +382,21 @@ class PlaybackService : MediaLibraryService() {
 
 			if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) {
 				val previous = currentRef
+				val previousItem = currentItem
 				val ref = player.currentMediaItem?.itemRef()
-				// The entry is one per account per server, so a queue moving to
-				// another server has to end the one it leaves behind.
-				if (previous != null && previous.server != ref?.server && reportedState != "stopped")
-					report(previous, "stopped", 0)
+				// An item that played to its end is reported there: the last
+				// periodic report can be a minute short of it, which on a
+				// 20-minute episode is short of the 95% that marks it watched.
+				// The same "stopped" also ends the entry a queue moving to
+				// another server leaves behind, which is one per account per
+				// server.
+				val endMs = previousItem?.mediaMetadata?.durationMs
+					?.takeIf { transitionAuto }
+				if (previous != null && reportedState != "stopped"
+					&& (endMs != null || previous.server != ref?.server))
+					report(previous, "stopped", endMs ?: 0, item = previousItem)
 				currentRef = ref
+				currentItem = player.currentMediaItem
 				submitted = false
 				reportedState = null
 				if (ref != null)
@@ -520,6 +566,9 @@ class PlaybackService : MediaLibraryService() {
 		// Well inside the server's five minutes, so one lost refresh is not
 		// enough to drop the entry.
 		const val REFRESH_MS = 60_000L
+
+		/** The server's threshold for audio that gets a resume point. */
+		const val LONG_AUDIO_MS = 20 * 60 * 1000L
 	}
 
 	private inner class LibraryCallback : MediaLibrarySession.Callback {

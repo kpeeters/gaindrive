@@ -715,7 +715,7 @@ other id is skipped, so a client can pass every song of an album.
 
 [[endpoint]]
 kind       = 'additions'
-applies_to = ["getAlbum", "getPlaylist"]
+applies_to = ["getAlbum", "getMusicDirectory", "getPlaylist"]
 section    = "playback"
 summary    = 'Two per-user fields on a song entry, saying how far an episode has been watched.'
 

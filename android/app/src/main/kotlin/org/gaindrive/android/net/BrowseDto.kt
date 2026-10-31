@@ -136,6 +136,14 @@ data class SongDto(
 	 * a disc; that is cosmetic and the ordering is unaffected.
 	 */
 	val season: Int? = null,
+	/**
+	 * gaindrive extension, per user: when this item was finished, absent when
+	 * it was not. Only `getAlbum`, `getMusicDirectory` and `getPlaylist` send
+	 * it, and only for a video or audio of 20 minutes or more.
+	 */
+	val watched: String? = null,
+	/** The resume point in milliseconds, from the same listings; absent when none. */
+	val bookmarkPosition: Long? = null,
 	/** Both omitted when the scan could not probe the file. */
 	val originalWidth: Int? = null,
 	val originalHeight: Int? = null,

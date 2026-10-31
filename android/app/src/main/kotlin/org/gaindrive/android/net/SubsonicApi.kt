@@ -270,6 +270,17 @@ interface SubsonicApi {
 	@GET("rest/getBookmarks.view")
 	suspend fun getBookmarks(): SubsonicEnvelope<GetBookmarksBody>
 
+	/**
+	 * gaindrive extension: marks songs finished, or clears the mark. The
+	 * server skips anything that gets no resume point, so a whole album can
+	 * be passed.
+	 */
+	@GET("rest/setWatched.view")
+	suspend fun setWatched(
+		@Query("id") ids: List<String>,
+		@Query("watched") watched: Boolean,
+	): SubsonicEnvelope<EmptyBody>
+
 	// ── gaindrive extensions ────────────────────────────────────────────
 
 	@GET("rest/getRecentSongs.view")
