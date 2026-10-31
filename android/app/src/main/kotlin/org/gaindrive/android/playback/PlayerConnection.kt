@@ -569,9 +569,12 @@ class PlayerConnection @Inject constructor(
 	}
 
 	fun stop() {
+		// Stopped before cleared: the service reports "stopped" on the way to
+		// idle, while the item and its position are still there, which is what
+		// writes the resume point. Cleared first, the report would be at 0.
 		controller?.run {
-			clearMediaItems()
 			stop()
+			clearMediaItems()
 		}
 		autoFrom = QueueBoundary.EMPTY
 		// Cleared at the source, not just in the snapshot below: the watchdog

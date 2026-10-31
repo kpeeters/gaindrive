@@ -57,6 +57,7 @@ class PlayerViewModel @Inject constructor(
 
 	fun togglePlayPause() = player.togglePlayPause()
 	fun pause() { player.pause() }
+	fun stop() { player.stop() }
 	fun next() { player.next() }
 	fun previous() { player.previous() }
 	fun seekTo(positionMs: Long) { player.seekTo(positionMs) }

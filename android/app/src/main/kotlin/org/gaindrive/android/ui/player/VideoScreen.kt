@@ -103,6 +103,11 @@ import org.gaindrive.android.ui.tvFocusHighlight
  * Backing out does not stop playback: the surface detaches, the sound carries
  * on, and the mini-player offers the way back in. That is the choice made for
  * concert recordings, which are listened to as often as they are watched.
+ *
+ * Except on a TV, where backing out stops the film. A television has no
+ * mini-player within reach of the remote, and a sound track with no picture
+ * is not what anybody on the sofa wants. Stopping also empties the queue, so
+ * choosing the film again is a fresh item and opens the picture again.
  */
 @Composable
 fun VideoScreen(
@@ -151,9 +156,8 @@ fun VideoScreen(
 
 	// On a TV, leaving the app while the film is on screen pauses it: Play's
 	// TV review requires it (TV-NP), and nobody is left watching a picture
-	// the launcher now covers. ON_STOP rather than disposal, so backing out
-	// of this screen still leaves the sound playing as it always has. Not
-	// while casting: the picture is on the other television.
+	// the launcher now covers. Not while casting: the picture is on the
+	// other television.
 	LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
 		if (isTv && castDevice == null) viewModel.pause()
 	}
@@ -239,10 +243,16 @@ fun VideoScreen(
 	}
 
 	// Back is the same gesture as the button, and both mean "leave the picture",
-	// not "stop the film". The panel takes it first, though: a viewer who has
-	// opened a jump list means to close that, not to walk out of the film.
+	// not "stop the film" - except on a TV, see above. The panel takes it first,
+	// though: a viewer who has opened a jump list means to close that, not to
+	// walk out of the film. The "no longer a video" exit above stays a plain
+	// onBack(), so a queue moving on to a track keeps playing it.
+	val leave = {
+		if (isTv) viewModel.stop()
+		onBack()
+	}
 	BackHandler {
-		if (chaptersOpen) chaptersOpen = false else onBack()
+		if (chaptersOpen) chaptersOpen = false else leave()
 	}
 
 	Box(
@@ -384,7 +394,7 @@ fun VideoScreen(
 					.joinToString(" · "),
 				state = state,
 				casting = castDevice != null,
-				onBack = onBack,
+				onBack = leave,
 				onTogglePlay = {
 					viewModel.togglePlayPause()
 					interactionTick++
