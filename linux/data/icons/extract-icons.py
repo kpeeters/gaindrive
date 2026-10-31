@@ -55,6 +55,7 @@ ICONS = {
 	'library-add':    ('library_add',   False),
 	'edit':           ('edit',          False),
 	'music-note':     ('music_note',    False),
+	'check-circle':   ('check_circle',  True),
 }
 
 def glyphsets():

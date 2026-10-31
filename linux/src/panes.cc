@@ -9,6 +9,9 @@
 #include <gtkmm/root.h>
 #include <gtkmm/signallistitemfactory.h>
 
+#include <algorithm>
+#include <cmath>
+
 // ---- RowWidget ----------------------------------------------------------
 
 RowWidget::RowWidget(CoverStore *covers, int cover_px)
@@ -53,6 +56,32 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 		mark->set_visible(false);
 		}
 	sub_video_.add_css_class("dim-label");
+	watched_.set_from_icon_name("gd-check-circle-symbolic");
+	watched_.add_css_class("watch-mark");
+	watched_.set_tooltip_text("Watched");
+	watched_.set_visible(false);
+	// Drawn rather than cut from the font: Material Symbols has only six
+	// steps of this pie, and here any fraction costs nothing.
+	progress_.set_content_width(16);
+	progress_.set_content_height(16);
+	progress_.set_valign(Gtk::Align::CENTER);
+	progress_.add_css_class("watch-mark");
+	progress_.set_visible(false);
+	progress_.set_draw_func([this](const Cairo::RefPtr<Cairo::Context>& cr, int w, int h) {
+		auto c = progress_.get_color();
+		cr->set_source_rgba(c.get_red(), c.get_green(), c.get_blue(), c.get_alpha());
+		// The check's circle spans 800 of the glyph's 960 units; the
+		// same here, so the two marks are one size.
+		double x = w/2.0, y = h/2.0, r = std::min(w, h)/2.0*800/960;
+		const double ring = 1.5, gap = 1, top = -M_PI/2;
+		cr->set_line_width(ring);
+		cr->arc(x, y, r-ring/2, 0, 2*M_PI);
+		cr->stroke();
+		cr->move_to(x, y);
+		cr->arc(x, y, r-ring-gap, top, top+2*M_PI*progress_fraction_);
+		cr->close_path();
+		cr->fill();
+		});
 	title_line_.append(title_video_);
 	title_line_.append(title_);
 	sub_line_.append(sub_video_);
@@ -70,6 +99,9 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 		b->set_visible(false);
 		item_.append(*b);
 		}
+	// Right by the time, where the web has it.
+	item_.append(watched_);
+	item_.append(progress_);
 	trail_.add_css_class("dim-label");
 	trail_.add_css_class("numeric");
 	item_.append(trail_);
@@ -157,6 +189,7 @@ void RowWidget::show_item(const ItemRef& cover, const std::string& lead,
 	subtitle_.set_visible(!subtitle.empty());
 	sub_line_.set_visible(!subtitle.empty());
 	show_video_mark(VideoMark::none, "");
+	show_watch(false, 0);
 	trail_.set_text(trail);
 	}
 
@@ -168,6 +201,17 @@ void RowWidget::show_video_mark(VideoMark where, const std::string& tooltip)
 	sub_video_.set_tooltip_text(tooltip);
 	// An album with no year or count still has a line for its mark.
 	if(where==VideoMark::subtitle) sub_line_.set_visible(true);
+	}
+
+void RowWidget::show_watch(bool watched, double progress)
+	{
+	watched_.set_visible(watched);
+	progress_.set_visible(!watched && progress>0);
+	if(watched || progress<=0) return;
+	progress_.set_tooltip_text(std::to_string(std::lround(progress*100)) + "% watched");
+	if(progress==progress_fraction_) return;
+	progress_fraction_ = progress;
+	progress_.queue_draw();
 	}
 
 void RowWidget::show_actions(bool show_star, bool starred, ListButton mode, bool show_queue)
@@ -393,6 +437,18 @@ void Pane::star_changed(ListRow::Kind kind, const ItemRef& ref, bool on)
 			r->album.starred = on;
 		}
 	rebind_all();
+	}
+
+void Pane::watch_progress(const ItemRef& song, double pos)
+	{
+	bool changed = false;
+	for(guint i=0; i<store_->get_n_items(); ++i) {
+		auto r = store_->get_item(i);
+		if((r->kind==ListRow::Kind::song || r->kind==ListRow::Kind::chapter)
+		   && r->song.ref.id==song.id && r->song.ref.server==song.server)
+			changed |= note_watch(r->song, pos);
+		}
+	if(changed) rebind_all();
 	}
 
 void Pane::set_playing(const ItemRef& song)

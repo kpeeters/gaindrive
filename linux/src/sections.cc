@@ -149,6 +149,7 @@ void PlaylistPane::bind(RowWidget& w, const ListRow& row)
 	{
 	const auto& s = row.song;
 	w.show_item({}, row.text, s.title, s.artist, format_duration(s.duration));
+	if(s.resumable()) w.show_watch(s.watched, s.watch_progress());
 	w.show_actions(true, s.starred,
 	               owner_ ? RowWidget::ListButton::remove : RowWidget::ListButton::add, true);
 	}

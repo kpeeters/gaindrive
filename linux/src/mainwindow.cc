@@ -95,6 +95,7 @@ namespace {
 		.settings-subtitle { font-size: 0.9em; }
 		.pane .remove-server > image { -gtk-icon-size: 30px; }
 		.video-mark { -gtk-icon-size: 16px; }
+		.watch-mark { color: @gd_red; -gtk-icon-size: 16px; }
 		/* GainDrive red where the theme would put its blue accent: an on
 		   switch, the default button, a focused field. */
 		/* Image and animation too: WhiteSur paints the track with its blue
@@ -274,9 +275,6 @@ namespace {
 
 	// Credentials the server refuses: wrong user or password.
 	const int auth_refused = 40;
-
-	// The server's own rule for what gets a resume point.
-	const int resume_min_seconds = 20*60;
 
 	struct Section { const char *name, *label; };
 	const Section sections[] = {
@@ -646,6 +644,10 @@ MainWindow::MainWindow()
 		// An open info card follows the track, not every queue change.
 		if(info_card_.get_visible() && s && s->ref.server + "|" + s->ref.id!=info_card_.shown())
 			info_card_.refresh();
+		});
+	playback_.signal_reported.connect([this](const ItemRef& song, double pos) {
+		for(auto p: all_panes())
+			p->watch_progress(song, pos);
 		});
 	playback_.signal_started.connect([this]() {
 		const Song *s = playback_.current();
@@ -1373,7 +1375,7 @@ void MainWindow::play(const std::vector<Song>& songs, size_t index)
 	if(index>=songs.size()) return;
 	const Song& song = songs[index];
 	// Every film, as on the web client; music only when it is long.
-	if(song.duration<resume_min_seconds && !song.is_video) {
+	if(!song.resumable()) {
 		playback_.play(songs, index);
 		return;
 		}

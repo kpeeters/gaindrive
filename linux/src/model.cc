@@ -6,6 +6,7 @@
 #include <glibmm/datetime.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 Artist parse_artist(const std::string& server, const nlohmann::json& j, bool category)
@@ -66,7 +67,31 @@ Song parse_song(const std::string& server, const nlohmann::json& j)
 	s.video_codec          = jstr(j, "videoCodec");
 	s.audio_codec          = jstr(j, "audioCodec");
 	s.transcoded_suffix    = jstr(j, "transcodedSuffix");
+	s.watched              = !jstr(j, "watched").empty();
+	s.bookmark_ms          = long(jnum(j, "bookmarkPosition"));
 	return s;
+	}
+
+double Song::watch_progress() const
+	{
+	if(watched || duration<=0 || bookmark_ms<=0) return 0;
+	return std::min(1.0, bookmark_ms/1000.0/duration);
+	}
+
+bool note_watch(Song& s, double pos)
+	{
+	// The thresholds of the server's update_resume_point(). A rewatch that
+	// stops early keeps the mark there, and so it does here.
+	if(!s.resumable() || pos<=0) return false;
+	if(s.duration>0 && pos>=s.duration*0.95) {
+		if(s.watched && s.bookmark_ms==0) return false;
+		s.watched     = true;
+		s.bookmark_ms = 0;
+		return true;
+		}
+	if(pos<30) return false;
+	s.bookmark_ms = std::lround(pos*1000);
+	return true;
 	}
 
 Playlist parse_playlist(const std::string& server, const nlohmann::json& j)

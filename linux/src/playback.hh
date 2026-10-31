@@ -97,6 +97,9 @@ class Playback {
 		sigc::signal<void(const std::string&)> signal_error;
 		// A seek within the current track, in seconds; for MPRIS's Seeked.
 		sigc::signal<void(double)>             signal_seeked;
+		// A playback report sent for `song`, at `pos` seconds: what the
+		// server keeps the resume point and watched mark from.
+		sigc::signal<void(const ItemRef& song, double pos)> signal_reported;
 
 	private:
 		void start(double offset=0);

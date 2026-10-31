@@ -9,6 +9,7 @@
 #include <gtkmm/popover.h>
 #include <gtkmm/box.h>
 #include <gtkmm/button.h>
+#include <gtkmm/drawingarea.h>
 #include <gtkmm/image.h>
 #include <gtkmm/label.h>
 #include <gtkmm/listview.h>
@@ -59,6 +60,10 @@ class RowWidget : public Gtk::Box {
 		// (an album holding videos); show_item clears it.
 		enum class VideoMark { none, title, subtitle };
 		void show_video_mark(VideoMark where, const std::string& tooltip);
+		// How far an episode or film was watched, before the time: a check
+		// once finished, a pie part-way, nothing before it is started.
+		// show_item clears it.
+		void show_watch(bool watched, double progress);
 		void set_playing(bool on);
 		// Marks each occurrence of `needle`, lowercase, in the title and
 		// subtitle; empty clears.
@@ -86,6 +91,9 @@ class RowWidget : public Gtk::Box {
 		Gtk::Label  lead_, title_, subtitle_, trail_;
 		Gtk::Box    text_, title_line_, sub_line_;
 		Gtk::Image  title_video_, sub_video_;
+		Gtk::Image  watched_;
+		Gtk::DrawingArea progress_;
+		double      progress_fraction_=0;
 };
 
 // A titled, scrolling list of ListRows, as on the web client's pane strip.
@@ -99,6 +107,9 @@ class Pane : public Gtk::Box {
 		virtual void clear();
 		// A star set or cleared anywhere: rows showing that item follow.
 		virtual void star_changed(ListRow::Kind kind, const ItemRef& ref, bool on);
+		// A playback report at `pos` seconds: rows of that song follow it,
+		// as the server's watched mark and resume point will.
+		virtual void watch_progress(const ItemRef& song, double pos);
 		void set_playing(const ItemRef& song);
 		void unselect();
 		// Reselects the first row `match` accepts, as a click would, once
@@ -285,6 +296,7 @@ class TrackPane : public Pane {
 		                const std::string& play_id="", const std::string& mark_id="");
 		void clear() override;
 		void star_changed(ListRow::Kind kind, const ItemRef& ref, bool on) override;
+		void watch_progress(const ItemRef& song, double pos) override;
 
 		// Marks a chapter of `film` as playing; -1 for none. 0-based, as
 		// the film's own chapter list counts.

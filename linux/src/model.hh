@@ -66,6 +66,17 @@ struct Song {
 	std::string video_codec;
 	std::string audio_codec;
 	std::string transcoded_suffix;
+	// This user's mark and resume point; only the album and playlist
+	// listings carry them.
+	bool        watched=false;
+	long        bookmark_ms=0;
+
+	// Whether the server keeps a resume point and a watched mark: a video,
+	// or audio long enough to be a chapter or a mix. Its own rule, mirrored
+	// so an ordinary song costs no request.
+	bool resumable() const { return is_video || duration>=20*60; }
+	// How far it was left, 0..1; 0 once watched or before it is started.
+	double watch_progress() const;
 };
 
 struct Playlist {
@@ -82,6 +93,10 @@ Artist parse_artist(const std::string& server, const nlohmann::json& j, bool cat
 Album  parse_album(const std::string& server, const nlohmann::json& j);
 Song     parse_song(const std::string& server, const nlohmann::json& j);
 Playlist parse_playlist(const std::string& server, const nlohmann::json& j);
+
+// Does to `s` what the server does with a playback report at `pos` seconds,
+// so a listing follows playback without a reload. False when nothing changed.
+bool note_watch(Song& s, double pos);
 
 // "3:07", or "1:02:03" past the hour.
 std::string format_duration(int seconds);

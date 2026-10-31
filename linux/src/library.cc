@@ -575,6 +575,15 @@ void TrackPane::star_changed(ListRow::Kind kind, const ItemRef& ref, bool on)
 		}
 	}
 
+void TrackPane::watch_progress(const ItemRef& song, double pos)
+	{
+	// songs_ too, which show_rows() builds the rows from again.
+	for(auto& s: songs_)
+		if(s.ref.id==song.id && s.ref.server==song.server)
+			note_watch(s, pos);
+	Pane::watch_progress(song, pos);
+	}
+
 void TrackPane::show_star()
 	{
 	star_.set_visible(true);
@@ -828,6 +837,7 @@ void TrackPane::bind(RowWidget& w, const ListRow& row)
 	std::string artist = (!s.display_album_artist.empty() && s.artist!=s.display_album_artist)
 		? s.artist : "";
 	w.show_item({}, row.text, s.title, artist, format_duration(s.duration));
+	if(s.resumable()) w.show_watch(s.watched, s.watch_progress());
 	w.show_actions(true, s.starred, RowWidget::ListButton::add, true);
 	}
 

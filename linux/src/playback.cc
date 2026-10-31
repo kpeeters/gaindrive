@@ -732,6 +732,7 @@ void Playback::report(const char *state, double pos)
 		{"positionMs", std::to_string(std::lround(pos*1000))},
 		{"ignoreScrobble", "true"}
 		}, [](const ApiResult&) {});
+	signal_reported.emit(s->ref, pos);
 	}
 
 void Playback::report_stopped_now()
