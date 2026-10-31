@@ -6989,6 +6989,11 @@ function hlsStop() {
    if (!h) return;
    hlsCur = null;
    h.ctrl?.abort();
+   if (h.holding) {
+      h.holding = false;
+      playerBuffering(false);
+      videoPreparing(false);
+      }
    h.el.removeEventListener('seeking', h.onSeek);
    h.el.removeEventListener('timeupdate', h.onTime);
    h.el.removeEventListener('error', h.onError);
@@ -7115,7 +7120,9 @@ function hlsFail(h, err) {
    if (!err.fetchGaveUp && hlsRebuilds.length < 3) {
       hlsRebuilds.push(now);
       console.warn('[hls] rebuilding after:', err.message);
-      const pos = el.currentTime, paused = el.paused;
+      // A held seek is where the listener is, and whether they were playing.
+      const pos    = h.seekTo ?? el.currentTime;
+      const paused = h.holding ? !h.resume : el.paused;
       hlsStart(el, h.url, pos);
       if (!paused) el.play().catch(e => console.warn('[hls] play failed', e));
       return;
@@ -7166,11 +7173,31 @@ function hlsSeek(h, target) {
    if (!h.sb || hlsCovers(h, target, Math.min(target + 0.5, h.el.duration || target))) {
       h.seekTo = null;
       h.el.currentTime = target;
+      hlsHold(h, false);
       return;
       }
    h.seekTo = target;
+   hlsHold(h, true);
    h.ctrl?.abort();
    hlsPump(h);
+}
+
+// Freezes the picture while a seek waits for its segment, which on an encoded
+// film takes the encoder's start-up time: playing on looked as though the seek
+// had been ignored.  The position it stops at is buffered, so this keeps clear
+// of the drain hlsSeek() avoids.  The pause and play this causes are not the
+// listener's, and the element listeners leave them unreported.
+function hlsHold(h, on) {
+   if (on === !!h.holding) return;
+   h.holding = on;
+   if (on) {
+      h.resume = !h.el.paused;
+      h.el.pause();
+      }
+   else if (h.resume)
+      h.el.play().catch(err => console.warn('[hls] play failed', err));
+   playerBuffering(on);
+   videoPreparing(on, 'Seeking…');
 }
 
 async function hlsFill(h) {
@@ -7183,6 +7210,7 @@ async function hlsFill(h) {
          const to = h.seekTo;
          h.seekTo = null;
          h.el.currentTime = to;
+         hlsHold(h, false);
          }
       // A pending seek is where the data is needed, not the playhead.
       const t = h.seekTo ?? h.el.currentTime;
@@ -8959,20 +8987,21 @@ el.addEventListener('timeupdate', () => {
 // and every one of those would fight onCastStatus for the glyph, which is
 // supposed to report what the *receiver* is doing.
 el.addEventListener('play',  () => {
-   if (castDeviceId !== null) return;
+   if (castDeviceId !== null || hlsCur?.holding) return;
    playerPlayGlyph('pause');
    posReportNow();
    playbackReport('playing');
    });
 el.addEventListener('pause', () => {
-   if (castDeviceId !== null) return;
+   if (castDeviceId !== null || hlsCur?.holding) return;
    playerPlayGlyph('play_arrow');
    posReportNow();
    // Held back a moment and re-checked: a track change and playerStop() both
    // pause the element on their way, and reporting those would race the
    // `starting` or `stopped` sent beside them, possibly landing last.
    setTimeout(() => {
-      if (castDeviceId === null && player.media.paused && player.media.src)
+      if (castDeviceId === null && player.media.paused && player.media.src
+          && !hlsCur?.holding)
          playbackReport('paused');
       }, 1000);
    });
@@ -9002,7 +9031,7 @@ for (const ev of ['waiting', 'stalled']) {
    }
 for (const ev of ['playing', 'canplay', 'error']) {
    el.addEventListener(ev, () => {
-      if (castDeviceId !== null) return;
+      if (castDeviceId !== null || hlsCur?.holding) return;
       playerBuffering(false);
       });
    }
@@ -9087,6 +9116,13 @@ function setupPlayer() {
             playerPlayGlyph('play_arrow');
             apiCall('castControl', {action: 'pause'}).catch(() => {});
             }
+         return;
+         }
+      // Held for a seek, the element is paused whatever the listener
+      // wants; the choice is what happens when the seek lands.
+      if (hlsCur?.holding) {
+         hlsCur.resume = !hlsCur.resume;
+         playerPlayGlyph(hlsCur.resume ? 'pause' : 'play_arrow');
          return;
          }
       if (player.media.paused) player.media.play();
