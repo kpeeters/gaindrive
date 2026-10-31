@@ -99,6 +99,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		void album_loaded(const Album& a);
 		void play(const std::vector<Song>& songs, size_t index);
 		void star(ListRow::Kind kind, const ItemRef& ref, bool on);
+		// setWatched on the songs' server, then every pane follows.
+		void set_watched(const std::vector<ItemRef>& songs, bool on);
 		void close_video();
 		void install_tune_closers();
 		void close_cards();

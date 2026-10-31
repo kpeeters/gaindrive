@@ -94,6 +94,15 @@ bool note_watch(Song& s, double pos)
 	return true;
 	}
 
+void set_watched(Song& s, bool on)
+	{
+	// The server skips what cannot be finished; a mark replaces the
+	// resume point, and taking it away leaves any there is.
+	if(!s.resumable()) return;
+	s.watched = on;
+	if(on) s.bookmark_ms = 0;
+	}
+
 Playlist parse_playlist(const std::string& server, const nlohmann::json& j)
 	{
 	Playlist p;

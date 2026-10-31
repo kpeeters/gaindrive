@@ -60,9 +60,9 @@ class RowWidget : public Gtk::Box {
 		// (an album holding videos); show_item clears it.
 		enum class VideoMark { none, title, subtitle };
 		void show_video_mark(VideoMark where, const std::string& tooltip);
-		// How far an episode or film was watched, before the time: a check
-		// once finished, a pie part-way, nothing before it is started.
-		// show_item clears it.
+		// How far an episode or film was watched, before the time, as a
+		// toggle: a check once finished, a pie part-way, an outlined check
+		// on hover before it is started. show_item hides it.
 		void show_watch(bool watched, double progress);
 		void set_playing(bool on);
 		// Marks each occurrence of `needle`, lowercase, in the title and
@@ -75,7 +75,7 @@ class RowWidget : public Gtk::Box {
 
 		// The row currently bound here.
 		Glib::RefPtr<ListRow> row;
-		Gtk::Button           star, list, queue, remove_upload, promote;
+		Gtk::Button           star, list, queue, remove_upload, promote, watch;
 		ListButton            list_mode=ListButton::none;
 		// The pane's set of live row widgets, which this one leaves when it
 		// is destroyed. GTK does not promise the child is still reachable
@@ -91,6 +91,7 @@ class RowWidget : public Gtk::Box {
 		Gtk::Label  lead_, title_, subtitle_, trail_;
 		Gtk::Box    text_, title_line_, sub_line_;
 		Gtk::Image  title_video_, sub_video_;
+		Gtk::Box    watch_box_;
 		Gtk::Image  watched_;
 		Gtk::DrawingArea progress_;
 		double      progress_fraction_=0;
@@ -110,6 +111,8 @@ class Pane : public Gtk::Box {
 		// A playback report at `pos` seconds: rows of that song follow it,
 		// as the server's watched mark and resume point will.
 		virtual void watch_progress(const ItemRef& song, double pos);
+		// Songs marked or unmarked as watched: rows of them follow.
+		virtual void watched_changed(const std::vector<ItemRef>& songs, bool on);
 		void set_playing(const ItemRef& song);
 		void unselect();
 		// Reselects the first row `match` accepts, as a click would, once
@@ -146,6 +149,8 @@ class Pane : public Gtk::Box {
 		sigc::signal<void(const std::vector<Song>&, size_t)>  signal_play;
 		sigc::signal<void(const Song&)>                       signal_enqueue;
 		sigc::signal<void(ListRow::Kind, const ItemRef&, bool)> signal_star;
+		// Mark `songs` as watched, or not; all on one server.
+		sigc::signal<void(const std::vector<ItemRef>& songs, bool)> signal_watched;
 		sigc::signal<void(const Song&, Gtk::Widget&)>         signal_pick_playlist;
 		// Open an album in the track pane, and play `play_id` from it if set.
 		sigc::signal<void(const ItemRef& album, const std::string& play_id)> signal_open_album;
@@ -297,6 +302,7 @@ class TrackPane : public Pane {
 		void clear() override;
 		void star_changed(ListRow::Kind kind, const ItemRef& ref, bool on) override;
 		void watch_progress(const ItemRef& song, double pos) override;
+		void watched_changed(const std::vector<ItemRef>& songs, bool on) override;
 
 		// Marks a chapter of `film` as playing; -1 for none. 0-based, as
 		// the film's own chapter list counts.
@@ -304,8 +310,9 @@ class TrackPane : public Pane {
 
 		// The album's own details, once getAlbum has answered.
 		sigc::signal<void(const Album&)> signal_loaded;
-		// A chapter row was picked: play songs[index] from `start`.
-		sigc::signal<void(const std::vector<Song>&, size_t, double start)> signal_play_chapter;
+		// A chapter row or Continue was picked: play songs[index] from
+		// `start`, with no resume prompt, since that is already decided.
+		sigc::signal<void(const std::vector<Song>&, size_t, double start)> signal_play_from;
 		// Saved edits the listing cannot patch in place: show the album
 		// afresh where it now is, under `artist`.
 		sigc::signal<void(const ItemRef& artist, const ItemRef& album)> signal_edited;
@@ -324,6 +331,7 @@ class TrackPane : public Pane {
 		};
 		void show_rows();
 		void show_star();
+		void update_watch_bar();
 		// The number shown before songs_[i].
 		std::string number(size_t i) const;
 		void start_edit();
@@ -356,6 +364,9 @@ class TrackPane : public Pane {
 		Gtk::Button                 img_prev_, img_next_;
 		int                         image_=0, images_=1;
 		std::unique_ptr<InfoBlock>  notes_;
+		// Continue and Mark all, above the tracks, as on the web.
+		Gtk::Box                    watch_bar_;
+		Gtk::Button                 continue_, mark_all_;
 
 		// Liner notes: the .txt files in the album's folder.
 		Gtk::Box                    texts_, texts_nav_;

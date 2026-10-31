@@ -95,7 +95,11 @@ namespace {
 		.settings-subtitle { font-size: 0.9em; }
 		.pane .remove-server > image { -gtk-icon-size: 30px; }
 		.video-mark { -gtk-icon-size: 16px; }
-		.watch-mark { color: @gd_red; -gtk-icon-size: 16px; }
+		.watch-mark { -gtk-icon-size: 16px; }
+		.row-action.marked { color: @gd_red; }
+		.hover-actions .row-action.marked { opacity: 1; }
+		.watch-bar { margin: 6px 12px; }
+		.watch-bar .mark-all { color: @gd_red; }
 		/* GainDrive red where the theme would put its blue accent: an on
 		   switch, the default button, a focused field. */
 		/* Image and animation too: WhiteSur paints the track with its blue
@@ -547,6 +551,7 @@ MainWindow::MainWindow()
 		p->signal_play.connect(sigc::mem_fun(*this, &MainWindow::play));
 		p->signal_enqueue.connect(sigc::mem_fun(playback_, &Playback::enqueue));
 		p->signal_star.connect(sigc::mem_fun(*this, &MainWindow::star));
+		p->signal_watched.connect(sigc::mem_fun(*this, &MainWindow::set_watched));
 		p->signal_open_album.connect([this](const ItemRef& album, const std::string& play_id) {
 			open_album(album, play_id);
 			});
@@ -576,8 +581,8 @@ MainWindow::MainWindow()
 		albums_.clear();
 		open_album(album, "");
 		});
-	// No resume prompt: the chapter is where to start.
-	tracks_.signal_play_chapter.connect([this](const std::vector<Song>& songs, size_t index, double start) {
+	// No resume prompt: the chapter, or the resume point, is where to start.
+	tracks_.signal_play_from.connect([this](const std::vector<Song>& songs, size_t index, double start) {
 		const Song *now = playback_.current();
 		if(now && now->ref.id==songs[index].ref.id && now->ref.server==songs[index].ref.server)
 			playback_.seek(start);
@@ -1423,6 +1428,25 @@ void MainWindow::star(ListRow::Kind kind, const ItemRef& ref, bool on)
 			}
 		for(auto pane: all_panes())
 			pane->star_changed(kind, ref, on);
+		});
+	}
+
+void MainWindow::set_watched(const std::vector<ItemRef>& songs, bool on)
+	{
+	if(songs.empty()) return;
+	auto api = client_for(songs.front().server);
+	if(!api) return;
+	// `id` repeats, so a whole season is one call.
+	Params p = {{"watched", on ? "true" : "false"}};
+	for(const auto& s: songs)
+		p.push_back({"id", s.id});
+	api->call("setWatched", p, [this, songs, on](const ApiResult& r) {
+		if(!r.ok) {
+			failed(r);
+			return;
+			}
+		for(auto pane: all_panes())
+			pane->watched_changed(songs, on);
 		});
 	}
 

@@ -506,6 +506,36 @@ TrackPane::TrackPane(CoverStore& covers)
 	editor_->tracks.set_margin_end(12);
 	top_.append(editor_->tracks);
 
+	continue_.set_label("Continue");
+	continue_.add_css_class("suggested-action");
+	continue_.signal_clicked().connect([this]() {
+		// The first item not yet watched, at its resume point.
+		for(size_t i=0; i<songs_.size(); ++i)
+			if(songs_[i].resumable() && !songs_[i].watched) {
+				signal_play_from.emit(songs_, i, songs_[i].bookmark_ms/1000.0);
+				return;
+				}
+		});
+	mark_all_.add_css_class("flat");
+	mark_all_.add_css_class("mark-all");
+	mark_all_.set_hexpand(true);
+	mark_all_.set_halign(Gtk::Align::END);
+	mark_all_.signal_clicked().connect([this]() {
+		std::vector<ItemRef> refs;
+		bool any_left = false;
+		for(const auto& s: songs_)
+			if(s.resumable()) {
+				refs.push_back(s.ref);
+				any_left |= !s.watched;
+				}
+		if(!refs.empty()) signal_watched.emit(refs, any_left);
+		});
+	watch_bar_.set_spacing(12);
+	watch_bar_.add_css_class("watch-bar");
+	watch_bar_.append(continue_);
+	watch_bar_.append(mark_all_);
+	top_.append(watch_bar_);
+
 	text_prev_.set_icon_name("gd-chevron-left-symbolic");
 	text_prev_.add_css_class("flat");
 	text_next_.set_icon_name("gd-chevron-right-symbolic");
@@ -557,6 +587,7 @@ void TrackPane::clear()
 	img_prev_.set_visible(false);
 	img_next_.set_visible(false);
 	notes_->clear();
+	watch_bar_.set_visible(false);
 	texts_.set_visible(false);
 	text_files_.clear();
 	songs_.clear();
@@ -582,6 +613,37 @@ void TrackPane::watch_progress(const ItemRef& song, double pos)
 		if(s.ref.id==song.id && s.ref.server==song.server)
 			note_watch(s, pos);
 	Pane::watch_progress(song, pos);
+	update_watch_bar();
+	}
+
+void TrackPane::watched_changed(const std::vector<ItemRef>& songs, bool on)
+	{
+	for(auto& s: songs_)
+		for(const auto& ref: songs)
+			if(s.ref.id==ref.id && s.ref.server==ref.server)
+				set_watched(s, on);
+	Pane::watched_changed(songs, on);
+	update_watch_bar();
+	}
+
+void TrackPane::update_watch_bar()
+	{
+	// Continue only once something has been started: before that, a click
+	// on the first row says the same. A film on its own, never seen, shows
+	// no bar at all.
+	const Song *next = nullptr;
+	size_t resumable = 0;
+	bool started = false;
+	for(const auto& s: songs_) {
+		if(!s.resumable()) continue;
+		++resumable;
+		started |= s.watched || s.bookmark_ms>0;
+		if(!next && !s.watched) next = &s;
+		}
+	continue_.set_visible(next && started);
+	continue_.set_tooltip_text(next ? next->title : "");
+	mark_all_.set_label(next ? "Mark all watched" : "Mark all not watched");
+	watch_bar_.set_visible(!editor_->editing() && (resumable>1 || continue_.get_visible()));
 	}
 
 void TrackPane::show_star()
@@ -691,6 +753,7 @@ void TrackPane::show_rows()
 				}
 		}
 	set_rows(rows);
+	update_watch_bar();
 	}
 
 std::string TrackPane::number(size_t i) const
@@ -709,6 +772,7 @@ void TrackPane::start_edit()
 	for(size_t i=0; i<songs_.size(); ++i)
 		numbers.push_back(number(i));
 	editor_->start(api_, album_, songs_, numbers);
+	watch_bar_.set_visible(false);
 	title_.set_visible(false);
 	edit_.set_visible(false);
 	show_hero();
@@ -846,7 +910,7 @@ void TrackPane::activated(const ListRow& row)
 	for(size_t i=0; i<songs_.size(); ++i)
 		if(songs_[i].ref.id==row.song.ref.id) {
 			if(row.kind==ListRow::Kind::chapter)
-				signal_play_chapter.emit(songs_, i, row.start);
+				signal_play_from.emit(songs_, i, row.start);
 			else
 				signal_play.emit(songs_, i);
 			break;

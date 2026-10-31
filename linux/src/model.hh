@@ -97,6 +97,8 @@ Playlist parse_playlist(const std::string& server, const nlohmann::json& j);
 // Does to `s` what the server does with a playback report at `pos` seconds,
 // so a listing follows playback without a reload. False when nothing changed.
 bool note_watch(Song& s, double pos);
+// What setWatched does to `s` on the server.
+void set_watched(Song& s, bool on);
 
 // "3:07", or "1:02:03" past the hour.
 std::string format_duration(int seconds);

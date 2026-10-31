@@ -56,17 +56,13 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 		mark->set_visible(false);
 		}
 	sub_video_.add_css_class("dim-label");
-	watched_.set_from_icon_name("gd-check-circle-symbolic");
 	watched_.add_css_class("watch-mark");
-	watched_.set_tooltip_text("Watched");
-	watched_.set_visible(false);
 	// Drawn rather than cut from the font: Material Symbols has only six
 	// steps of this pie, and here any fraction costs nothing.
 	progress_.set_content_width(16);
 	progress_.set_content_height(16);
 	progress_.set_valign(Gtk::Align::CENTER);
 	progress_.add_css_class("watch-mark");
-	progress_.set_visible(false);
 	progress_.set_draw_func([this](const Cairo::RefPtr<Cairo::Context>& cr, int w, int h) {
 		auto c = progress_.get_color();
 		cr->set_source_rgba(c.get_red(), c.get_green(), c.get_blue(), c.get_alpha());
@@ -99,9 +95,16 @@ RowWidget::RowWidget(CoverStore *covers, int cover_px)
 		b->set_visible(false);
 		item_.append(*b);
 		}
-	// Right by the time, where the web has it.
-	item_.append(watched_);
-	item_.append(progress_);
+	// Right by the time. A row action, but one that stays up once there
+	// is something to show, as a set star does.
+	watch_box_.append(watched_);
+	watch_box_.append(progress_);
+	watch.set_child(watch_box_);
+	watch.add_css_class("flat");
+	watch.add_css_class("row-action");
+	watch.set_valign(Gtk::Align::CENTER);
+	watch.set_visible(false);
+	item_.append(watch);
 	trail_.add_css_class("dim-label");
 	trail_.add_css_class("numeric");
 	item_.append(trail_);
@@ -189,7 +192,7 @@ void RowWidget::show_item(const ItemRef& cover, const std::string& lead,
 	subtitle_.set_visible(!subtitle.empty());
 	sub_line_.set_visible(!subtitle.empty());
 	show_video_mark(VideoMark::none, "");
-	show_watch(false, 0);
+	watch.set_visible(false);
 	trail_.set_text(trail);
 	}
 
@@ -205,11 +208,18 @@ void RowWidget::show_video_mark(VideoMark where, const std::string& tooltip)
 
 void RowWidget::show_watch(bool watched, double progress)
 	{
-	watched_.set_visible(watched);
-	progress_.set_visible(!watched && progress>0);
-	if(watched || progress<=0) return;
-	progress_.set_tooltip_text(std::to_string(std::lround(progress*100)) + "% watched");
-	if(progress==progress_fraction_) return;
+	bool started = !watched && progress>0;
+	watch.set_visible(true);
+	watch.set_tooltip_text(watched ? "Mark as not watched"
+		: started ? std::to_string(std::lround(progress*100)) + "% watched - mark as watched"
+		:           "Mark as watched");
+	if(watched || started) watch.add_css_class("marked");
+	else                   watch.remove_css_class("marked");
+	watched_.set_from_icon_name(watched ? "gd-check-circle-symbolic"
+	                                    : "gd-check-circle-outline-symbolic");
+	watched_.set_visible(!started);
+	progress_.set_visible(started);
+	if(!started || progress==progress_fraction_) return;
 	progress_fraction_ = progress;
 	progress_.queue_draw();
 	}
@@ -328,6 +338,10 @@ Pane::Pane(CoverStore& covers, int cover_px, bool boxed)
 				signal_star.emit(r.kind, r.song.ref, !r.song.starred);
 			else if(r.kind==ListRow::Kind::album)
 				signal_star.emit(r.kind, r.album.ref, !r.album.starred);
+			});
+		w->watch.signal_clicked().connect([this, w]() {
+			if(w->row && w->row->kind==ListRow::Kind::song)
+				signal_watched.emit({w->row->song.ref}, !w->row->song.watched);
 			});
 		w->list.signal_clicked().connect([this, w]() {
 			if(!w->row) return;
@@ -449,6 +463,18 @@ void Pane::watch_progress(const ItemRef& song, double pos)
 			changed |= note_watch(r->song, pos);
 		}
 	if(changed) rebind_all();
+	}
+
+void Pane::watched_changed(const std::vector<ItemRef>& songs, bool on)
+	{
+	for(guint i=0; i<store_->get_n_items(); ++i) {
+		auto r = store_->get_item(i);
+		if(r->kind!=ListRow::Kind::song && r->kind!=ListRow::Kind::chapter) continue;
+		for(const auto& ref: songs)
+			if(r->song.ref.id==ref.id && r->song.ref.server==ref.server)
+				set_watched(r->song, on);
+		}
+	rebind_all();
 	}
 
 void Pane::set_playing(const ItemRef& song)

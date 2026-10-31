@@ -56,6 +56,7 @@ ICONS = {
 	'edit':           ('edit',          False),
 	'music-note':     ('music_note',    False),
 	'check-circle':   ('check_circle',  True),
+	'check-circle-outline': ('check_circle', False),
 }
 
 def glyphsets():
