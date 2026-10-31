@@ -6787,6 +6787,15 @@ function noteWatchProgress(song, pos) {
    drawWatchState(song);
    }
 
+// The pie that fills the watched toggle's circle as far as `fraction`.
+// Material Symbols draws these steps only, and at this size six are plenty.
+function pieGlyph(fraction) {
+   const steps = [10, 20, 40, 60, 80, 90];
+   const pct   = fraction * 100;
+   const step  = steps.reduce((a, b) => Math.abs(b - pct) < Math.abs(a - pct) ? b : a);
+   return `clock_loader_${step}`;
+   }
+
 // Applies `song`'s watched mark and resume point to its album row, and the
 // album's Continue bar to match.
 function drawWatchState(song) {
@@ -6797,9 +6806,13 @@ function drawWatchState(song) {
       ? Math.min(1, song.bookmarkPosition / 1000 / song.duration) : 0;
    row.classList.toggle('watched', !!song.watched);
    row.classList.toggle('in-progress', progress > 0);
-   row.style.setProperty('--progress', progress);
-   const btn = row.querySelector('.track-watch');
-   if (btn) btn.title = song.watched ? 'Mark as not watched' : 'Mark as watched';
+   const btn = row.querySelector('.track-watch.mi');
+   if (btn) {
+      btn.textContent = progress > 0 ? pieGlyph(progress) : 'check_circle';
+      btn.title = song.watched  ? 'Mark as not watched'
+                : progress > 0  ? `${Math.round(progress * 100)}% watched - mark as watched`
+                :                 'Mark as watched';
+      }
    updateWatchBar();
    }
 

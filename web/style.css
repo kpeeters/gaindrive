@@ -1861,8 +1861,6 @@ input.chapter-time.bad { border-color: #e06c6c; }
    padding: 0.3rem 0.4rem;
    border-radius: 4px;
    cursor: pointer;
-   /* Anchors the progress bar of an episode watched part-way. */
-   position: relative;
 }
 
 /* An album row has one more slot, the watched toggle. Before .editing, which
@@ -2027,16 +2025,10 @@ input.chapter-time.bad { border-color: #e06c6c; }
 }
 .track-row.watched .track-title { color: var(--text-dim); }
 
-/* Absolutely placed, so it takes no grid cell. --progress is 0..1. */
-.track-row.in-progress::after {
-   content: '';
-   position: absolute;
-   left: 0.4rem;
-   bottom: 0.1rem;
-   height: 2px;
-   width: calc((100% - 0.8rem) * var(--progress));
-   background: var(--accent);
-   border-radius: 1px;
+/* Part-way: the toggle shows a pie of how far, and stays up like the check. */
+.track-row.in-progress .track-watch {
+   opacity: 1;
+   color: var(--accent);
 }
 
 .watch-bar {
