@@ -106,6 +106,12 @@ nlohmann::json song_entry_json(const MediaStore::ChildEntry& c)
 	// "Disc 2". Omitted rather than sent as 0, so its absence means "not an
 	// episode, or an entry from a query that does not select it".
 	if (c.season > 0) s["season"] = c.season;
+	// gaindrive extension: when this user finished the item. Omitted when
+	// not finished, like starred. bookmarkPosition is the resume point, a
+	// field original Subsonic already defines on a song entry; between them
+	// a listing can show each episode as done, part-way or not started.
+	if (!c.watched.empty()) s["watched"] = iso8601(c.watched);
+	if (c.bookmark_ms > 0) s["bookmarkPosition"] = c.bookmark_ms;
 	// Omitted rather than sent as 0 when the scan could not probe the file, or
 	// when the query that produced this entry does not select the dimensions.
 	if (c.width  > 0) s["originalWidth"]  = c.width;
@@ -182,6 +188,10 @@ XMLElement* song_entry_xml(XMLDocument& doc,
 	if (c.height > 0) el->SetAttribute("originalHeight", c.height);
 	// See the JSON entry: a gaindrive extension marking discNumber as a season.
 	if (c.season > 0) el->SetAttribute("season", c.season);
+	// See the JSON entry.
+	if (!c.watched.empty())
+		el->SetAttribute("watched", iso8601(c.watched).c_str());
+	if (c.bookmark_ms > 0) el->SetAttribute("bookmarkPosition", c.bookmark_ms);
 	if (!c.starred.empty())
 		el->SetAttribute("starred", iso8601(c.starred).c_str());
 	if (auto t = transcode_target(c)) {

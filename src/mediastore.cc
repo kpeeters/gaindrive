@@ -260,6 +260,17 @@ static const std::string SONG_COVER_ART_SQL =
 static const std::string SONG_VIDEO_COLS_SQL =
 	", s.video_codec, s.audio_codec, s.season";
 
+// The watched mark and resume point of song `s`, for the user bound to the
+// one placeholder in WATCH_JOIN_SQL. Only the album and playlist listings
+// select these: they are where an episode is picked, and where a check
+// beside each one answers "where was I in this series".
+static const std::string WATCH_COLS_SQL =
+	", COALESCE(w.watched, ''), COALESCE(b.position, 0)";
+static const std::string WATCH_JOIN_SQL =
+	" LEFT JOIN client.users wu ON wu.username = ?"
+	" LEFT JOIN client.watched w ON w.user_id = wu.id AND w.song_path = s.path"
+	" LEFT JOIN client.bookmarks b ON b.user_id = wu.id AND b.song_path = s.path";
+
 // The artist folder of an album whose folder is aliased `f`: the folder above
 // it, always.
 //
@@ -1343,6 +1354,16 @@ void MediaStore::create_schema()
 			comment   TEXT,
 			created   DATETIME DEFAULT CURRENT_TIMESTAMP,
 			changed   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (user_id, song_path)
+		);
+
+		-- Finished episodes, films and long audio. Not derivable from
+		-- play_counts, which counts a play after four minutes, nor from
+		-- bookmarks, whose row simply goes away at the end.
+		CREATE TABLE IF NOT EXISTS client.watched (
+			user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			song_path TEXT NOT NULL,
+			watched   DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (user_id, song_path)
 		);
 
@@ -7666,6 +7687,9 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		? ""
 		: " LEFT JOIN client.stars st ON st.song_path = s.path"
 		  " AND st.user_id = (SELECT id FROM client.users WHERE username = ?)";
+	const std::string watch_col  = username.empty()
+		? ", '', 0" : WATCH_COLS_SQL;
+	const std::string watch_join = username.empty() ? "" : WATCH_JOIN_SQL;
 
 	// Flat mode absorbs disc-subfolder songs into the album listing, so they report
 	// the album folder as parent rather than the disc folder (see get_directory).
@@ -7678,11 +7702,12 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		+ star_col +
 		", s.width, s.height, s.video_codec, s.audio_codec, s.cover_path"
 		", s.season, COALESCE(s.artist,'') AS track_artist"
+		+ watch_col +
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
-		+ star_join +
+		+ star_join + watch_join +
 		" WHERE s.folder_id = ?"
 		"    OR s.folder_id IN (SELECT id FROM folders WHERE parent_id = ?)"
 		" ORDER BY s.disc_number, s.track_number, s.filename";
@@ -7696,11 +7721,12 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		+ star_col +
 		", s.width, s.height, s.video_codec, s.audio_codec, s.cover_path"
 		", s.season, COALESCE(s.artist,'') AS track_artist"
+		+ watch_col +
 		" FROM songs s"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
-		+ star_join +
+		+ star_join + watch_join +
 		" WHERE s.folder_id = ?"
 		" ORDER BY s.disc_number, s.track_number, s.filename";
 
@@ -7719,8 +7745,10 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 
 	SQLite::Statement ssel(db_music_, flatten ? song_sql_flat : song_sql_normal);
 	int idx = 1;
-	if (!username.empty())
-		ssel.bind(idx++, username);
+	if (!username.empty()) {
+		ssel.bind(idx++, username);   // star_join
+		ssel.bind(idx++, username);   // watch_join
+		}
 	ssel.bind(idx++, folder_id);
 	if (flatten) ssel.bind(idx, folder_id);
 
@@ -7753,6 +7781,8 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 			e.cover_art_id = info.album.cover_art_id;
 		e.season       = ssel.getColumn(19).getInt();
 		e.track_artist = ssel.getColumn(20).getString();
+		e.watched      = ssel.getColumn(21).getString();
+		e.bookmark_ms  = ssel.getColumn(22).getInt64();
 		info.songs.push_back(std::move(e));
 		}
 
@@ -7926,32 +7956,56 @@ void MediaStore::scrobble(const std::string& username, const std::string& song_p
 		}
 	}
 
-void MediaStore::update_resume_point(int user_id, const std::string& song_path,
-                                     int64_t position_ms)
+std::optional<double> MediaStore::resumable_duration(const std::string& song_path)
 	{
 	// Twenty minutes: no ordinary song is that long, but a DJ mix or an
 	// audiobook chapter is, and those are worth resuming.
-	constexpr double  long_audio_s = 20 * 60;
-	// Below this the play has barely begun; above all, Android reports
-	// `stopped` at 0 on a track change, which must not wipe the point.
-	constexpr int64_t min_pos_ms   = 30000;
+	constexpr double long_audio_s = 20 * 60;
 
 	SQLite::Statement q(db_music_,
 		"SELECT is_video, COALESCE(duration, 0) FROM songs WHERE path = ?");
 	q.bind(1, song_path);
-	if (!q.executeStep()) return;
+	if (!q.executeStep()) return std::nullopt;
 	bool   is_video = q.getColumn(0).getInt() != 0;
 	double duration = q.getColumn(1).getDouble();
-	if (!is_video && duration < long_audio_s) return;
+	if (!is_video && duration < long_audio_s) return std::nullopt;
+	return duration;
+	}
+
+void MediaStore::mark_watched(int user_id, const std::string& song_path)
+	{
+	// A finished item should not go on asking to resume.
+	SQLite::Statement del(db_music_,
+		"DELETE FROM client.bookmarks WHERE user_id = ? AND song_path = ?");
+	del.bind(1, user_id);
+	del.bind(2, song_path);
+	del.exec();
+
+	SQLite::Statement ins(db_music_,
+		"INSERT INTO client.watched (user_id, song_path, watched)"
+		" VALUES (?, ?, CURRENT_TIMESTAMP)"
+		" ON CONFLICT(user_id, song_path) DO UPDATE SET"
+		"   watched = CURRENT_TIMESTAMP");
+	ins.bind(1, user_id);
+	ins.bind(2, song_path);
+	ins.exec();
+	}
+
+void MediaStore::update_resume_point(int user_id, const std::string& song_path,
+                                     int64_t position_ms)
+	{
+	// Below this the play has barely begun; above all, Android reports
+	// `stopped` at 0 on a track change, which must not wipe the point.
+	constexpr int64_t min_pos_ms = 30000;
+
+	auto duration = resumable_duration(song_path);
+	if (!duration) return;
 
 	// Past 95% counts as watched: a film's credits should not leave it
-	// asking to resume.
-	if (duration > 0 && position_ms >= duration * 950) {
-		SQLite::Statement del(db_music_,
-			"DELETE FROM client.bookmarks WHERE user_id = ? AND song_path = ?");
-		del.bind(1, user_id);
-		del.bind(2, song_path);
-		del.exec();
+	// asking to resume. A rewatch that stops early leaves the mark alone;
+	// only set_watched() takes it away.
+	if (*duration > 0 && position_ms >= *duration * 950) {
+		mark_watched(user_id, song_path);
 		return;
 		}
 	if (position_ms < min_pos_ms) return;
@@ -7966,6 +8020,35 @@ void MediaStore::update_resume_point(int user_id, const std::string& song_path,
 	ins.bind(2, song_path);
 	ins.bind(3, position_ms);
 	ins.exec();
+	}
+
+void MediaStore::set_watched(const std::string& username,
+                             const std::vector<std::string>& song_paths,
+                             bool watched)
+	{
+	std::lock_guard<std::mutex> lock(db_mutex_);
+
+	SQLite::Statement uid_q(db_music_, "SELECT id FROM client.users WHERE username = ?");
+	uid_q.bind(1, username);
+	if (!uid_q.executeStep()) return;
+	int user_id = uid_q.getColumn(0).getInt();
+
+	SQLite::Transaction txn(db_music_);
+	for (const auto& path : song_paths) {
+		// A whole album may be marked at once, and an ordinary song on it
+		// is not a thing one finishes.
+		if (!resumable_duration(path)) continue;
+		if (watched) {
+			mark_watched(user_id, path);
+			continue;
+			}
+		SQLite::Statement del(db_music_,
+			"DELETE FROM client.watched WHERE user_id = ? AND song_path = ?");
+		del.bind(1, user_id);
+		del.bind(2, path);
+		del.exec();
+		}
+	txn.commit();
 	}
 
 bool MediaStore::report_playback(const std::string& username,
@@ -8582,6 +8665,7 @@ bool MediaStore::relocate_prefix(const std::string& old_rel,
 		rewrite("client.play_queue",     "song_path");
 		rewrite("client.now_playing",    "song_path");
 		rewrite("client.bookmarks",      "song_path");
+		rewrite("client.watched",        "song_path");
 		// These two used to move for free: the flag was a column on the albums
 		// row and the title was the songs row. Both are paths in a separate
 		// WAL file now, so they belong in this list - and a miss is a cover a
@@ -8716,6 +8800,7 @@ void MediaStore::forget_prefix(const std::string& rel)
 		forget("client.play_queue",     "song_path");
 		forget("client.now_playing",    "song_path");
 		forget("client.bookmarks",      "song_path");
+		forget("client.watched",        "song_path");
 		// Newly load-bearing. The albums row used to be pruned by the
 		// scan_dirs() that follows, taking the flag with it; nothing prunes
 		// the client schema. Left behind, a manual_covers row on a deleted
@@ -9260,6 +9345,9 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		? ""
 		: " LEFT JOIN client.stars st ON st.song_path = s.path"
 		  " AND st.user_id = (SELECT id FROM client.users WHERE username = ?)";
+	const std::string watch_col  = username.empty()
+		? ", '', 0" : WATCH_COLS_SQL;
+	const std::string watch_join = username.empty() ? "" : WATCH_JOIN_SQL;
 
 	// al.folder_id, not s.folder_id - songs on a multi-disc album live in disc
 	// subfolders, which have no albums row to resolve cover art or getAlbum against.
@@ -9276,13 +9364,14 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		// ends with a comma, and star_col begins with one.  The reader below
 		// numbers them in this order.
 		+ star_col
-		+ SONG_VIDEO_COLS_SQL +
+		+ SONG_VIDEO_COLS_SQL
+		+ watch_col +
 		" FROM client.playlist_songs ps"
 		" JOIN songs s ON s.path = ps.song_path"
 		" LEFT JOIN albums al ON al.id = s.album_id"
 		" LEFT JOIN song_artists sa ON sa.song_id = s.id AND sa.role = 'artist'"
 		" LEFT JOIN artists a ON a.id = sa.artist_id"
-		+ star_join +
+		+ star_join + watch_join +
 		" WHERE ps.playlist_id = ?"
 		// Someone else's public playlist keeps the entries soft-hidden for
 		// this user, which is what makes sharing one worth anything.
@@ -9291,8 +9380,10 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 
 	SQLite::Statement sq(db_music_, pl_sql);
 	int idx = 1;
-	if (!username.empty())
+	if (!username.empty()) {
 		sq.bind(idx++, username);            // star_join user_id subquery
+		sq.bind(idx++, username);            // watch_join
+		}
 	sq.bind(idx, playlist_id);
 	int total_duration = 0;
 	while (sq.executeStep()) {
@@ -9317,6 +9408,8 @@ std::optional<MediaStore::PlaylistInfo> MediaStore::get_playlist(int playlist_id
 		e.video_codec  = sq.getColumn(16).isNull() ? "" : sq.getColumn(16).getString();
 		e.audio_codec  = sq.getColumn(17).isNull() ? "" : sq.getColumn(17).getString();
 		e.season       = sq.getColumn(18).getInt();
+		e.watched      = sq.getColumn(19).getString();
+		e.bookmark_ms  = sq.getColumn(20).getInt64();
 		total_duration += (int)e.duration;
 		pl.songs.push_back(std::move(e));
 		}

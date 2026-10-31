@@ -690,6 +690,54 @@ there is no need to unregister a finished stream.
 '''
 
 [[endpoint]]
+kind    = 'endpoint'
+name    = "setWatched"
+section = "playback"
+summary = 'Marks videos and long audio as finished for the authenticated user, or clears the mark.'
+notes   = '''
+`reportPlayback` sets the same mark by itself once the position passes 95% of
+the duration; this is for an episode seen elsewhere, or one skipped on
+purpose. Marking also deletes the resume bookmark. Only items that get a
+resume point are marked - videos, and audio of 20 minutes or more - and any
+other id is skipped, so a client can pass every song of an album.
+'''
+
+  [[endpoint.param]]
+  name       = "id"
+  type       = "string"
+  repeatable = true
+  doc        = 'A song id. Unknown and unreadable ids are skipped.'
+
+  [[endpoint.param]]
+  name = "watched"
+  type = "bool"
+  doc  = '`true` to mark, `false` to clear.'
+
+[[endpoint]]
+kind       = 'additions'
+applies_to = ["getAlbum", "getPlaylist"]
+section    = "playback"
+summary    = 'Two per-user fields on a song entry, saying how far an episode has been watched.'
+
+  [[endpoint.field]]
+  name  = "watched"
+  type  = "string"
+  on    = "Child"
+  doc   = 'When this user finished the item; absent when not finished.'
+
+  [[endpoint.field]]
+  name  = "bookmarkPosition"
+  type  = "int"
+  on    = "Child"
+  doc   = 'The resume point in milliseconds; absent when there is none.'
+  notes = '''
+The field original Subsonic defines on a song entry. It is filled from the
+same bookmark `getBookmarks` lists, so a client can draw progress in a
+listing, or start an item at its resume point, without fetching every
+bookmark first.
+'''
+
+[[endpoint]]
 kind       = 'additions'
 applies_to = ["stream"]
 section    = "playback"

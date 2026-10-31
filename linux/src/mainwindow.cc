@@ -388,7 +388,12 @@ MainWindow::MainWindow()
 		open_album(album, "", song_id);
 		});
 	sidebar_.append(users_);
-	main_.append(sidebar_);
+	main_.set_start_child(sidebar_);
+	// The sidebar keeps its dragged width as the window resizes, and
+	// neither side goes below its minimum width.
+	main_.set_resize_start_child(false);
+	main_.set_shrink_start_child(false);
+	main_.set_shrink_end_child(false);
 
 	left_.add(artists_, "library");
 	left_.add(uploads_, "uploads");
@@ -409,7 +414,7 @@ MainWindow::MainWindow()
 	content_.set_vexpand(true);
 	content_box_.append(content_);
 	content_box_.append(isearch_);
-	main_.append(content_box_);
+	main_.set_end_child(content_box_);
 	main_.set_vexpand(true);
 	body_.set_child(main_);
 	// Bottom right, just above the button that opens it, as on the web.
@@ -696,6 +701,8 @@ void MainWindow::restore_size()
 	set_default_size(w>0 ? w : 1200, h>0 ? h : 760);
 	if(jsub(j, "maximized").is_boolean() && jsub(j, "maximized").get<bool>())
 		maximize();
+	sidebar_width_ = jint(j, "sidebarWidth");
+	if(sidebar_width_>0) main_.set_position(sidebar_width_);
 	}
 
 void MainWindow::save_size()
@@ -704,7 +711,10 @@ void MainWindow::save_size()
 	// leaves it alone while maximised, so this is the size to come back to.
 	int w=0, h=0;
 	get_default_size(w, h);
-	write_config("state.json", {{"width", w}, {"height", h}, {"maximized", is_maximized()}});
+	// A hidden sidebar's position says nothing about the width it had.
+	if(sidebar_.get_visible()) sidebar_width_ = main_.get_position();
+	write_config("state.json", {{"width", w}, {"height", h}, {"maximized", is_maximized()},
+	                            {"sidebarWidth", sidebar_width_}});
 	}
 
 void MainWindow::show_login(const std::string& error)

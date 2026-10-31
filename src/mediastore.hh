@@ -654,6 +654,12 @@ class MediaStore {
 			// "Disc 2" in a listing. Selected by the same fragment as the two
 			// codecs above, and for the same reason.
 			int         season = 0;
+			// Per user, and selected only by get_album() and get_playlist(),
+			// the listings an episode is picked from. `watched` is the
+			// SQLite timestamp of finishing it, empty when not finished;
+			// bookmark_ms is the resume point, 0 when there is none.
+			std::string watched;
+			int64_t     bookmark_ms = 0;
 			// Album hits from search() only: a film turns up there as an
 			// album, and this is what lets a client mark it as one.
 			int         video_count = 0;
@@ -1067,6 +1073,13 @@ class MediaStore {
 		// Returns false if no bookmark existed.
 		bool delete_bookmark(const std::string& username, const std::string& song_path);
 
+		// Marks or unmarks items as finished. Marking also drops the resume
+		// point. Paths that get no resume point (see resumable_duration())
+		// are skipped, so a client can pass a whole album.
+		void set_watched(const std::string& username,
+		                 const std::vector<std::string>& song_paths,
+		                 bool watched);
+
 		// Add/remove a star for the authenticated user.
 		// Exactly one of song_path, album_folder_path, artist_folder_path should be non-empty.
 		void add_star   (const std::string& username,
@@ -1472,6 +1485,15 @@ class MediaStore {
 		// itself. Caller holds db_mutex_.
 		void update_resume_point(int user_id, const std::string& song_path,
 		                         int64_t position_ms);
+
+		// The duration of a video or long audio file, the items which get a
+		// resume point and a watched mark; nullopt for anything else.
+		// Caller holds db_mutex_.
+		std::optional<double> resumable_duration(const std::string& song_path);
+
+		// Records a finished item and drops its resume point. Caller holds
+		// db_mutex_.
+		void mark_watched(int user_id, const std::string& song_path);
 
 		// Helpers used by scan(); all called within a single transaction.
 		int  upsert_folder(const std::filesystem::path& path, int parent_id,

@@ -582,6 +582,37 @@ void GainDrive::routes_playlist()
 		res.set_content(body, use_json ? "application/json" : "application/xml");
 		});
 
+	// setWatched - gaindrive extension. Marks (watched=true) or unmarks the
+	// given songs as finished; `id` repeats so a season goes in one call.
+	server_.Get("/rest/setWatched.view", [this](const httplib::Request& req,
+	                                             httplib::Response& res) {
+		if (!check_auth(req, res, store_)) return;
+		bool use_json = (fmt_of(req) == "json");
+		std::string user = req.params.find("u")->second;
+
+		auto w = req.params.find("watched");
+		if (!req.has_param("id") || w == req.params.end()) {
+			auto msg = "Required parameter missing: id or watched.";
+			res.set_content(use_json ? subsonic_error_json(10, msg)
+			                         : subsonic_error(10, msg),
+			                use_json ? "application/json" : "application/xml");
+			return;
+			}
+
+		// Same read check as scrobble: the mark comes back out on the full
+		// song entry, so a foreign id is dropped like an unknown one.
+		std::vector<std::string> paths;
+		auto range = req.params.equal_range("id");
+		for (auto it = range.first; it != range.second; ++it)
+			if (auto p = store_.song_path_by_id(to_int(it->second, -1)))
+				if (item_read_allowed(req, store_, *p))
+					paths.push_back(*p);
+		store_.set_watched(user, paths, w->second == "true");
+
+		std::string body = use_json ? subsonic_ok_json() : subsonic_ok();
+		res.set_content(body, use_json ? "application/json" : "application/xml");
+		});
+
 	// deletePlaylist - remove a playlist owned by the authenticated user.
 	server_.Get("/rest/deletePlaylist.view", [this](const httplib::Request& req,
 	                                                 httplib::Response& res) {

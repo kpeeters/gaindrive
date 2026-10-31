@@ -1861,7 +1861,17 @@ input.chapter-time.bad { border-color: #e06c6c; }
    padding: 0.3rem 0.4rem;
    border-radius: 4px;
    cursor: pointer;
+   /* Anchors the progress bar of an episode watched part-way. */
+   position: relative;
 }
+
+/* An album row has one more slot, the watched toggle. Before .editing, which
+   must win: edit mode hides the toggle and keeps its own seven columns. */
+.track-row.watch-slot {
+   grid-template-columns: 1.2rem 2ch 1fr auto auto auto auto;
+}
+.track-row.editing .track-watch,
+.editing-tracks .watch-bar { display: none; }
 
 /* In edit mode: explicit column widths so the header row can mirror them exactly. */
 .track-row.editing {
@@ -2006,6 +2016,50 @@ input.chapter-time.bad { border-color: #e06c6c; }
 
 .track-action-remove:hover {
    color: var(--error);
+}
+
+/* Watched items: the toggle stays lit, like a star, and the title dims so the
+   next episode stands out. */
+.track-row.watched .track-watch {
+   opacity: 1;
+   color: var(--accent);
+   font-variation-settings: 'FILL' 1;
+}
+.track-row.watched .track-title { color: var(--text-dim); }
+
+/* Absolutely placed, so it takes no grid cell. --progress is 0..1. */
+.track-row.in-progress::after {
+   content: '';
+   position: absolute;
+   left: 0.4rem;
+   bottom: 0.1rem;
+   height: 2px;
+   width: calc((100% - 0.8rem) * var(--progress));
+   background: var(--accent);
+   border-radius: 1px;
+}
+
+.watch-bar {
+   display: flex;
+   align-items: center;
+   gap: 1rem;
+   margin: 0 0.4rem 0.6rem;
+}
+.watch-bar[hidden], .watch-continue[hidden] { display: none; }
+.watch-continue {
+   background: var(--accent);
+   color: #fff;
+   border: none;
+   border-radius: 4px;
+   padding: 0.3rem 0.9rem;
+   font-size: 0.85rem;
+   cursor: pointer;
+}
+.watch-all {
+   margin-left: auto;
+   font-size: 0.8rem;
+   color: var(--accent);
+   cursor: pointer;
 }
 
 /* ── Album star ─────────────────────────────────────────────────────────── */

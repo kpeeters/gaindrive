@@ -23,6 +23,7 @@
 #include <gtkmm/label.h>
 #include <gtkmm/listbox.h>
 #include <gtkmm/overlay.h>
+#include <gtkmm/paned.h>
 #include <gtkmm/revealer.h>
 #include <gtkmm/stack.h>
 #include <gtkmm/togglebutton.h>
@@ -137,7 +138,7 @@ class MainWindow : public Gtk::ApplicationWindow {
 		sigc::connection           notice_timer_;
 		// main_ with the volume and equaliser card floating over it.
 		Gtk::Overlay               body_;
-		Gtk::Box                   main_;
+		Gtk::Paned                 main_;
 		Gtk::Box                   sidebar_;
 		Gtk::ListBox               nav_;
 		Gtk::ScrolledWindow        queue_scroll_;
@@ -200,6 +201,8 @@ class MainWindow : public Gtk::ApplicationWindow {
 		bool                       gtk_dark_=false;
 		// gtk-xft-dpi as the desktop set it, text scaling included.
 		int                        desktop_dpi_=0;
+		// The sidebar's width as last dragged, kept while it is hidden.
+		int                        sidebar_width_=0;
 		// The web's dark-theme accent, on the display while the theme is dark.
 		Glib::RefPtr<Gtk::CssProvider> dark_css_;
 		bool                       dark_css_on_=false;

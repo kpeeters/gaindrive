@@ -791,6 +791,17 @@ CREATE TABLE bookmarks (
     PRIMARY KEY (user_id, song_path)
 );
 
+-- Finished videos and long audio: set at 95% by
+-- reportPlayback, or by hand through setWatched.
+CREATE TABLE watched (
+    user_id     INTEGER NOT NULL
+                  REFERENCES users(id)
+                  ON DELETE CASCADE,
+    song_path   TEXT NOT NULL,
+    watched     DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, song_path)
+);
+
 -- A cover a person chose through setCoverArt.
 --
 -- The *image* survives a rebuild of the music DB --

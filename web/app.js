@@ -6702,6 +6702,126 @@ function makeTrackActions(song, ctx) {
    return [starBtn, listBtn];
    }
 
+// Whether the server keeps a resume point and a watched mark for `song`: a
+// video, or audio long enough to be a chapter or a mix.  Mirrors
+// resumable_duration() on the server, so a song costs no request.
+function isResumable(song) {
+   return !!song && (song.isVideo || (song.duration || 0) >= 20 * 60);
+}
+
+// The watched toggle of an album row.  An item that cannot be finished gets
+// an empty slot instead, so its row keeps the same columns.
+function makeWatchToggle(song) {
+   const btn = document.createElement('span');
+   btn.className = 'track-watch';
+   if (!isResumable(song)) return btn;
+   btn.className = 'track-action track-watch mi';
+   btn.textContent = 'check_circle';
+   btn.addEventListener('click', e => {
+      e.stopPropagation();
+      setWatched([song], !song.watched);
+      });
+   return btn;
+   }
+
+// Marks or unmarks `songs` on the server, then redraws them.  The server
+// skips what cannot be finished, and so does the local copy.
+async function setWatched(songs, watched) {
+   const pairs = [['watched', watched ? 'true' : 'false']];
+   for (const s of songs) pairs.push(['id', s.id]);
+   try {
+      await apiCall('setWatched', pairs);
+      }
+   catch {
+      showError('The action could not be completed. Please check your connection.');
+      return;
+      }
+   for (const s of songs) {
+      if (!isResumable(s)) continue;
+      if (watched) {
+         s.watched = new Date().toISOString();
+         delete s.bookmarkPosition;
+         }
+      else delete s.watched;
+      drawWatchState(s);
+      }
+   }
+
+// Built hidden; updateWatchBar() decides what of it shows.  Continue starts
+// the first item not yet watched, at its resume point, which skips the
+// Resume prompt since the answer is already given.
+function makeWatchBar(songs, ctx) {
+   const bar = document.createElement('div');
+   bar.className = 'watch-bar';
+   bar.hidden = true;
+   const cont = document.createElement('button');
+   cont.className = 'watch-continue';
+   cont.textContent = 'Continue';
+   cont.addEventListener('click', () => {
+      const i = songs.findIndex(s => isResumable(s) && !s.watched);
+      if (i === -1) return;
+      player.albumCtx = ctx;
+      playerLoadNow(songs, i, (songs[i].bookmarkPosition || 0) / 1000);
+      });
+   const all = document.createElement('span');
+   all.className = 'watch-all';
+   all.addEventListener('click', () => {
+      const items = songs.filter(isResumable);
+      setWatched(items, items.some(s => !s.watched));
+      });
+   bar.append(cont, all);
+   return bar;
+   }
+
+// Mirrors what the server does with a playback report, so a listing's check
+// and progress bar follow playback without a reload.  Same thresholds as
+// update_resume_point().
+function noteWatchProgress(song, pos) {
+   if (!isResumable(song) || !(pos > 0)) return;
+   if (song.duration > 0 && pos >= song.duration * 0.95) {
+      if (!song.watched) song.watched = new Date().toISOString();
+      delete song.bookmarkPosition;
+      }
+   else if (pos >= 30) song.bookmarkPosition = Math.round(pos * 1000);
+   else return;
+   drawWatchState(song);
+   }
+
+// Applies `song`'s watched mark and resume point to its album row, and the
+// album's Continue bar to match.
+function drawWatchState(song) {
+   const row = document.querySelector(
+      `#pane-tracks .track-row[data-id="${CSS.escape(String(song.id))}"]`);
+   if (!row) return;
+   const progress = !song.watched && song.duration > 0 && song.bookmarkPosition > 0
+      ? Math.min(1, song.bookmarkPosition / 1000 / song.duration) : 0;
+   row.classList.toggle('watched', !!song.watched);
+   row.classList.toggle('in-progress', progress > 0);
+   row.style.setProperty('--progress', progress);
+   const btn = row.querySelector('.track-watch');
+   if (btn) btn.title = song.watched ? 'Mark as not watched' : 'Mark as watched';
+   updateWatchBar();
+   }
+
+// The bar above an album's tracks: Continue, and marking the lot.  Hidden
+// until there is something to continue from, so a film never seen shows
+// nothing but its play row.
+function updateWatchBar() {
+   const pane = document.getElementById('pane-tracks');
+   const bar  = pane.querySelector('.watch-bar');
+   if (!bar) return;
+   const rows    = [...pane.querySelectorAll('.track-row.resumable')];
+   const next    = rows.find(r => !r.classList.contains('watched'));
+   const started = rows.some(r => r.classList.contains('watched')
+                               || r.classList.contains('in-progress'));
+   const cont = bar.querySelector('.watch-continue');
+   cont.hidden = !(next && started);
+   if (next) cont.title = next.querySelector('.track-title')?.textContent ?? '';
+   bar.querySelector('.watch-all').textContent =
+      next ? 'Mark all watched' : 'Mark all not watched';
+   bar.hidden = rows.length < 2 && cont.hidden;
+   }
+
 let playlistTargetId = null;
 
 function openPlaylistModal(songId) {
@@ -8253,10 +8373,9 @@ async function playerLoad(songs, startIndex, offset = 0) {
    playerLoadNow(songs, startIndex, offset);
 }
 
-// Seconds into `song` to offer resuming at, or 0.  Mirrors the server's rule
-// for which items get a resume point, so a three-minute song costs no request.
+// Seconds into `song` to offer resuming at, or 0.
 async function resumePoint(song) {
-   if (!song || !(song.isVideo || (song.duration || 0) >= 20 * 60)) return 0;
+   if (!isResumable(song)) return 0;
    try {
       const sr = await apiCall('getBookmarks');
       const bm = (sr.bookmarks?.bookmark || []).find(b => b.entry?.id === song.id);
@@ -8736,6 +8855,7 @@ document.getElementById('player-cover').addEventListener('click', () => {
 function playbackReport(state, pos = playerPosition()) {
    const song = player.queue[player.index];
    if (!song) return Promise.resolve();
+   noteWatchProgress(song, pos);
    return apiCall('reportPlayback', playbackReportParams(song, state, pos))
       .catch(err => console.warn('[now-playing] failed', err));
 }
@@ -8797,6 +8917,9 @@ el.addEventListener('play', () => {
 el.addEventListener('ended', () => {
    if (castDeviceId !== null) return;  // cast poll loop owns advance
    scrobbleCurrentSong();
+   // The periodic report can land a minute short of the end, which on a
+   // 20-minute item is short of the 95% that marks it watched.
+   playbackReport('stopped');
    if (player.index < player.queue.length - 1) {
       player.index++;
       playerPlay();
@@ -9407,9 +9530,12 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
          playerLoad(songs, i);
          });
       const [starBtn, listBtn] = makeTrackActions(song);
+      if (isResumable(song)) row.classList.add('resumable');
+      row.classList.add('watch-slot');
       row.appendChild(icon);
       row.appendChild(num);
       row.appendChild(titleWrap);
+      row.appendChild(makeWatchToggle(song));
       row.appendChild(starBtn);
       row.appendChild(listBtn);
       row.appendChild(dur);
@@ -9435,7 +9561,11 @@ async function viewTracks(albumId, albumTitle, artistId, artistName,
          }
       }
 
+   pane.appendChild(makeWatchBar(songs, {albumId, albumTitle, artistId, artistName}));
    pane.appendChild(frag);
+   for (const song of songs)
+      if (isResumable(song)) drawWatchState(song);
+   updateWatchBar();
    // The rows are new nodes, so a track that was already playing when this
    // listing was (re)built would otherwise lose its arrow until the next
    // track starts.
