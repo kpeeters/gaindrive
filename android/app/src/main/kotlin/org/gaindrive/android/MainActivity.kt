@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
 				}
 			}
 
-			GainDriveTheme(mode = state.themeMode, isTv = isTv) {
+			GainDriveTheme(isTv = isTv) {
 				// Inside the theme, so the TV indication wraps the themed ripple.
 				TvEnvironment(isTv) {
 					CompositionLocalProvider(

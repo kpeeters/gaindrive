@@ -12,7 +12,6 @@ import org.gaindrive.android.data.model.AlbumSort
 import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.LibrarySection
-import org.gaindrive.android.data.model.ThemeMode
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -23,15 +22,6 @@ import javax.inject.Singleton
 class SettingsStore @Inject constructor(
 	private val dataStore: DataStore<Preferences>,
 ) {
-
-	val themeMode: Flow<ThemeMode> = dataStore.data.map { prefs ->
-		prefs[THEME]?.let { name -> runCatching { ThemeMode.valueOf(name) }.getOrNull() }
-			?: ThemeMode.AUTO
-	}
-
-	suspend fun setThemeMode(mode: ThemeMode) {
-		dataStore.edit { it[THEME] = mode.name }
-	}
 
 	/**
 	 * What the library screens are showing: a server id, or
@@ -267,7 +257,6 @@ class SettingsStore @Inject constructor(
 		/** Big enough to be useful, small enough not to surprise anyone. */
 		const val DEFAULT_CACHE_BYTES = 4L * 1024 * 1024 * 1024
 
-		private val THEME = stringPreferencesKey("theme_mode")
 		private val SELECTED_SERVER = stringPreferencesKey("selected_server")
 
 		/** One key per library section, so the sections do not share an answer. */

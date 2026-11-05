@@ -10,7 +10,6 @@ import org.gaindrive.android.ui.adaptive.PaneHost
 import org.gaindrive.android.ui.adaptive.PaneStack
 import org.gaindrive.android.ui.adaptive.PaneStrip
 import org.gaindrive.android.ui.adaptive.PaneWaiting
-import org.gaindrive.android.ui.settings.AppearanceSettingsScreen
 import org.gaindrive.android.ui.settings.CastSettingsScreen
 import org.gaindrive.android.ui.settings.LibrarySettingsScreen
 import org.gaindrive.android.ui.settings.ServersSettingsScreen
@@ -46,7 +45,6 @@ fun SettingsTab(stack: PaneStack, onEditServer: (ServerId?) -> Unit) {
 					onOpenLibrary = { stack.show(1, Route.SettingsLibrary) },
 					onOpenStorage = { stack.show(1, Route.SettingsStorage) },
 					onOpenCasting = { stack.show(1, Route.SettingsCasting) },
-					onOpenAppearance = { stack.show(1, Route.SettingsAppearance) },
 				)
 			}
 			composable<Route.SettingsServers> {
@@ -63,9 +61,6 @@ fun SettingsTab(stack: PaneStack, onEditServer: (ServerId?) -> Unit) {
 			}
 			composable<Route.SettingsCasting> {
 				CastSettingsScreen(onBack = LocalPaneBack.current)
-			}
-			composable<Route.SettingsAppearance> {
-				AppearanceSettingsScreen(onBack = LocalPaneBack.current)
 			}
 		}
 	}

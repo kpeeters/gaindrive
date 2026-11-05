@@ -24,13 +24,11 @@ import org.gaindrive.android.data.model.AudioQuality
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
-import org.gaindrive.android.data.model.ThemeMode
 import org.gaindrive.android.playback.PlayerConnection
 import javax.inject.Inject
 
 data class SettingsUiState(
 	val servers: List<ServerConfig> = emptyList(),
-	val themeMode: ThemeMode = ThemeMode.AUTO,
 	val mergeDuplicateAlbums: Boolean = false,
 	val castOriginal: Boolean = false,
 	val videoAudioOnly: Boolean = false,
@@ -58,9 +56,9 @@ data class StorageUiState(
 )
 
 /**
- * Switches that share a slot in the outer `combine`, which is full at its typed
- * limit of five flows - the same squeeze [StoragePrefs] answers. They ride
- * together because there was room for one more value, not because they belong
+ * Switches that share a slot in the outer `combine`, which would otherwise
+ * exceed its typed limit of five flows - the same squeeze [StoragePrefs]
+ * answers. They ride together for that reason, not because they belong
  * together; all are unpacked into [SettingsUiState], which stays flat.
  */
 private data class Toggles(
@@ -146,8 +144,8 @@ class SettingsViewModel @Inject constructor(
 	private val pinnedItems = pins.pins.map { pins.describe(it) }
 
 	/**
-	 * Kept beside [state] rather than inside it: the combine there is already at
-	 * five flows, and this changes on its own schedule as downloads progress.
+	 * Kept beside [state] rather than inside it: this changes on its own
+	 * schedule as downloads progress.
 	 */
 	val pinStatuses: StateFlow<Map<String, PinStatus>> = pins.statuses
 
@@ -161,14 +159,12 @@ class SettingsViewModel @Inject constructor(
 	val state: StateFlow<SettingsUiState> =
 		combine(
 			registry.servers,
-			settings.themeMode,
 			toggles,
 			storage,
 			pinnedItems,
-		) { servers, theme, toggles, storage, pins ->
+		) { servers, toggles, storage, pins ->
 			SettingsUiState(
 				servers = servers,
-				themeMode = theme,
 				mergeDuplicateAlbums = toggles.mergeDuplicateAlbums,
 				castOriginal = toggles.castOriginal,
 				videoAudioOnly = toggles.videoAudioOnly,
@@ -181,8 +177,6 @@ class SettingsViewModel @Inject constructor(
 			started = SharingStarted.WhileSubscribed(5_000),
 			initialValue = SettingsUiState(),
 		)
-
-	fun setTheme(mode: ThemeMode) = viewModelScope.launch { settings.setThemeMode(mode) }
 
 	fun setEnabled(id: ServerId, enabled: Boolean) =
 		viewModelScope.launch { registry.setEnabled(id, enabled) }

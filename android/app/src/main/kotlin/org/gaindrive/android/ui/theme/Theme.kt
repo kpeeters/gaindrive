@@ -6,7 +6,6 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import org.gaindrive.android.data.model.ThemeMode
 
 // Taken from web/style.css so the app and the web client are recognisably the
 // same product, rather than following the system wallpaper.
@@ -70,15 +69,10 @@ private val TvDarkScheme = DarkScheme.copy(
 
 @Composable
 fun GainDriveTheme(
-	mode: ThemeMode = ThemeMode.AUTO,
 	isTv: Boolean = false,
 	content: @Composable () -> Unit,
 ) {
-	val dark = when (mode) {
-		ThemeMode.AUTO -> isSystemInDarkTheme()
-		ThemeMode.LIGHT -> false
-		ThemeMode.DARK -> true
-	}
+	val dark = isSystemInDarkTheme()
 	MaterialTheme(
 		colorScheme = when {
 			dark && isTv -> TvDarkScheme

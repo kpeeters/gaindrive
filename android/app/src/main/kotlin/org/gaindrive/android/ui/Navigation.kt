@@ -122,9 +122,6 @@ sealed interface Route {
 	@Serializable
 	data object SettingsCasting : Route
 
-	@Serializable
-	data object SettingsAppearance : Route
-
 	/**
 	 * Null [serverId] means "add a server" - the same screen serves both.
 	 * [firstRun] marks the copy a TV's empty first launch pushes: that one

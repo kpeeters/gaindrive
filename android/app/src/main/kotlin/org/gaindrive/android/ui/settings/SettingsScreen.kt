@@ -13,7 +13,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.BuildConfig
-import org.gaindrive.android.data.model.ThemeMode
 import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.components.formatBytes
 
@@ -36,7 +35,6 @@ fun SettingsScreen(
 	onOpenLibrary: () -> Unit,
 	onOpenStorage: () -> Unit,
 	onOpenCasting: () -> Unit,
-	onOpenAppearance: () -> Unit,
 	viewModel: SettingsViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
@@ -72,11 +70,16 @@ fun SettingsScreen(
 				onClick = onOpenCasting,
 			)
 		}
+		// On the top page rather than inside a category: it is a switch people
+		// flip often, and no category name says where it would be.
 		item {
-			CategoryRow(
-				title = "Appearance",
-				summary = state.themeMode.label(),
-				onClick = onOpenAppearance,
+			SwitchRow(
+				title = "Play videos as audio only",
+				subtitle = "Fetches just the soundtrack, at the quality set under " +
+					"Storage & offline. A fraction of the data, and unlike a " +
+					"video it is cached and can be downloaded for offline.",
+				checked = state.videoAudioOnly,
+				onCheckedChange = viewModel::setVideoAudioOnly,
 			)
 		}
 
@@ -144,9 +147,3 @@ private fun storageSummary(state: SettingsUiState): String =
 	if (state.storage.offlineMode) "Offline mode on"
 	else "${formatBytes(state.storage.usedBytes)} of " +
 		"${formatBytes(state.storage.maxBytes)} used"
-
-internal fun ThemeMode.label(): String = when (this) {
-	ThemeMode.AUTO -> "Auto"
-	ThemeMode.LIGHT -> "Light"
-	ThemeMode.DARK -> "Dark"
-}
