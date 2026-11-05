@@ -73,7 +73,7 @@ Debian 13 or newer, and derivatives:
 macOS:
 
 ```
-      brew install cmake pkgconf ffmpeg openssl@3 \
+      brew install cmake pkgconf ffmpeg openssl@4 \
            taglib tinyxml2 cxxopts nlohmann-json sqlitecpp reproc libarchive
 ```
 

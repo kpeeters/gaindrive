@@ -88,7 +88,7 @@ endif()
 # and -z stack-size are all rejected by ld64. Fail here rather than at link time
 # with an error that reads like a toolchain problem. macOS distribution goes
 # through the Homebrew formula instead, which wants a normal dynamic link
-# against brew's own openssl@3 - see README.
+# against brew's own openssl@4 - see README.
 if(GAINDRIVE_STATIC AND APPLE)
 	message(FATAL_ERROR
 		"GAINDRIVE_STATIC/GAINDRIVE_STATIC_LIBC are Linux-only: Apple ships no "
