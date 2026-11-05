@@ -204,33 +204,67 @@ class PlaybackService : MediaLibraryService() {
 	 *
 	 * `drop(1)` because the first value is the state the queue was already
 	 * resolved under; collecting it would rebuild the queue on every start.
+	 *
+	 * Only while playback is wanted. Rebuilding a paused queue loads the new
+	 * URL at once, which for a film's soundtrack starts a server-side
+	 * extraction the user may never listen to; [audioOnlyCatchUp] does it
+	 * when they press play instead.
 	 */
 	private fun watchAudioOnly() = scope.launch {
 		settings.videoAudioOnly.distinctUntilChanged().drop(1).collect { audioOnly ->
-			val player = activePlayer ?: return@collect
-			val callback = libraryCallback ?: return@collect
-			val items = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
-			// A queue of nothing but music is unaffected. `!= false` rather
-			// than `== true`: an item the system restored from a bare media id
-			// carries no extras, and not knowing is a reason to go and ask.
-			if (items.none { it.isVideoOrNull() != false || it.isAudioOnlyVideo() })
-				return@collect
+			if (activePlayer?.playWhenReady != true) return@collect
+			reresolveQueue(audioOnly)
+		}
+	}
 
-			val index = player.currentMediaItemIndex
-			val position = player.currentPosition.coerceAtLeast(0)
-			val wasPlaying = player.isPlaying
-			// Anything that fails to resolve keeps the URL it has, which is
-			// still playable - a re-resolve is an improvement, not a repair.
-			val resolved = items.mapIndexed { i, item ->
-				callback.resolve(item, audioOnly, withCaptions = i == index) ?: item
+	private suspend fun reresolveQueue(audioOnly: Boolean) {
+		val player = activePlayer ?: return
+		val callback = libraryCallback ?: return
+		val items = (0 until player.mediaItemCount).map { player.getMediaItemAt(it) }
+		// A queue of nothing but music is unaffected. `!= false` rather
+		// than `== true`: an item the system restored from a bare media id
+		// carries no extras, and not knowing is a reason to go and ask.
+		if (items.none { it.isVideoOrNull() != false || it.isAudioOnlyVideo() })
+			return
+
+		val index = player.currentMediaItemIndex
+		val position = player.currentPosition.coerceAtLeast(0)
+		// playWhenReady rather than isPlaying: a film still buffering is one
+		// the user wants playing.
+		val wasPlaying = player.playWhenReady
+		// Anything that fails to resolve keeps the URL it has, which is
+		// still playable - a re-resolve is an improvement, not a repair.
+		val resolved = items.mapIndexed { i, item ->
+			callback.resolve(item, audioOnly, withCaptions = i == index) ?: item
+		}
+
+		// setMediaItems with an index and a position, the same shape the
+		// cast handover uses: it is the one call that moves a whole queue
+		// without losing where in it the user was.
+		player.setMediaItems(resolved, index, position)
+		player.prepare()
+		if (wasPlaying) player.play()
+	}
+
+	/**
+	 * Catches up a queue that `videoAudioOnly` changed under while paused; see
+	 * [watchAudioOnly]. Items without extras are not counted as out of step:
+	 * `onAddMediaItems` resolved those under the current setting already.
+	 *
+	 * The old item plays for the moment [reresolveQueue] takes to resolve.
+	 */
+	private val audioOnlyCatchUp = object : Player.Listener {
+		override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+			if (!playWhenReady) return
+			val player = activePlayer ?: return
+			scope.launch {
+				val audioOnly = settings.videoAudioOnly.first()
+				val stale = (0 until player.mediaItemCount).any {
+					val item = player.getMediaItemAt(it)
+					if (audioOnly) item.isVideo() else item.isAudioOnlyVideo()
+				}
+				if (stale) reresolveQueue(audioOnly)
 			}
-
-			// setMediaItems with an index and a position, the same shape the
-			// cast handover uses: it is the one call that moves a whole queue
-			// without losing where in it the user was.
-			player.setMediaItems(resolved, index, position)
-			player.prepare()
-			if (wasPlaying) player.play()
 		}
 	}
 
@@ -238,6 +272,7 @@ class PlaybackService : MediaLibraryService() {
 		player.addListener(scrobbler)
 		player.addListener(prewarmWatcher)
 		player.addListener(captionFiller)
+		player.addListener(audioOnlyCatchUp)
 	}
 
 	// ── Handing playback to the Chromecast and back ─────────────────────────
