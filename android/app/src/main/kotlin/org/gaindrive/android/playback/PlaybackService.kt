@@ -221,7 +221,9 @@ class PlaybackService : MediaLibraryService() {
 			val wasPlaying = player.isPlaying
 			// Anything that fails to resolve keeps the URL it has, which is
 			// still playable - a re-resolve is an improvement, not a repair.
-			val resolved = items.map { callback.resolve(it, audioOnly) ?: it }
+			val resolved = items.mapIndexed { i, item ->
+				callback.resolve(item, audioOnly, withCaptions = i == index) ?: item
+			}
 
 			// setMediaItems with an index and a position, the same shape the
 			// cast handover uses: it is the one call that moves a whole queue
@@ -235,6 +237,7 @@ class PlaybackService : MediaLibraryService() {
 	private fun attachListeners(player: Player) {
 		player.addListener(scrobbler)
 		player.addListener(prewarmWatcher)
+		player.addListener(captionFiller)
 	}
 
 	// ── Handing playback to the Chromecast and back ─────────────────────────
@@ -467,6 +470,55 @@ class PlaybackService : MediaLibraryService() {
 	}
 
 	/**
+	 * On every track change, fetches the subtitle tracks of the film just
+	 * started and the one after it, for whichever was queued without them.
+	 *
+	 * The next one is the case that matters: it is replaced while it is still
+	 * only queued, which costs nothing. The current one is only pending when
+	 * the user jumped straight to it, and replacing it prepares the film again,
+	 * so its position is carried across.
+	 *
+	 * Local player only: a receiver loads no side-loaded captions, and the
+	 * items keep their mark through a cast handover, so they are filled in
+	 * once the queue comes back.
+	 */
+	private val captionFiller = object : Player.Listener {
+		// Replacing the current item is itself a transition, which would
+		// otherwise send a second probe for the next one.
+		private val inFlight = mutableSetOf<String>()
+
+		override fun onEvents(player: Player, events: Player.Events) {
+			if (player !== localPlayer || player !== activePlayer) return
+			if (!events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION)) return
+			fill(player, player.currentMediaItemIndex)
+			fill(player, player.nextMediaItemIndex)
+		}
+
+		private fun fill(player: Player, index: Int) {
+			if (index == C.INDEX_UNSET) return
+			val item = player.getMediaItemAt(index)
+			if (!item.isVideo() || !item.captionsPending()) return
+			val callback = libraryCallback ?: return
+			if (!inFlight.add(item.mediaId)) return
+			scope.launch {
+				val full = try {
+					callback.resolve(item, audioOnly = false, withCaptions = true)
+				} finally {
+					inFlight.remove(item.mediaId)
+				} ?: return@launch
+				// The queue may have moved while the server was probing.
+				if (activePlayer !== player || index >= player.mediaItemCount
+					|| player.getMediaItemAt(index).mediaId != item.mediaId
+					|| !player.getMediaItemAt(index).captionsPending()) return@launch
+				val current = index == player.currentMediaItemIndex
+				val position = player.currentPosition
+				player.replaceMediaItem(index, full)
+				if (current) player.seekTo(index, position)
+			}
+		}
+	}
+
+	/**
 	 * Submits a completed play once the track has been listened to.
 	 *
 	 * Half the track, or four minutes, whichever comes first - the convention
@@ -595,7 +647,38 @@ class PlaybackService : MediaLibraryService() {
 			mediaItems: MutableList<MediaItem>,
 		): ListenableFuture<MutableList<MediaItem>> = scope.future {
 			val audioOnly = settings.videoAudioOnly.first()
-			mediaItems.mapNotNull { item -> resolve(item, audioOnly) }.toMutableList()
+			mediaItems.mapNotNull { item ->
+				resolve(item, audioOnly, withCaptions = false)
+			}.toMutableList()
+		}
+
+		/**
+		 * Replacing the queue is the one case that knows which item will play
+		 * first, so only that one gets its captions here; see [resolveVideo].
+		 *
+		 * C.INDEX_UNSET means "keep the current index", which for a fresh queue
+		 * is the first item. Items that fail to resolve are dropped, as in
+		 * [onAddMediaItems], so the start index is re-counted past them.
+		 */
+		override fun onSetMediaItems(
+			mediaSession: MediaSession,
+			controller: MediaSession.ControllerInfo,
+			mediaItems: MutableList<MediaItem>,
+			startIndex: Int,
+			startPositionMs: Long,
+		): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
+			val audioOnly = settings.videoAudioOnly.first()
+			val first = if (startIndex == C.INDEX_UNSET) 0 else startIndex
+			var newStart = startIndex
+			val resolved = mutableListOf<MediaItem>()
+			mediaItems.forEachIndexed { i, item ->
+				if (i == first && startIndex != C.INDEX_UNSET) newStart = resolved.size
+				resolve(item, audioOnly, withCaptions = i == first)?.let(resolved::add)
+			}
+			// The start item itself may have been the one dropped, as the last.
+			if (newStart != C.INDEX_UNSET && resolved.isNotEmpty())
+				newStart = newStart.coerceAtMost(resolved.lastIndex)
+			MediaSession.MediaItemsWithStartPosition(resolved, newStart, startPositionMs)
 		}
 
 		/**
@@ -606,11 +689,15 @@ class PlaybackService : MediaLibraryService() {
 		 * second copy of this branch is how the two would drift into resolving
 		 * the same film differently.
 		 */
-		suspend fun resolve(item: MediaItem, audioOnly: Boolean): MediaItem? {
+		suspend fun resolve(
+			item: MediaItem,
+			audioOnly: Boolean,
+			withCaptions: Boolean,
+		): MediaItem? {
 			val ref = item.itemRef() ?: return null
 			val video = isVideo(item, ref)
 			return when {
-				video && !audioOnly -> resolveVideo(item, ref)
+				video && !audioOnly -> resolveVideo(item, ref, withCaptions)
 				// Everything downstream reads the item rather than the setting:
 				// with the video flag cleared, the byte cache takes it, no
 				// surface is drawn and it can be downloaded - all of which is
@@ -665,8 +752,17 @@ class PlaybackService : MediaLibraryService() {
 		 * costs one `getVideoInfo`, in which the server runs `ffprobe`, so it
 		 * is allowed to fail quietly: a film with no captions is a film, a film
 		 * that would not load is not.
+		 *
+		 * Without [withCaptions] the item is marked pending instead, and
+		 * [captionFiller] completes it before it plays. Queueing a folder of
+		 * films would otherwise probe every one of them, one after another,
+		 * before the first could start.
 		 */
-		private suspend fun resolveVideo(item: MediaItem, ref: ItemRef): MediaItem? {
+		private suspend fun resolveVideo(
+			item: MediaItem,
+			ref: ItemRef,
+			withCaptions: Boolean,
+		): MediaItem? {
 			// Whether the declaration below will actually be honoured, which is
 			// also what decides where the subtitle tracks come from. Both halves
 			// are needed: without nativeSeek the server can only re-encode, and
@@ -689,12 +785,13 @@ class PlaybackService : MediaLibraryService() {
 			// the mirror just gave: GainDriveMediaSourceFactory reads the same
 			// flag to keep this off the byte cache, and the UI reads it to
 			// offer a picture.
-			return item.markedAsVideo().buildUpon()
+			val subtitles =
+				if (withCaptions) captions.configurationsFor(ref, sidecarOnly = demuxedHere)
+				else emptyList()
+			return item.markedAsVideo().withCaptionsPending(!withCaptions).buildUpon()
 				.setUri(target.url)
 				.setMimeType(target.mimeType)
-				.setSubtitleConfigurations(
-					captions.configurationsFor(ref, sidecarOnly = demuxedHere)
-				)
+				.setSubtitleConfigurations(subtitles)
 				.build()
 		}
 

@@ -99,6 +99,13 @@ private const val KEY_QUALITY = "org.gaindrive.quality"
 private const val KEY_STARRED = "org.gaindrive.starred"
 
 /**
+ * Set on a video queued without its subtitle tracks. Each lookup costs an
+ * `ffprobe` on the server, so only the film about to play pays for it at queue
+ * time; the service fills the rest in one at a time as they come up.
+ */
+private const val KEY_CAPTIONS_PENDING = "org.gaindrive.captionsPending"
+
+/**
  * The size the server is asked to scale notification artwork to, and the size
  * `CoilBitmapLoader` then asks Coil for. Here rather than in `PlayerConnection`
  * because the two have to agree: a different number on the loading side would
@@ -293,6 +300,20 @@ fun MediaItem.markedAsVideo(): MediaItem {
 		// The other half of the pair, for an item re-resolved because
 		// `videoAudioOnly` was turned off while it was queued.
 		putBoolean(KEY_AUDIO_ONLY_VIDEO, false)
+	}
+	return buildUpon()
+		.setMediaMetadata(mediaMetadata.buildUpon().setExtras(extras).build())
+		.build()
+}
+
+/** Whether this video still lacks its subtitle tracks; see [KEY_CAPTIONS_PENDING]. */
+fun MediaItem.captionsPending(): Boolean =
+	mediaMetadata.extras?.getBoolean(KEY_CAPTIONS_PENDING) == true
+
+/** Copied rather than mutated, for the reason [markedAsVideo] gives. */
+fun MediaItem.withCaptionsPending(pending: Boolean): MediaItem {
+	val extras = Bundle(mediaMetadata.extras ?: Bundle()).apply {
+		putBoolean(KEY_CAPTIONS_PENDING, pending)
 	}
 	return buildUpon()
 		.setMediaMetadata(mediaMetadata.buildUpon().setExtras(extras).build())
