@@ -23,7 +23,10 @@ import org.gaindrive.android.data.model.Playlist
  * hiding rows because one request timed out would be a strange thing to do.
  */
 data class StoredFilter(
-	/** Encoded refs of songs held in full - the audio cache's own keys. */
+	/**
+	 * Encoded refs of songs held in full - the audio cache's own keys - plus
+	 * films with a stored chapter, which is enough to list them.
+	 */
 	val songs: Set<String>,
 	val albums: Set<String>,
 	val artists: Set<String>,

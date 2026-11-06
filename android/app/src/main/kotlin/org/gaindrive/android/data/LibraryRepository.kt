@@ -21,6 +21,8 @@ import org.gaindrive.android.data.browse.RootRequest
 import org.gaindrive.android.data.browse.listingRequests
 import org.gaindrive.android.data.browse.uploadsRequest
 import org.gaindrive.android.data.cache.AudioCache
+import org.gaindrive.android.data.cache.DownloadQueue
+import org.gaindrive.android.data.cache.FilmRange
 import org.gaindrive.android.data.local.LocalLibrary
 import org.gaindrive.android.data.local.StoredFilter
 import org.gaindrive.android.data.model.Album
@@ -66,6 +68,7 @@ class LibraryRepository @Inject constructor(
 	private val local: LocalLibrary,
 	private val connectivity: Connectivity,
 	private val audioCache: AudioCache,
+	private val downloads: DownloadQueue,
 	private val musicRoots: MusicRoots,
 	private val accounts: Accounts,
 	private val libraryRevision: LibraryRevision,
@@ -89,7 +92,19 @@ class LibraryRepository @Inject constructor(
 	 * genuinely offline app trims itself to what it can play.
 	 */
 	private suspend fun storedOnly(): StoredFilter? =
-		if (offline) local.storedFilter(audioCache.cachedKeys.value) else null
+		if (offline) local.storedFilter(audioCache.cachedKeys.value + filmsWithStoredRanges())
+		else null
+
+	/**
+	 * Films with at least one stored chapter, as bare refs. A chapter download
+	 * is filed under its `FilmRange` ref, which no listing knows, so without
+	 * this the film's album, artist and playlists would all vanish offline
+	 * while the chapter itself is sitting on the device.
+	 */
+	private fun filmsWithStoredRanges(): Set<String> =
+		downloads.states.value.completed.mapNotNullTo(mutableSetOf()) { key ->
+			ItemRef.decode(key)?.let(FilmRange::of)?.film?.encode()
+		}
 
 	/**
 	 * One server's contribution to the merged list: its category buckets and
