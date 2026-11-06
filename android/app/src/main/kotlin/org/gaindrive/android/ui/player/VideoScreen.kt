@@ -21,13 +21,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Toc
@@ -240,6 +243,22 @@ fun VideoScreen(
 		// back and starting to cast all have to give the bars back. A screen
 		// that swallowed them would leave no way out of itself.
 		onDispose { bars?.show(WindowInsetsCompat.Type.systemBars()) }
+	}
+
+	// The picture now runs under the bars where they show, which is over
+	// black: their icons go light for as long as this screen is up, so the
+	// clock stays readable in the light theme.
+	DisposableEffect(view) {
+		val bars = view.activityWindow()?.let { WindowCompat.getInsetsController(it, view) }
+			?: return@DisposableEffect onDispose {}
+		val status = bars.isAppearanceLightStatusBars
+		val navigation = bars.isAppearanceLightNavigationBars
+		bars.isAppearanceLightStatusBars = false
+		bars.isAppearanceLightNavigationBars = false
+		onDispose {
+			bars.isAppearanceLightStatusBars = status
+			bars.isAppearanceLightNavigationBars = navigation
+		}
 	}
 
 	// Back is the same gesture as the button, and both mean "leave the picture",
@@ -456,6 +475,7 @@ fun VideoScreen(
 				onClose = { chaptersOpen = false },
 				modifier = Modifier
 					.fillMaxHeight()
+					.windowInsetsPadding(WindowInsets.safeDrawing)
 					.widthIn(max = CHAPTER_PANEL_MAX_WIDTH),
 			)
 		}
@@ -600,7 +620,11 @@ private fun Controls(
 		modifier = Modifier
 			.fillMaxSize()
 			// Scrim so white controls stay readable over a bright frame.
-			.background(Color.Black.copy(alpha = CONTROLS_SCRIM)),
+			.background(Color.Black.copy(alpha = CONTROLS_SCRIM))
+			// After the scrim, which covers the whole picture: the picture
+			// gets the whole window, camera cutout included, and only the
+			// controls keep clear of it and of any bars showing.
+			.windowInsetsPadding(WindowInsets.safeDrawing),
 	) {
 		Row(
 			modifier = Modifier

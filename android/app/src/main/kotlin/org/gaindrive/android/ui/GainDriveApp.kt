@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -531,61 +532,67 @@ fun GainDriveApp(
 						fadeOut(tween(TRANSITION_MS))
 					}
 				},
-				// padding() positions the content; consumeWindowInsets() tells the
-				// screens' own Scaffolds and TopAppBars that these insets are
-				// already accounted for. Without the second call each screen adds
-				// the status bar and navigation bar a second time - a doubled gap
-				// under the status bar, and a dead strip above the mini-player.
-				modifier = Modifier
-					.padding(insets)
-					.consumeWindowInsets(insets),
+				// No padding here: each destination but the film takes the
+				// shell's insets through Padded, see there.
 			) {
 				composable<Route.Artists> {
-					LibraryTab(
-						stack = stacks.getValue(TopLevel.ARTISTS),
-						// The same panel a shared URL opens, with nothing in its URL
-						// field. A form wants the whole window, so it is pushed onto
-						// the shell's own host rather than into a pane.
-						onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
-						onOpenUploads = {
-							uploadsStack.focusRoot()
-							navController.navigate(Route.Uploads)
-						},
-					)
+					Padded(insets) {
+						LibraryTab(
+							stack = stacks.getValue(TopLevel.ARTISTS),
+							// The same panel a shared URL opens, with nothing in its URL
+							// field. A form wants the whole window, so it is pushed onto
+							// the shell's own host rather than into a pane.
+							onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
+							onOpenUploads = {
+								uploadsStack.focusRoot()
+								navController.navigate(Route.Uploads)
+							},
+						)
+					}
 				}
 
 				// The uploads listing: the Library tab's own pane strip a second
 				// time, rooted at the personal slice. The bottom bar and player
 				// stay - it is a listing, not a form.
 				composable<Route.Uploads> {
-					LibraryTab(
-						stack = uploadsStack,
-						onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
-						onBack = { navController.popBackStack() },
-					)
+					Padded(insets) {
+						LibraryTab(
+							stack = uploadsStack,
+							onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
+							onBack = { navController.popBackStack() },
+						)
+					}
 				}
 
 				composable<Route.Playlists> {
-					PlaylistsTab(stacks.getValue(TopLevel.PLAYLISTS))
+					Padded(insets) {
+						PlaylistsTab(stacks.getValue(TopLevel.PLAYLISTS))
+					}
 				}
 
 				composable<Route.Recents> {
-					RecentsTab(stacks.getValue(TopLevel.RECENTS))
+					Padded(insets) {
+						RecentsTab(stacks.getValue(TopLevel.RECENTS))
+					}
 				}
 
 				composable<Route.Search> {
-					SearchTab(stacks.getValue(TopLevel.SEARCH))
+					Padded(insets) {
+						SearchTab(stacks.getValue(TopLevel.SEARCH))
+					}
 				}
 
 				composable<Route.Settings> {
-					SettingsTab(
-						stack = stacks.getValue(TopLevel.SETTINGS),
-						// A form with a validating action, so it takes the window
-						// rather than a pane - see SettingsTab.
-						onEditServer = { id: ServerId? ->
-							navController.navigate(Route.ServerEdit(id?.value))
-						},
-					)
+					Padded(insets) {
+						SettingsTab(
+							stack = stacks.getValue(TopLevel.SETTINGS),
+							// A form with a validating action, so it takes the window
+							// rather than a pane - see SettingsTab.
+							onEditServer = { id: ServerId? ->
+								navController.navigate(Route.ServerEdit(id?.value))
+							},
+						)
+					}
 				}
 
 				// The one album that is not a pane of some tab. It is reached only
@@ -595,21 +602,27 @@ fun GainDriveApp(
 				// to exactly that. Leaving this path on the shell's own host is
 				// what keeps that true, and unchanged.
 				composable<Route.Album> {
-					AlbumDetailScreen(
-						onBack = { navController.popBackStack() },
-						onPromoted = { navController.popBackStack() },
-					)
+					Padded(insets) {
+						AlbumDetailScreen(
+							onBack = { navController.popBackStack() },
+							onPromoted = { navController.popBackStack() },
+						)
+					}
 				}
 
 				composable<Route.ServerEdit> {
-					ServerEditScreen(onDone = { navController.popBackStack() })
+					Padded(insets) {
+						ServerEditScreen(onDone = { navController.popBackStack() })
+					}
 				}
 
 				// Always navigated *onto* the start destination, never the start
 				// destination itself, so there is something to pop back to even when
 				// a share is what launched the app.
 				composable<Route.FetchUrl> {
-					FetchUrlScreen(onDone = { navController.popBackStack() })
+					Padded(insets) {
+						FetchUrlScreen(onDone = { navController.popBackStack() })
+					}
 				}
 
 				composable<Route.Video> {
@@ -756,5 +769,26 @@ private fun NavHostController.switchTo(route: Route) {
 		popUpTo(graph.findStartDestination().id) { saveState = true }
 		launchSingleTop = true
 		restoreState = true
+	}
+}
+
+/**
+ * The shell's insets, for one destination.
+ *
+ * Applied per destination rather than to the NavHost so the film can have the
+ * whole window, camera cutout included, and keep its controls clear of it
+ * itself. Not switched on the current route either: the screen fading out
+ * while the film fades in would jump by the insets mid-transition.
+ *
+ * padding() positions the content; consumeWindowInsets() tells the screens'
+ * own Scaffolds and TopAppBars that these insets are already accounted for.
+ * Without the second call each screen adds the status bar and navigation bar a
+ * second time - a doubled gap under the status bar, and a dead strip above the
+ * mini-player.
+ */
+@Composable
+private fun Padded(insets: PaddingValues, content: @Composable () -> Unit) {
+	Box(modifier = Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets)) {
+		content()
 	}
 }
