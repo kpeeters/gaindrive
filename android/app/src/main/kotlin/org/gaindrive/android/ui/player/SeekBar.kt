@@ -28,6 +28,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.playback.PlayerState
 import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.components.formatDuration
@@ -50,6 +51,9 @@ import org.gaindrive.android.ui.tvFocusHighlight
  * 1% step, and center runs [onPlayPause] when given: Play's TV review wants
  * exactly that of a playing screen (TV-PC). [focusRequester] lets a screen
  * land the d-pad here first.
+ *
+ * [window], from [chapterWindow], narrows the bar to one chapter: thumb,
+ * labels and seeks are all relative to it. Null is the whole item.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,6 +64,7 @@ fun SeekBar(
 	textColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 	onPlayPause: (() -> Unit)? = null,
 	focusRequester: FocusRequester? = null,
+	window: LongRange? = null,
 ) {
 	val isTv = LocalIsTv.current
 	var dragging by remember { mutableStateOf(false) }
@@ -70,10 +75,13 @@ fun SeekBar(
 	// silently stops happening.
 	val interactionSource = remember { MutableInteractionSource() }
 	val enabled = state.durationMs > 0
+	val startMs = window?.first ?: 0L
+	val spanMs = window?.let { it.last - it.first } ?: state.durationMs
+	val endMs = startMs + spanMs
 
-	val fraction = if (dragging) dragFraction else progressOf(state)
+	val fraction = if (dragging) dragFraction else progressOf(state, window)
 	val shownPositionMs =
-		if (dragging) (dragFraction * state.durationMs).toLong() else state.positionMs
+		if (dragging) (dragFraction * spanMs).toLong() else state.positionMs - startMs
 
 	Column(modifier = modifier) {
 		Slider(
@@ -90,7 +98,7 @@ fun SeekBar(
 						Key.DirectionLeft, Key.DirectionRight -> {
 							if (down) {
 								val step = if (event.key == Key.DirectionLeft) -SKIP_MS else SKIP_MS
-								onSeek((state.positionMs + step).coerceIn(0L, state.durationMs))
+								onSeek((state.positionMs + step).coerceIn(startMs, endMs))
 							}
 							true
 						}
@@ -110,7 +118,7 @@ fun SeekBar(
 			},
 			onValueChangeFinished = {
 				dragging = false
-				onSeek((dragFraction * state.durationMs).toLong())
+				onSeek(startMs + (dragFraction * spanMs).toLong())
 			},
 			enabled = enabled,
 			interactionSource = interactionSource,
@@ -129,17 +137,34 @@ fun SeekBar(
 			horizontalArrangement = Arrangement.SpaceBetween,
 		) {
 			Text(
-				text = formatDuration((shownPositionMs / 1000).toInt()),
+				text = formatDuration((shownPositionMs.coerceAtLeast(0) / 1000).toInt()),
 				style = MaterialTheme.typography.labelSmall,
 				color = textColor,
 			)
 			Text(
-				text = formatDuration((state.durationMs / 1000).toInt()),
+				text = formatDuration((spanMs / 1000).toInt()),
 				style = MaterialTheme.typography.labelSmall,
 				color = textColor,
 			)
 		}
 	}
+}
+
+/**
+ * The chapter [positionMs] is in, from its start to the next one's or the end
+ * of the item, for [SeekBar]'s `window`. Null with no markers, or before the
+ * duration is known.
+ *
+ * Before the first marker counts as the first chapter, so a film whose first
+ * marker is not at zero still gets a window from its very start.
+ */
+fun chapterWindow(chapters: List<Chapter>, positionMs: Long, durationMs: Long): LongRange? {
+	if (chapters.isEmpty() || durationMs <= 0) return null
+	val starts = chapters.map { it.startMs }.sorted()
+	val i = starts.indexOfLast { it <= positionMs }.coerceAtLeast(0)
+	val start = if (i == 0) 0L else starts[i]
+	val end = starts.getOrNull(i + 1) ?: durationMs
+	return if (end > start) start..end else null
 }
 
 /**

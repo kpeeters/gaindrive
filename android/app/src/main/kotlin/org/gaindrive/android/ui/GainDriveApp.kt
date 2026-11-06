@@ -69,6 +69,8 @@ import org.gaindrive.android.ui.player.EqualizerSheet
 import org.gaindrive.android.ui.player.MiniPlayer
 import org.gaindrive.android.ui.player.NowPlayingSheet
 import org.gaindrive.android.ui.player.PlayerViewModel
+import org.gaindrive.android.ui.player.SeekWindowViewModel
+import org.gaindrive.android.ui.player.chapterWindow
 import org.gaindrive.android.ui.player.TrackInfoDialog
 import org.gaindrive.android.ui.player.VideoScreen
 import org.gaindrive.android.ui.player.WiiMControlsSheet
@@ -170,6 +172,11 @@ fun GainDriveApp(
 
 	val playerViewModel: PlayerViewModel = hiltViewModel()
 	val playerState by playerViewModel.state.collectAsStateWithLifecycle()
+	// Empty unless an audio-only film is playing with the per-chapter
+	// seekbar on, which leaves the window null and the bar whole.
+	val seekChapters by hiltViewModel<SeekWindowViewModel>().chapterList
+		.collectAsStateWithLifecycle()
+	val seekWindow = chapterWindow(seekChapters, playerState.positionMs, playerState.durationMs)
 	var nowPlayingOpen by remember { mutableStateOf(false) }
 	var trackInfoOpen by remember { mutableStateOf(false) }
 
@@ -450,6 +457,7 @@ fun GainDriveApp(
 							// either way, so it persists across navigation.
 							MiniPlayer(
 								state = playerState,
+								seekWindow = seekWindow,
 								// A film's bar leads back to the film. Opening the
 								// audio-shaped sheet instead would make the user find
 								// the way back to the picture from inside it.
@@ -618,6 +626,7 @@ fun GainDriveApp(
 	if (nowPlayingOpen && playerState.isActive) {
 		NowPlayingSheet(
 			state = playerState,
+			seekWindow = seekWindow,
 			casting = castDevice != null,
 			onDismiss = { nowPlayingOpen = false },
 			onOpenAlbum = { ref, title ->

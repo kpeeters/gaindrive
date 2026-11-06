@@ -67,6 +67,7 @@ fun MiniPlayer(
 	casting: Boolean,
 	onCast: (() -> Unit)?,
 	onInfo: () -> Unit,
+	seekWindow: LongRange? = null,
 ) {
 	val current = state.current ?: return
 
@@ -85,7 +86,7 @@ fun MiniPlayer(
 					LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
 				} else {
 					LinearProgressIndicator(
-						progress = { progressOf(state) },
+						progress = { progressOf(state, seekWindow) },
 						modifier = Modifier.fillMaxWidth(),
 					)
 				}
@@ -189,6 +190,7 @@ fun MiniPlayer(
 						// The row already pads its ends; the stock
 						// modifier's own 24dp would double it.
 						modifier = Modifier.weight(1f),
+						window = seekWindow,
 					)
 				}
 			}
@@ -200,6 +202,10 @@ fun MiniPlayer(
 private val WIDE_TITLE_WIDTH = 220.dp
 
 /** Zero rather than NaN before the player knows the duration. */
-internal fun progressOf(state: PlayerState): Float =
-	if (state.durationMs <= 0) 0f
-	else (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
+internal fun progressOf(state: PlayerState, window: LongRange? = null): Float {
+	if (state.durationMs <= 0) return 0f
+	if (window == null) return (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
+	val span = window.last - window.first
+	return if (span <= 0) 0f
+	else ((state.positionMs - window.first).toFloat() / span).coerceIn(0f, 1f)
+}

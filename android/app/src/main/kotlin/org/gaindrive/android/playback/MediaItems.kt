@@ -353,6 +353,8 @@ data class NowPlaying(
 	val quality: AudioQuality? = null,
 	/** Starred when queued; see [KEY_STARRED]. */
 	val starred: Boolean = false,
+	/** A film played for its soundtrack; see [isAudioOnlyVideo]. */
+	val audioOnlyVideo: Boolean = false,
 )
 
 fun MediaItem.toNowPlaying(): NowPlaying = NowPlaying(
@@ -367,4 +369,5 @@ fun MediaItem.toNowPlaying(): NowPlaying = NowPlaying(
 	aspectRatio = aspectRatio(),
 	quality = quality(),
 	starred = mediaMetadata.extras?.getBoolean(KEY_STARRED) == true,
+	audioOnlyVideo = isAudioOnlyVideo(),
 )

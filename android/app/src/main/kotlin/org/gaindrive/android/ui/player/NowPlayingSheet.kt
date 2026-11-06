@@ -82,6 +82,7 @@ fun NowPlayingSheet(
 	onRemoveFromQueue: (Int) -> Unit,
 	onMoveInQueue: (from: Int, to: Int) -> Unit,
 	onWatch: () -> Unit,
+	seekWindow: LongRange? = null,
 ) {
 	val current = state.current ?: return
 	val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -226,6 +227,7 @@ fun NowPlayingSheet(
 					onSeek,
 					onPlayPause = onTogglePlay,
 					focusRequester = if (isTv) seekFocus else null,
+					window = seekWindow,
 				)
 			}
 

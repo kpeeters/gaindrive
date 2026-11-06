@@ -205,6 +205,18 @@ class SettingsStore @Inject constructor(
 	}
 
 	/**
+	 * Whether the seekbar of a film played as audio only spans the chapter
+	 * being played rather than the whole film. Off by default: a bar that
+	 * resets at every marker surprises anyone who did not ask for it.
+	 */
+	val seekbarPerChapter: Flow<Boolean> =
+		dataStore.data.map { it[SEEKBAR_PER_CHAPTER] ?: false }
+
+	suspend fun setSeekbarPerChapter(enabled: Boolean) {
+		dataStore.edit { it[SEEKBAR_PER_CHAPTER] = enabled }
+	}
+
+	/**
 	 * What the URL-fetch panel was last set to.
 	 *
 	 * All four are sticky between shares, which is what the web client does and
@@ -272,6 +284,7 @@ class SettingsStore @Inject constructor(
 		private val TRANSCODE_FORMAT = stringPreferencesKey("transcode_format")
 		private val CAST_ORIGINAL = booleanPreferencesKey("cast_original")
 		private val VIDEO_AUDIO_ONLY = booleanPreferencesKey("video_audio_only")
+		private val SEEKBAR_PER_CHAPTER = booleanPreferencesKey("seekbar_per_chapter")
 		private val FETCH_SERVER = stringPreferencesKey("fetch_server")
 		private val FETCH_AUDIO = booleanPreferencesKey("fetch_audio")
 		private val FETCH_ARTIST = stringPreferencesKey("fetch_artist")

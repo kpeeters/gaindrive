@@ -32,6 +32,7 @@ data class SettingsUiState(
 	val mergeDuplicateAlbums: Boolean = false,
 	val castOriginal: Boolean = false,
 	val videoAudioOnly: Boolean = false,
+	val seekbarPerChapter: Boolean = false,
 	val storage: StorageUiState = StorageUiState(),
 	val pins: List<PinnedItem> = emptyList(),
 	/** Distinguishes "no servers yet" from "not loaded yet" for routing. */
@@ -65,6 +66,7 @@ private data class Toggles(
 	val mergeDuplicateAlbums: Boolean,
 	val castOriginal: Boolean,
 	val videoAudioOnly: Boolean,
+	val seekbarPerChapter: Boolean,
 )
 
 /** The stored half of [StorageUiState]; the measured half comes from the cache. */
@@ -153,6 +155,7 @@ class SettingsViewModel @Inject constructor(
 		settings.mergeDuplicateAlbums,
 		settings.castOriginal,
 		settings.videoAudioOnly,
+		settings.seekbarPerChapter,
 		::Toggles,
 	)
 
@@ -168,6 +171,7 @@ class SettingsViewModel @Inject constructor(
 				mergeDuplicateAlbums = toggles.mergeDuplicateAlbums,
 				castOriginal = toggles.castOriginal,
 				videoAudioOnly = toggles.videoAudioOnly,
+				seekbarPerChapter = toggles.seekbarPerChapter,
 				storage = storage,
 				pins = pins,
 				loaded = true,
@@ -207,6 +211,9 @@ class SettingsViewModel @Inject constructor(
 	 * Playback follows separately - `PlaybackService` watches the same flow and
 	 * re-resolves what is already queued.
 	 */
+	fun setSeekbarPerChapter(enabled: Boolean) =
+		viewModelScope.launch { settings.setSeekbarPerChapter(enabled) }
+
 	fun setVideoAudioOnly(enabled: Boolean) = viewModelScope.launch {
 		settings.setVideoAudioOnly(enabled)
 		pins.refreshDownloads()

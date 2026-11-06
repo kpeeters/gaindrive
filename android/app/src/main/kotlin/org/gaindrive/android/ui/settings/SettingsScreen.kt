@@ -82,6 +82,15 @@ fun SettingsScreen(
 				onCheckedChange = viewModel::setVideoAudioOnly,
 			)
 		}
+		item {
+			SwitchRow(
+				title = "Seekbar is local to chapters",
+				subtitle = "For a video played as audio only, the seekbar spans " +
+					"the chapter being played rather than the whole film.",
+				checked = state.seekbarPerChapter,
+				onCheckedChange = viewModel::setSeekbarPerChapter,
+			)
+		}
 
 		// Inline rather than a category of its own. A screen holding one line
 		// of version text would be a tap that buys nothing.
