@@ -950,9 +950,16 @@ std::vector<std::string> Streamer::ffmpeg_argv(const SongInfo& song,
 	// back in the output.  A cache file can be seeked; a pipe cannot, and
 	// ffmpeg aborts rather than produce a headerless file.  A fragmented
 	// layout is the only form that streams.
+	//
+	// frag_keyframe alone is not enough: it cuts only at a *video* keyframe,
+	// and this output has no video, so the muxer would hold every sample
+	// until the encode ends and the pipe would carry the header and then
+	// nothing.  A one-second bound makes it cut regardless.
 	if (out == "pipe:1" && (target.muxer == "ipod" || target.muxer == "mp4")) {
 		args.push_back("-movflags");
 		args.push_back("frag_keyframe+empty_moov");
+		args.push_back("-frag_duration");
+		args.push_back("1000000");
 		}
 	args.push_back(out);
 	return args;
