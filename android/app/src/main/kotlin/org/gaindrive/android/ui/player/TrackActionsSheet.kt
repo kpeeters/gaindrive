@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.cache.FilmRange
 import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.data.model.StarKind
@@ -52,6 +53,7 @@ import org.gaindrive.android.ui.LocalStars
 import org.gaindrive.android.ui.LocalWatched
 import org.gaindrive.android.ui.PinViewModel
 import org.gaindrive.android.ui.components.DownloadIndicator
+import org.gaindrive.android.ui.components.chapterDownloadLabel
 import org.gaindrive.android.ui.components.downloadActionLabel
 
 /**
@@ -65,6 +67,11 @@ fun TrackActionsSheet(
 	onDismiss: () -> Unit,
 	onPlayNext: () -> Unit,
 	onAddToQueue: () -> Unit,
+	/**
+	 * The stretch of [song] a chapter row was long-pressed on, which adds a
+	 * download of just that stretch beside the film's own.
+	 */
+	chapter: FilmRange? = null,
 	playlists: AddToPlaylistViewModel = hiltViewModel(),
 	pins: PinViewModel = hiltViewModel(),
 ) {
@@ -186,6 +193,19 @@ fun TrackActionsSheet(
 						label = downloadActionLabel(status),
 					) {
 						pins.toggle(song.ref, PinKind.SONG)
+						onDismiss()
+					}
+				}
+				// Under the same condition as the film's: what a chapter stores
+				// is its soundtrack, and only an audio-only film is played from
+				// that rather than fetched as a film.
+				if (videoDownloadable) chapter?.let { range ->
+					val status = pinStatuses[range.ref.encode()]
+					SheetAction(
+						leading = { DownloadIndicator(status) },
+						label = chapterDownloadLabel(status),
+					) {
+						pins.toggle(range.ref, PinKind.RANGE)
 						onDismiss()
 					}
 				}

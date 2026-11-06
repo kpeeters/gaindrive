@@ -320,6 +320,36 @@
 <p>Send a report every few seconds while a <code>posToken</code> stream is open, paused included, because a paused report is what holds the stream at its lead instead of letting the wall clock drift it ahead. A report older than 30 seconds stops steering the stream, which then degrades to unpaced delivery; there is no need to unregister a finished stream.</p></div>
 </div>
 <div class="api-ep">
+<h3 id="ep-setWatched">setWatched</h3>
+<p class="api-meta"><code>GET /rest/setWatched.view</code></p>
+<p>Marks videos and long audio as finished for the authenticated user, or clears the mark.</p>
+<h4>Parameters</h4>
+<table class="doc-table">
+<thead><tr><th>Parameter</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>id</code></td><td>string</td><td>A song id. Unknown and unreadable ids are skipped. may repeat.</td></tr>
+<tr><td><code>watched</code></td><td>bool</td><td><code>true</code> to mark, <code>false</code> to clear.</td></tr>
+</tbody>
+</table>
+<p><code>reportPlayback</code> sets the same mark by itself once the position passes 95% of the duration; this is for an episode seen elsewhere, or one skipped on purpose. Marking also deletes the resume bookmark. Only items that get a resume point are marked - videos, and audio of 20 minutes or more - and any other id is skipped, so a client can pass every song of an album.</p>
+</div>
+<div class="api-ep">
+<h3 id="ep-getalbum-getmusicdirectory-getplaylist">getAlbum / getMusicDirectory / getPlaylist</h3>
+<p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
+<p>Carried by <code>getAlbum</code>, <code>getMusicDirectory</code>, <code>getPlaylist</code>. Only the gaindrive additions are listed here.</p>
+<p>Two per-user fields on a song entry, saying how far an episode has been watched.</p>
+<h4>Response</h4>
+<table class="doc-table">
+<thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>watched</code> <span class="api-on">on Child</span></td><td>string</td><td>When this user finished the item; absent when not finished.</td></tr>
+<tr><td><code>bookmarkPosition</code> <span class="api-on">on Child</span></td><td>int</td><td>The resume point in milliseconds; absent when there is none.</td></tr>
+</tbody>
+</table>
+<div class="api-note"><p class="api-note-h"><code>bookmarkPosition</code></p>
+<p>The field original Subsonic defines on a song entry. It is filled from the same bookmark <code>getBookmarks</code> lists, so a client can draw progress in a listing, or start an item at its resume point, without fetching every bookmark first.</p></div>
+</div>
+<div class="api-ep">
 <h3 id="ep-stream">stream</h3>
 <p class="api-meta"><span class="api-badge api-badge-std">standard endpoint</span></p>
 <p>Carried by <code>stream</code>. Only the gaindrive additions are listed here.</p>
@@ -1120,6 +1150,7 @@
 <ul class="doc-list"><li>Where a fetch produced several directories at a level - a playlist, or a handler that splits by uploader - they are <b>merged</b> into the one name given, and files that then collide are suffixed rather than overwritten.</li><li>Giving only <code>artist</code> keeps the handler&#x27;s album names; giving only <code>album</code> applies that name inside <em>every</em> artist directory.</li><li>A third directory level, if the handler wrote one, is left alone. That is a disc directory to the scanner, and renaming it would fuse two discs.</li></ul>
 <p>Note also that the duplicate guard keys on the URL alone, so the same URL cannot be fetched twice under two different names while one is in flight.</p>
 <p>Where the handler reports chapter markers of its own -- the built-in one asks for them -- they are written out as a sidecar beside the media, so a fetched concert or DJ set arrives with its markers already in place. An existing sidecar is never overwritten, and a fetch that reports no markers writes nothing rather than the empty file that would assert there are none.</p>
+<p>A playlist URL becomes one album: the built-in handler files every entry under the playlist&#x27;s title and owner, numbered in playlist order, and fetches at most <code>url_fetch_playlist_max</code> entries (config, default 100). Entries the site refuses (deleted, private) are skipped rather than failing the job; see <code>itemsOk</code> in <code>getFetchJobs</code>. A watch URL that also names a playlist fetches only the video it shows.</p>
 <p class="api-see">See also <a href="#ep-getUrlHandlers"><code>getUrlHandlers</code></a>, <a href="#ep-getFetchJobs"><code>getFetchJobs</code></a>, <a href="#ep-cancelFetch"><code>cancelFetch</code></a>.</p>
 </div>
 <div class="api-ep">
@@ -1133,10 +1164,12 @@
 <tbody>
 <tr><td><code>fetchJobs.fetchJob</code></td><td>object[]</td><td>Everything <code>fetchUrl</code> returns, plus the fields below.</td></tr>
 <tr><td><code>url</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>The URL as submitted.</td></tr>
-<tr><td><code>percent</code> <span class="api-on">on fetchJob</span></td><td>int</td><td>Progress, parsed from the tool&#x27;s output. A line carrying no percentage keeps the previous value rather than resetting to zero.</td></tr>
+<tr><td><code>percent</code> <span class="api-on">on fetchJob</span></td><td>int</td><td>Progress, parsed from the tool&#x27;s output. A line carrying no percentage keeps the previous value rather than resetting to zero. For a playlist it covers the whole list, not the current entry.</td></tr>
 <tr><td><code>detail</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>The tool&#x27;s last output line.</td></tr>
-<tr><td><code>error</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>Why the job failed, when its state is <code>error</code>.</td></tr>
+<tr><td><code>error</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>Why the job failed, when its state is <code>error</code>; for a playlist that is <code>done</code> but missing entries, how many arrived.</td></tr>
 <tr><td><code>files</code> <span class="api-on">on fetchJob</span></td><td>int</td><td>How many media files the fetch produced.</td></tr>
+<tr><td><code>itemsOk</code> <span class="api-on">on fetchJob</span></td><td>int</td><td>For a playlist, how many entries arrived; 0 for a single video.</td></tr>
+<tr><td><code>itemsTotal</code> <span class="api-on">on fetchJob</span></td><td>int</td><td>For a playlist, how many entries the tool announced; 0 for a single video.</td></tr>
 <tr><td><code>started</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>When the job began.</td></tr>
 <tr><td><code>finished</code> <span class="api-on">on fetchJob</span></td><td>string</td><td>When it ended, if it has.</td></tr>
 </tbody>

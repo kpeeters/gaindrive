@@ -1,5 +1,6 @@
 package org.gaindrive.android.ui.browse
 
+import org.gaindrive.android.data.cache.FilmRange
 import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
@@ -48,7 +49,17 @@ sealed interface AlbumListRow {
 		val song: Song,
 		val queueIndex: Int,
 		val chapter: Chapter,
+		/**
+		 * Where the marker ends: the next one's start, or the end of the
+		 * recording. To the millisecond, unlike [Chapter.duration], because
+		 * a stored chapter is found by its bounds (`FilmRange`).
+		 */
+		val endMs: Long,
 	) : AlbumListRow {
+
+		/** What a download of this chapter stores and is pinned under. */
+		val range: FilmRange get() = FilmRange(song.ref, chapter.startMs, endMs)
+
 		override val key: String get() = "c/${song.ref.encode()}/${chapter.index}"
 	}
 }
@@ -110,13 +121,14 @@ fun albumListRows(
 		}
 
 		if (multiChaptered) pending.add(song.title)
-		markers.forEach { chapter ->
+		markers.forEachIndexed { i, chapter ->
 			rows.add(
 				AlbumListRow.Marker(
 					headings = pending,
 					song = song,
 					queueIndex = index,
 					chapter = chapter,
+					endMs = markers.getOrNull(i + 1)?.startMs ?: (song.duration * 1000L),
 				)
 			)
 			pending = mutableListOf()

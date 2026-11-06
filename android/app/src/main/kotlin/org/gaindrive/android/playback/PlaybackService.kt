@@ -102,6 +102,9 @@ class PlaybackService : MediaLibraryService() {
 	lateinit var watchdog: PlaybackWatchdog
 
 	@Inject
+	lateinit var heldRanges: HeldRangeGuard
+
+	@Inject
 	lateinit var equalizer: EqualizerController
 
 	@Inject
@@ -166,6 +169,9 @@ class PlaybackService : MediaLibraryService() {
 		// Only the local player can stall on a stream - the Chromecast fetches
 		// its own, and nothing here would see it.
 		watchdog.registerPlayer(player)
+		// Local-only too: offline, a film's stored chapters are on this
+		// device, and a receiver could not play them anyway.
+		heldRanges.registerPlayer(player)
 		// Likewise local-only: the effect lives on this player's audio
 		// session, and a receiver's equalizer is the receiver's business.
 		equalizer.registerPlayer(player)
@@ -632,6 +638,7 @@ class PlaybackService : MediaLibraryService() {
 		castPlayer = null
 		videoSurface.registerPlayer(null)
 		watchdog.registerPlayer(null)
+		heldRanges.registerPlayer(null)
 		equalizer.registerPlayer(null)
 		localPlayer?.release()
 		localPlayer = null
@@ -743,14 +750,15 @@ class PlaybackService : MediaLibraryService() {
 			ref: ItemRef,
 			audioOnlyVideo: Boolean,
 		): MediaItem? {
-			// A soundtrack not held in full plays as HLS, so it starts without
-			// waiting for the server to extract all of it.
+			// A film's soundtrack always plays as HLS, so it starts without
+			// waiting for the server to extract all of it, and a stored
+			// chapter is found segment by segment in the cache.
 			if (audioOnlyVideo) streamUrls.forSoundtrackHls(ref)?.let { hls ->
 				return item.markedAsAudioOnlyVideo().withQuality(hls.quality).buildUpon()
 					.setUri(hls.url)
-					// Cleared rather than left: an item re-resolved from the
-					// cached path still carries that key, and these segments
-					// do not go through the cache.
+					// Cleared rather than left: every playlist and segment has
+					// a key of its own (HlsKeys), and one key set on the item
+					// would file them all under the same name.
 					.setCustomCacheKey(null)
 					.setMimeType(hls.mimeType)
 					.setSubtitleConfigurations(emptyList())

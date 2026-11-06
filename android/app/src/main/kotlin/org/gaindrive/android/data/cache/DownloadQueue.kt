@@ -171,6 +171,30 @@ class DownloadQueue @Inject constructor(
 	}
 
 	/**
+	 * Stores part of a film's soundtrack HLS ([target] is its playlist): the
+	 * segments overlapping [startMs] to [endMs], see [RangeHlsDownloader].
+	 *
+	 * [id] is a bare film ref for a whole film and a [FilmRange] ref for a
+	 * chapter, which is what the pin covers either way, so `DownloadStates`
+	 * reports it like any song. No custom cache key: each resource behind the
+	 * playlist has its own ([HlsKeys]), and one key on the request would file
+	 * them all under the same name.
+	 */
+	fun addRange(id: String, target: StreamTarget, startMs: Long, endMs: Long) {
+		val request = DownloadRequest.Builder(id, Uri.parse(target.url))
+			.setMimeType(target.mimeType)
+			.setData(RangeHlsDownloader.encodeRange(startMs, endMs))
+			.build()
+		_states.update { it.copy(failed = it.failed - id) }
+		DownloadService.sendAddDownload(
+			context,
+			MediaDownloadService::class.java,
+			request,
+			/* foreground = */ false,
+		)
+	}
+
+	/**
 	 * Cancels the download and deletes its bytes.
 	 *
 	 * Media3 removes cached content along with the download and offers no way

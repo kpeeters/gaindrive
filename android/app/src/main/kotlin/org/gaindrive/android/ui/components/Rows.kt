@@ -545,10 +545,15 @@ fun SongRow(
  * the album's tracks and not as an annotation on one.
  *
  * What it deliberately lacks is everything that addresses a song id. There is
- * no star, no download mark and no video mark, because a chapter has no id of
- * its own to star, download or play on its own. Its long-press reaches the
- * recording's actions instead, which is the only handle on the file left once
- * its own row has been replaced.
+ * no star and no video mark, because a chapter has no id of its own to star or
+ * play on its own. Its long-press reaches the recording's actions instead,
+ * which is the only handle on the file left once its own row has been
+ * replaced.
+ *
+ * The one exception is storage. A film's soundtrack can be stored a stretch
+ * at a time, so [stored] names this chapter's stretch (a `FilmRange` ref) and
+ * gets the same download mark a track does. [playable] is false offline for a
+ * chapter that is not here, which dims it the way [TrackRow] dims a track.
  *
  * Dimmed until it is the marker being played, so the list reads as positions
  * inside one recording rather than as tracks in their own right.
@@ -562,6 +567,8 @@ fun ChapterRow(
 	playing: Boolean,
 	onClick: () -> Unit,
 	onLongClick: (() -> Unit)? = null,
+	stored: ItemRef? = null,
+	playable: Boolean = true,
 ) {
 	// A chapter's long-press reaches the recording's actions, which a remote
 	// needs a button for like any other row.
@@ -570,7 +577,9 @@ fun ChapterRow(
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
+			.alpha(if (playable) 1f else UNAVAILABLE_ALPHA)
 			.combinedClickable(
+				enabled = playable,
 				onClick = onClick,
 				onLongClick = if (tvActions) null else onLongClick,
 			)
@@ -600,6 +609,7 @@ fun ChapterRow(
 			},
 			modifier = Modifier.weight(1f),
 		)
+		stored?.let { TrackDownloadMark(it) }
 		Text(
 			text = formatDuration(duration),
 			style = MaterialTheme.typography.bodySmall,

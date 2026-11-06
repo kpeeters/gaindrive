@@ -4,8 +4,13 @@ import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Song
 
-/** What a pin was placed on. Only [PinKind.SONG] names a cache key directly. */
-enum class PinKind { SONG, ALBUM, PLAYLIST }
+/**
+ * What a pin was placed on. Only [PinKind.SONG] names a cache key directly.
+ *
+ * [RANGE] is a stretch of a film's soundtrack, in practice one chapter; its
+ * ref is a [FilmRange] ref, see there.
+ */
+enum class PinKind { SONG, ALBUM, PLAYLIST, RANGE }
 
 data class Pin(val ref: ItemRef, val kind: PinKind)
 
@@ -49,7 +54,7 @@ fun expandPins(
 ): PinCoverage = PinCoverage(
 	pins.associate { pin ->
 		val songs = when (pin.kind) {
-			PinKind.SONG -> listOf(pin.ref)
+			PinKind.SONG, PinKind.RANGE -> listOf(pin.ref)
 			PinKind.ALBUM -> albumSongs[pin.ref].orEmpty()
 			PinKind.PLAYLIST -> playlistSongs[pin.ref].orEmpty()
 		}
@@ -75,6 +80,8 @@ fun expandPins(
  */
 fun artRefsOf(pin: Pin, album: Album?, songs: List<Song>): List<ItemRef> = when (pin.kind) {
 	PinKind.SONG -> listOfNotNull(songs.firstOrNull()?.coverArt ?: pin.ref)
+	// The film's cover; the range's own ref is no `getCoverArt` id.
+	PinKind.RANGE -> listOfNotNull(songs.firstOrNull()?.coverArt)
 	PinKind.ALBUM -> listOfNotNull(
 		album?.coverArt ?: pin.ref,
 		album?.artistRef,
@@ -91,8 +98,8 @@ fun artRefsOf(pin: Pin, album: Album?, songs: List<Song>): List<ItemRef> = when 
  * Otherwise it could never complete: a video the server can only re-encode has
  * no `Content-Length`, so nothing downstream can decide the copy is whole, and
  * the byte cache is sized for tracks rather than films. With the setting on,
- * what is fetched is an ordinary audio transcode with a real length, and none
- * of that applies. The individual action follows the same rule (see
+ * what is fetched is the soundtrack's HLS segments, each a whole response with
+ * a length, and none of that applies. The individual action follows the same rule (see
  * `TrackActionsSheet`); this is the collection case, where the video is
  * incidental and the rest of the album should still download.
  *

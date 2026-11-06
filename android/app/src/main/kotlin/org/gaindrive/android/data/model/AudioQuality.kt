@@ -85,6 +85,15 @@ data class AudioQuality(val format: AudioFormat, val bitRate: Int) {
 	fun forVideoAudio(): AudioQuality =
 		if (format == AudioFormat.ORIGINAL) DEFAULT else this
 
+	/**
+	 * The rendition a film's soundtrack is played and stored as over HLS.
+	 * The server encodes those segments to Opus or AAC only, so Opus stays
+	 * Opus and anything else becomes AAC at the same rate.
+	 */
+	fun forSoundtrackHls(): AudioQuality = forVideoAudio().let {
+		if (it.format == AudioFormat.OPUS) it else AudioQuality(AudioFormat.M4A, it.bitRate)
+	}
+
 	companion object {
 		/**
 		 * Opus at 160 kbps: transparent enough for headphones on a phone, and

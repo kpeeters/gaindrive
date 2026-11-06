@@ -145,3 +145,15 @@ fun downloadActionLabel(status: PinStatus?): String = when (status?.phase) {
 	// that, and "Downloading…" as a menu item invites a tap that then cancels.
 	PinPhase.RUNNING -> "Cancel download (${status.stored} of ${status.total})"
 }
+
+/**
+ * [downloadActionLabel] for one chapter. No count while running: a chapter is
+ * one download, so it would only ever say "0 of 1".
+ */
+fun chapterDownloadLabel(status: PinStatus?): String = when (status?.phase) {
+	null -> "Download chapter"
+	PinPhase.COMPLETE -> "Remove chapter download"
+	PinPhase.WAITING -> "Waiting for Wi-Fi - remove"
+	PinPhase.FAILED -> "Chapter download failed - try again"
+	PinPhase.RUNNING -> "Cancel chapter download"
+}

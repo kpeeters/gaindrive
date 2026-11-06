@@ -165,17 +165,24 @@ class PinRepository @Inject constructor(
 	 * where raising the cap is one screen away.
 	 */
 	suspend fun pin(ref: ItemRef, kind: PinKind): PinResult {
-		val songs = songsFor(Pin(ref, kind))
+		val pin = Pin(ref, kind)
+		val songs = songsFor(pin)
 		if (songs.isEmpty()) return PinResult.NotKnownYet
 
 		val cap = settings.cacheMaxBytes.first()
 		val quality = settings.audioQuality.first()
 		val alreadyPinned = audioCache.pinnedBytes.value
-		val adding = songs
-			.filterNot {
-				pinnedKeys.isPinned(CacheKeys.of(it.ref, it.effectiveQuality(quality)))
-			}
-			.sumOf { it.storedSizeAt(quality) }
+		val range = FilmRange.of(ref).takeIf { kind == PinKind.RANGE }
+		// A film is counted in full even when part of it is already pinned:
+		// its segments are not one key to look up, and overestimating only
+		// refuses a pin that was within a chapter's worth of the cap anyway.
+		val adding = if (range != null) {
+			range.durationMs / 1000 * quality.forSoundtrackHls().bitRate * 125L
+		} else {
+			songs
+				.filterNot { !it.isVideo && pinnedKeys.isPinned(CacheKeys.of(it.ref, quality)) }
+				.sumOf { it.storedSizeAt(quality) }
+		}
 		if (alreadyPinned + adding > cap) {
 			return PinResult.TooLarge(alreadyPinned + adding, cap)
 		}
@@ -184,8 +191,8 @@ class PinRepository @Inject constructor(
 		// Protection is applied here rather than waiting for the DAO's flow: a
 		// download starting before its key is protected could be evicted by the
 		// very bytes it is writing.
-		applyProtection(_pins.value + Pin(ref, kind))
-		enqueue(songs)
+		applyProtection(_pins.value + pin)
+		enqueue(pin, songs)
 		return PinResult.Ok
 	}
 
@@ -210,7 +217,26 @@ class PinRepository @Inject constructor(
 	 */
 	suspend fun retry(ref: ItemRef) {
 		val pin = _pins.value.firstOrNull { it.ref == ref } ?: return
-		enqueue(songsFor(pin))
+		enqueue(pin, songsFor(pin))
+	}
+
+	/**
+	 * The stretches of [film] that will play with no network, sorted by
+	 * start: the whole film when it is held, otherwise each pinned range whose
+	 * download has finished.
+	 *
+	 * Segments that are here only because they were played do not count. A
+	 * stretch is promised only when something was asked to keep it, and a
+	 * half-played chapter would otherwise be offered offline and stop short.
+	 */
+	fun heldRanges(film: ItemRef): List<LongRange> {
+		val here = audioCache.cachedKeys.value + downloads.states.value.completed
+		if (film.encode() in here) return listOf(0L..Long.MAX_VALUE)
+		return _pins.value
+			.filter { it.kind == PinKind.RANGE && it.ref.encode() in here }
+			.mapNotNull { FilmRange.of(it.ref)?.takeIf { range -> range.film == film } }
+			.map { it.startMs until it.endMs }
+			.sortedBy { it.first }
 	}
 
 	suspend fun refresh() = applyProtection(_pins.value)
@@ -228,6 +254,14 @@ class PinRepository @Inject constructor(
 			PinKind.ALBUM -> local.album(pin.ref)?.let { "${it.artistName} - ${it.title}" }
 			PinKind.PLAYLIST -> local.playlists(pin.ref.server)
 				.firstOrNull { it.ref == pin.ref }?.name
+			PinKind.RANGE -> FilmRange.of(pin.ref)?.let { range ->
+				val film = local.song(range.film)?.title
+				// Named by the chapter it was pinned from, while one still
+				// starts there; an edited list leaves the film's name alone.
+				val chapter = local.chaptersOfSong(range.film)
+					.firstOrNull { it.startMs == range.startMs }?.displayName
+				listOfNotNull(film, chapter).joinToString(" - ").ifEmpty { null }
+			}
 		}
 		PinnedItem(pin, label ?: "Unknown ${pin.kind.name.lowercase()}")
 	}
@@ -256,8 +290,17 @@ class PinRepository @Inject constructor(
 		val videos = local.videoRefKeys(keys)
 		// Set before publishing: the evictor reads this, and a download racing
 		// ahead of it would be evictable for the length of the race.
-		pinnedKeys.keys = keys.mapTo(mutableSetOf()) {
-			CacheKeys.of(it, if (it in videos) quality.forVideoAudio() else quality)
+		pinnedKeys.keys = buildSet {
+			keys.forEach { key ->
+				val ref = ItemRef.decode(key)
+				val range = ref?.let(FilmRange::of)
+				when {
+					range != null -> addAll(segmentKeys(range, quality))
+					ref != null && key in videos ->
+						addAll(segmentKeys(FilmRange(ref, 0, Long.MAX_VALUE), quality))
+					else -> add(CacheKeys.of(key, quality))
+				}
+			}
 		}
 		firstProtection.complete(Unit)
 		_pins.value = pins
@@ -305,7 +348,7 @@ class PinRepository @Inject constructor(
 	 */
 	suspend fun refreshDownloads() {
 		applyProtection(_pins.value)
-		_pins.value.forEach { enqueue(songsFor(it)) }
+		_pins.value.forEach { enqueue(it, songsFor(it)) }
 	}
 
 	/**
@@ -360,6 +403,7 @@ class PinRepository @Inject constructor(
 
 	private suspend fun songsOf(pin: Pin): List<Song> = when (pin.kind) {
 		PinKind.SONG -> listOfNotNull(local.song(pin.ref))
+		PinKind.RANGE -> listOfNotNull(FilmRange.of(pin.ref)?.let { local.song(it.film) })
 		PinKind.ALBUM -> local.songsOfAlbum(pin.ref)
 		PinKind.PLAYLIST -> local.songsOfPlaylist(pin.ref)
 	}
@@ -391,37 +435,68 @@ class PinRepository @Inject constructor(
 		)
 	}
 
+	/**
+	 * A range pin is not filtered by the audio-only setting: it was placed on
+	 * a chapter's soundtrack explicitly, and is nothing but that.
+	 */
 	private suspend fun songsFor(pin: Pin): List<Song> =
-		songsOf(pin).downloadable(settings.videoAudioOnly.first())
+		if (pin.kind == PinKind.RANGE) songsOf(pin)
+		else songsOf(pin).downloadable(settings.videoAudioOnly.first())
 
-	private suspend fun enqueue(songs: List<Song>) {
+	private suspend fun enqueue(pin: Pin, songs: List<Song>) {
+		FilmRange.of(pin.ref)?.takeIf { pin.kind == PinKind.RANGE }?.let { range ->
+			val target = streamUrls.forSoundtrackHls(range.film) ?: return
+			downloads.addRange(pin.ref.encode(), target, range.startMs, range.endMs)
+			return
+		}
 		songs.forEach { song ->
 			// A video only ever reaches here through downloadable(), which lets
-			// one past exactly when its soundtrack is what will be fetched - so
-			// `isVideo` is the flag the URL builder wants, not a second reading
-			// of the setting that could disagree with the first.
+			// one past exactly when its soundtrack is what will be stored: all
+			// of its segments, as the range that covers the whole film. A
+			// second beyond the duration, which is whole seconds and may cut
+			// off the fraction the last segment runs to.
+			if (song.isVideo) {
+				val target = streamUrls.forSoundtrackHls(song.ref) ?: return@forEach
+				downloads.addRange(song.ref.encode(), target, 0, (song.duration + 1) * 1000L)
+				return@forEach
+			}
 			// The same declaration playback makes, and it must be: both build
 			// the same cache key, so a pinned copy and a played one that
 			// declared differently would write different bytes under it.
 			val target = streamUrls.forDownload(
 				song.ref,
-				song.isVideo,
-				MEDIA3_AUDIO,
+				playable = MEDIA3_AUDIO,
 			) ?: return@forEach
 			downloads.add(song.ref, target)
 		}
 	}
 
 	/**
-	 * The quality this song's bytes are actually filed under.
+	 * The cache keys a stretch of a film is stored under, for the evictor.
+	 * Empty while the film is not in the mirror, which leaves it unprotected
+	 * until it is; the same answer an unopened album pin gets.
+	 */
+	private suspend fun segmentKeys(range: FilmRange, quality: AudioQuality): List<String> {
+		val duration = local.song(range.film)?.duration ?: return emptyList()
+		return HlsKeys.keysCovering(
+			range.film,
+			quality.forSoundtrackHls(),
+			duration.toDouble(),
+			range.startMs,
+			range.endMs,
+		)
+	}
+
+	/**
+	 * The quality this song's bytes are actually stored at.
 	 *
 	 * A video's soundtrack is always a transcode - `AudioFormat.ORIGINAL` for
-	 * one means "send the film", which is not a thing that can be stored - so
-	 * the substitution has to be applied wherever a cache key or a size is
-	 * derived, not only where the URL is built.
+	 * one means "send the film", which is not a thing that can be stored - and
+	 * it is stored as the HLS rendition, so the substitution has to be applied
+	 * wherever a size is derived, not only where the URL is built.
 	 */
 	private fun Song.effectiveQuality(quality: AudioQuality): AudioQuality =
-		if (isVideo) quality.forVideoAudio() else quality
+		if (isVideo) quality.forSoundtrackHls() else quality
 
 	/**
 	 * Roughly what this song will occupy once stored.

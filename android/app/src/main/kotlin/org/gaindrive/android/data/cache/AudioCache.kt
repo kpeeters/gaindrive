@@ -38,6 +38,7 @@ class AudioCache @Inject constructor(
 	private val evictor: PinAwareEvictor,
 	private val pinned: PinnedKeys,
 	private val local: LocalLibrary,
+	private val hlsKeys: HlsKeys,
 	settings: SettingsStore,
 	scope: CoroutineScope,
 ) {
@@ -105,6 +106,7 @@ class AudioCache @Inject constructor(
 		DataSource.Factory {
 			CacheDataSource.Factory()
 				.setCache(cache)
+				.setCacheKeyFactory(hlsKeys.factory)
 				.setUpstreamDataSourceFactory(upstream)
 				// A cache that cannot be written must not cost the user their
 				// music: fall through to plain streaming instead of failing.
@@ -266,7 +268,10 @@ class AudioCache @Inject constructor(
 	}
 
 	private suspend fun refresh() {
-		val keys = withContext(Dispatchers.IO) { cache.keys }
+		val all = withContext(Dispatchers.IO) { cache.keys }
+		// A film's soundtrack is filed segment by segment, and a segment is
+		// not a track. It counts below only as part of a film held whole.
+		val (segments, keys) = all.partition { HlsKeys.isHls(it) }
 
 		// Fallback for a track the cache recorded no length for: the mirror's
 		// own byte size stands in, so a track cached by playing it still counts
@@ -282,10 +287,12 @@ class AudioCache @Inject constructor(
 		}
 		val sizes = local.songSizes(needSize)
 
+		val films = heldFilms(segments)
+
 		val snapshot = withContext(Dispatchers.IO) {
 			Snapshot(
 				used = cache.cacheSpace,
-				pinnedBytes = keys.filter { pinned.isPinned(it) }.sumOf { cachedBytesOf(it) },
+				pinnedBytes = all.filter { pinned.isPinned(it) }.sumOf { cachedBytesOf(it) },
 				complete = keys.filterTo(mutableSetOf()) { isFullyCached(it, sizes[it]) },
 			)
 		}
@@ -296,7 +303,28 @@ class AudioCache @Inject constructor(
 		// consume this match `serverId || '/' || id` and would silently return
 		// nothing if a quality suffix reached them.
 		_cachedKeys.value = snapshot.complete
-			.mapTo(mutableSetOf()) { CacheKeys.refKeyOf(it) }
+			.mapTo(mutableSetOf()) { CacheKeys.refKeyOf(it) } + films
+	}
+
+	/**
+	 * Films whose every soundtrack segment, at some rendition, is held, as
+	 * bare refs: played through to the end, or downloaded.
+	 *
+	 * Judged against the server's cut rule ([HlsKeys.keysCovering]) rather
+	 * than the stored playlist, which would mean parsing one per film on
+	 * every refresh. Each segment is a whole response with a length, so
+	 * [isFullyCached] can vouch for it.
+	 */
+	private suspend fun heldFilms(segments: List<String>): Set<String> {
+		val renditions = segments.mapNotNullTo(mutableSetOf()) { HlsKeys.filmOf(it) }
+		return renditions.mapNotNullTo(mutableSetOf()) { (film, quality) ->
+			val duration = local.song(film)?.duration ?: return@mapNotNullTo null
+			val needed = HlsKeys.keysCovering(film, quality, duration.toDouble(), 0, Long.MAX_VALUE)
+			val held = withContext(Dispatchers.IO) {
+				needed.isNotEmpty() && needed.all { isFullyCached(it) }
+			}
+			if (held) film.encode() else null
+		}
 	}
 
 	private fun cachedBytesOf(key: String): Long =

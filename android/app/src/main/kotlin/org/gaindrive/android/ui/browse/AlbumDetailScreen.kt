@@ -47,12 +47,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.gaindrive.android.data.cache.FilmRange
 import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.MusicRoot
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.data.model.StarKind
 import org.gaindrive.android.data.model.currentAt
+import org.gaindrive.android.ui.Availability
+import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.LocalWatched
 import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.ChapterRow
@@ -99,8 +102,11 @@ fun AlbumDetailScreen(
 	val extras by viewModel.extras.collectAsStateWithLifecycle()
 	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 	val playerState by player.state.collectAsStateWithLifecycle()
+	val availability = LocalAvailability.current
 	val autoPlay by viewModel.autoPlay.collectAsStateWithLifecycle()
 	var actionsFor by remember { mutableStateOf<Song?>(null) }
+	// Set together with actionsFor when the long-press was on a chapter.
+	var actionsChapter by remember { mutableStateOf<FilmRange?>(null) }
 
 	val canPromote by viewModel.canPromote.collectAsStateWithLifecycle()
 	val promoting by viewModel.promoting.collectAsStateWithLifecycle()
@@ -137,9 +143,10 @@ fun AlbumDetailScreen(
 	actionsFor?.let { song ->
 		TrackActionsSheet(
 			song = song,
-			onDismiss = { actionsFor = null },
+			onDismiss = { actionsFor = null; actionsChapter = null },
 			onPlayNext = { player.playNext(song) },
 			onAddToQueue = { player.addToQueue(song) },
+			chapter = actionsChapter,
 		)
 	}
 
@@ -441,7 +448,7 @@ fun AlbumDetailScreen(
 								// is what tapping a track in an album listing
 								// should mean.
 								onClick = { player.play(detail.songs, row.queueIndex) },
-								onLongClick = { actionsFor = row.song },
+								onLongClick = { actionsFor = row.song; actionsChapter = null },
 								playback = playerState.trackStateOf(row.song.ref),
 								number = row.number,
 							)
@@ -463,7 +470,15 @@ fun AlbumDetailScreen(
 								},
 								// The recording's own row is gone, so this is
 								// the only way left to reach its actions.
-								onLongClick = { actionsFor = row.song },
+								onLongClick = {
+									actionsFor = row.song
+									actionsChapter = row.range
+								},
+								stored = row.range.ref,
+								// Offline, a chapter plays when its film is
+								// stored whole or the chapter itself is.
+								playable = availability.of(row.song.ref) != Availability.UNAVAILABLE
+									|| availability.of(row.range.ref) == Availability.STORED,
 							)
 						}
 					}

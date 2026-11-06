@@ -217,30 +217,24 @@ class StreamUrls @Inject constructor(
 		}
 
 	/**
-	 * A film's soundtrack as audio-only HLS, for the local player. Null when a
-	 * copy is held in full, which [forPlayback] then serves from the cache.
+	 * A film's soundtrack as audio-only HLS, for the local player and for
+	 * downloads. The only way a film's sound is played or stored on the device.
 	 *
 	 * HLS rather than `stream.view` because the server has to extract the
 	 * whole soundtrack before `stream.view` sends its first byte, and for a
 	 * film that is minutes. The playlist's segments are encoded as they are
-	 * asked for, and seeking is picking one, so playback starts at once. The
-	 * cost is that what is heard does not stay on the device: the segments
-	 * bypass the byte cache, see `GainDriveMediaSourceFactory`.
+	 * asked for, and seeking is picking one, so playback starts at once.
+	 * Stored, the segments are the unit too: a pinned chapter is the segments
+	 * covering it, filed under `HlsKeys` rather than under the URL.
 	 *
-	 * The quality setting still applies. Opus stays Opus; anything else is
-	 * AAC, the codec every fragmented-MP4 player takes, at the same rate. The
-	 * cache key is carried for the reason [forCastOriginal] gives.
+	 * The quality setting still applies, through
+	 * [AudioQuality.forSoundtrackHls]. The cache key is carried for the reason
+	 * [forCastOriginal] gives: each resource behind this URL has its own.
 	 */
 	suspend fun forSoundtrackHls(ref: ItemRef): StreamTarget? {
-		val wanted = settings.audioQuality.first().forVideoAudio()
-		val held = withContext(Dispatchers.IO) {
-			audioCache.heldTagOf(ref.encode(), wanted)
-		}
-		if (held != null) return null
+		val quality = settings.audioQuality.first().forSoundtrackHls()
 		return withContext(Dispatchers.IO) {
 			val config = registry.get(ref.server) ?: return@withContext null
-			val quality = if (wanted.format == AudioFormat.OPUS) wanted
-				else AudioQuality(AudioFormat.M4A, wanted.bitRate)
 			val codec = if (quality.format == AudioFormat.OPUS) "opus" else "aac"
 			StreamTarget(
 				url = clients.clientFor(config).url(
