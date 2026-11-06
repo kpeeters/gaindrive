@@ -369,7 +369,8 @@ class PlayerConnection @Inject constructor(
 		publish()
 		val controller = awaitController() ?: return
 		val covers: CoverUrls = library.coverUrls()
-		val items = songs.map { it.toMediaItem(covers.url(it.coverArt, ARTWORK_PX)) }
+		val audioOnly = settings.videoAudioOnly.first()
+		val items = songs.map { it.toMediaItem(covers.url(it.coverArt, ARTWORK_PX), audioOnly) }
 		controller.setMediaItems(items, startIndex, startPositionMs)
 		autoFrom = autoFrom.afterPlay(startIndex)
 		controller.prepare()
@@ -390,7 +391,8 @@ class PlayerConnection @Inject constructor(
 		autoFrom.tailToDrop(controller.mediaItemCount)?.let { tail ->
 			controller.removeMediaItems(tail.first, tail.last + 1)
 		}
-		controller.addMediaItem(song.toMediaItem(covers.url(song.coverArt, ARTWORK_PX)))
+		val audioOnly = settings.videoAudioOnly.first()
+		controller.addMediaItem(song.toMediaItem(covers.url(song.coverArt, ARTWORK_PX), audioOnly))
 		autoFrom = autoFrom.afterAppend(controller.mediaItemCount)
 		if (controller.mediaItemCount == 1) {
 			controller.prepare()
@@ -404,7 +406,8 @@ class PlayerConnection @Inject constructor(
 		val controller = awaitController() ?: return@launch
 		val covers = library.coverUrls()
 		val at = (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
-		controller.addMediaItem(at, song.toMediaItem(covers.url(song.coverArt, ARTWORK_PX)))
+		val audioOnly = settings.videoAudioOnly.first()
+		controller.addMediaItem(at, song.toMediaItem(covers.url(song.coverArt, ARTWORK_PX), audioOnly))
 		autoFrom = autoFrom.afterInsert(at)
 		if (controller.mediaItemCount == 1) {
 			controller.prepare()

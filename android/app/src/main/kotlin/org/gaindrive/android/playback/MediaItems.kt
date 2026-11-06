@@ -122,8 +122,13 @@ const val ARTWORK_PX = 512
  * Items leave here with **no URI**. The service resolves that in
  * `onAddMediaItems`, so the stream policy lives in one place and the UI never
  * has to know how a stream URL is built.
+ *
+ * [audioOnly] marks a video as played for its soundtrack from the start, as
+ * [markedAsAudioOnlyVideo] would. The controller shows the item as built
+ * until the service's resolved one arrives, and a film still claiming to be
+ * a video in between opens the video screen only for it to close again.
  */
-fun Song.toMediaItem(artworkUrl: String?): MediaItem {
+fun Song.toMediaItem(artworkUrl: String?, audioOnly: Boolean = false): MediaItem {
 	val metadata = MediaMetadata.Builder()
 		.setTitle(title)
 		.setArtist(artistName)
@@ -139,7 +144,8 @@ fun Song.toMediaItem(artworkUrl: String?): MediaItem {
 			Bundle().apply {
 				putString(KEY_ALBUM_REF, albumRef?.encode())
 				putString(KEY_CONTENT_TYPE, contentType)
-				putBoolean(KEY_IS_VIDEO, isVideo)
+				putBoolean(KEY_IS_VIDEO, isVideo && !audioOnly)
+				putBoolean(KEY_AUDIO_ONLY_VIDEO, isVideo && audioOnly)
 				putBoolean(KEY_NATIVE_SEEK, nativeSeek)
 				putBoolean(KEY_CAST_DIRECT, castDirect)
 				putString(KEY_SOUNDTRACK_FORMAT, soundtrackFormat)
