@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.stateIn
 import org.gaindrive.android.data.Connectivity
 import org.gaindrive.android.data.cache.AudioCache
 import org.gaindrive.android.data.cache.DownloadQueue
+import org.gaindrive.android.data.cache.FilmRange
 import org.gaindrive.android.data.cache.PinRepository
 import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.cache.StoredContainers
@@ -45,6 +46,18 @@ sealed interface ContainerMark {
 
 	/** Every track is here, but nothing is keeping them from eviction. */
 	data object StoredOnly : ContainerMark
+}
+
+/** What a track or chapter row's download mark shows. */
+sealed interface DownloadMark {
+	/** Kept on purpose, and here. */
+	data object Downloaded : DownloadMark
+
+	/** Here because it was played; eviction may take it back. */
+	data object CachedOnly : DownloadMark
+
+	/** On its way; [fraction] null while queued or with no figure yet. */
+	data class Pending(val fraction: Float?) : DownloadMark
 }
 
 data class AvailabilityState(
@@ -95,6 +108,42 @@ data class AvailabilityState(
 	fun isDownloaded(ref: ItemRef): Boolean {
 		val key = ref.encode()
 		return key in pinnedKeys && key in storedKeys
+	}
+
+	/** The mark a track row shows, or null for none. */
+	fun markOf(ref: ItemRef): DownloadMark? {
+		val download = downloadOf(ref)
+		return when {
+			isDownloaded(ref) -> DownloadMark.Downloaded
+			download == null && isCachedOnly(ref) -> DownloadMark.CachedOnly
+			download == null -> null
+			else -> DownloadMark.Pending(download.knownFraction)
+		}
+	}
+
+	/**
+	 * The mark a chapter row shows: its own download's when it has one, else
+	 * its share of the whole film's.
+	 *
+	 * A whole film is one download under the film's ref, which no row shows
+	 * once its chapters have replaced it. Its percentage still says which
+	 * chapters are in: `RangeHlsDownloader` writes the segments in time order
+	 * and reports progress per segment, and the segments are all six seconds,
+	 * so a fraction of the download is the same fraction of the film.
+	 */
+	fun chapterMarkOf(range: FilmRange, filmDurationMs: Long): DownloadMark? {
+		markOf(range.ref)?.let { if (it != DownloadMark.CachedOnly) return it }
+		val film = markOf(range.film)
+		if (film !is DownloadMark.Pending || film.fraction == null || filmDurationMs <= 0) {
+			return film
+		}
+		val reached = film.fraction * filmDurationMs
+		val share = ((reached - range.startMs) / range.durationMs).coerceIn(0f, 1f)
+		return when {
+			share >= 1f -> DownloadMark.Downloaded
+			share <= 0f -> DownloadMark.Pending(null)
+			else -> DownloadMark.Pending(share)
+		}
 	}
 
 	/**

@@ -170,10 +170,17 @@ data class PinStatus(
 	val stored: Int,
 	val total: Int,
 	val phase: PinPhase,
+	/**
+	 * How far the covered downloads under way have got, in tracks: two at
+	 * half each is 1. Without it a pin covering one long film sits at zero
+	 * until the very end.
+	 */
+	val partial: Float = 0f,
 ) {
 	val complete: Boolean get() = phase == PinPhase.COMPLETE
 
-	val fraction: Float get() = if (total <= 0) 1f else stored.toFloat() / total
+	val fraction: Float
+		get() = if (total <= 0) 1f else ((stored + partial) / total).coerceIn(0f, 1f)
 }
 
 /**

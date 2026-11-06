@@ -44,11 +44,13 @@ import androidx.compose.ui.unit.dp
 import org.gaindrive.android.data.model.Album
 import org.gaindrive.android.data.model.Artist
 import org.gaindrive.android.data.model.ChapterHit
+import org.gaindrive.android.data.cache.FilmRange
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.Playlist
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.playback.TrackState
 import org.gaindrive.android.ui.Availability
+import org.gaindrive.android.ui.DownloadMark
 import org.gaindrive.android.ui.ContainerMark
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.LocalIsTv
@@ -551,8 +553,8 @@ fun SongRow(
  * replaced.
  *
  * The one exception is storage. A film's soundtrack can be stored a stretch
- * at a time, so [stored] names this chapter's stretch (a `FilmRange` ref) and
- * gets the same download mark a track does. [playable] is false offline for a
+ * at a time, so [stored] names this chapter's stretch and gets the same
+ * download mark a track does, or its share of the whole film's download. [playable] is false offline for a
  * chapter that is not here, which dims it the way [TrackRow] dims a track.
  *
  * Dimmed until it is the marker being played, so the list reads as positions
@@ -567,7 +569,8 @@ fun ChapterRow(
 	playing: Boolean,
 	onClick: () -> Unit,
 	onLongClick: (() -> Unit)? = null,
-	stored: ItemRef? = null,
+	stored: FilmRange? = null,
+	filmDurationMs: Long = 0,
 	playable: Boolean = true,
 ) {
 	// A chapter's long-press reaches the recording's actions, which a remote
@@ -609,7 +612,7 @@ fun ChapterRow(
 			},
 			modifier = Modifier.weight(1f),
 		)
-		stored?.let { TrackDownloadMark(it) }
+		stored?.let { ChapterDownloadMark(it, filmDurationMs) }
 		Text(
 			text = formatDuration(duration),
 			style = MaterialTheme.typography.bodySmall,
@@ -723,11 +726,21 @@ private fun ContainerDownloadMark(refs: List<ItemRef>) {
  */
 @Composable
 private fun TrackDownloadMark(ref: ItemRef) {
-	val availability = LocalAvailability.current
-	val download = availability.downloadOf(ref)
+	DownloadMarkIcon(LocalAvailability.current.markOf(ref))
+}
 
-	when {
-		availability.isDownloaded(ref) -> Icon(
+/** [TrackDownloadMark] for a chapter, which also reflects its film's download. */
+@Composable
+private fun ChapterDownloadMark(range: FilmRange, filmDurationMs: Long) {
+	DownloadMarkIcon(LocalAvailability.current.chapterMarkOf(range, filmDurationMs))
+}
+
+@Composable
+private fun DownloadMarkIcon(mark: DownloadMark?) {
+	when (mark) {
+		null -> Unit
+
+		DownloadMark.Downloaded -> Icon(
 			imageVector = Icons.Default.DownloadDone,
 			contentDescription = "Downloaded",
 			tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -737,25 +750,18 @@ private fun TrackDownloadMark(ref: ItemRef) {
 		// Cached by being played rather than downloaded on purpose. A smaller,
 		// quieter mark: it says the track will play offline, without claiming
 		// the permanence a download has - eviction may take it back.
-		download == null && availability.isCachedOnly(ref) -> Icon(
+		DownloadMark.CachedOnly -> Icon(
 			imageVector = Icons.Default.Circle,
 			contentDescription = "Stored, but not downloaded",
 			tint = MaterialTheme.colorScheme.onSurfaceVariant,
 			modifier = Modifier.size(8.dp),
 		)
 
-		download == null -> Unit
-
 		// Queued, or fetching with no figure reported yet. An indeterminate
-		// spinner is the honest picture: something is happening, and this track
-		// is not the one it is happening to yet.
-		download.knownFraction == null -> TrackSpinner()
-
-		else -> {
-			val fraction by animateFloatAsState(
-				targetValue = download.knownFraction ?: 0f,
-				label = "trackDownload",
-			)
+		// spinner is the honest picture: something is happening, and this
+		// track is not the one it is happening to yet.
+		is DownloadMark.Pending -> if (mark.fraction == null) TrackSpinner() else {
+			val fraction by animateFloatAsState(targetValue = mark.fraction, label = "trackDownload")
 			CircularProgressIndicator(
 				progress = { fraction },
 				modifier = Modifier.size(16.dp),

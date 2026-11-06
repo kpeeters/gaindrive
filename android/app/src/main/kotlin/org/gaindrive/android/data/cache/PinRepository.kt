@@ -94,6 +94,9 @@ class PinRepository @Inject constructor(
 				stored = keys.count { it in here },
 				total = keys.size,
 				phase = pinPhaseOf(keys, here, downloadStates),
+				partial = keys.filter { it !in here }
+					.sumOf { (downloadStates.active[it]?.knownFraction ?: 0f).toDouble() }
+					.toFloat(),
 			)
 		}
 	}.stateIn(scope, SharingStarted.Eagerly, emptyMap())

@@ -474,7 +474,8 @@ fun AlbumDetailScreen(
 									actionsFor = row.song
 									actionsChapter = row.range
 								},
-								stored = row.range.ref,
+								stored = row.range,
+								filmDurationMs = row.song.duration * 1000L,
 								// Offline, a chapter plays when its film is
 								// stored whole or the chapter itself is.
 								playable = availability.of(row.song.ref) != Availability.UNAVAILABLE
