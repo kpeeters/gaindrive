@@ -82,8 +82,11 @@ void append(std::vector<std::string>& a, std::initializer_list<std::string> more
 // "before E" must mean the keyframe that is at E in the file.  A re-encode
 // instead runs on the plain timeline that starts at `start`, which ffmpeg's
 // accurate seek makes exact.
+//
+// The soundtrack alone maps only the audio: a picture left in the run would
+// be encoded for nothing and land in every segment.
 std::vector<std::string> front(const Streamer::SongInfo& song, double start,
-                               bool copyts)
+                               bool copyts, bool audio_only = false)
 	{
 	std::vector<std::string> a = { "ffmpeg", "-nostdin" };
 	// No seek at all from the very start.  Even -ss 0 is a seek, and after one
@@ -91,16 +94,28 @@ std::vector<std::string> front(const Streamer::SongInfo& song, double start,
 	// video - 1.6 s of silence on an XviD/AC3 test file.
 	if (start > 0) append(a, { "-ss", secs(start) });
 	if (copyts) a.push_back("-copyts");
-	append(a, { "-i", disc_input(song.path),
-	            "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1" });
+	append(a, { "-i", disc_input(song.path) });
+	if (audio_only)
+		append(a, { "-map", "0:a:0", "-vn", "-map_metadata", "-1" });
+	else
+		append(a, { "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1" });
 	return a;
 	}
 
-// The codec half of a run that encodes audio: copied video with AAC, or a
-// full re-encode.
+// The codec half of a run that encodes audio: copied video with AAC, a full
+// re-encode, or the soundtrack alone.
 void session_codecs(std::vector<std::string>& a, const HlsPlan& p,
                     const HlsVariant& v)
 	{
+	if (!v.audio_only.empty()) {
+		append(a, { "-c:a", v.audio_only == "opus" ? "libopus" : "aac",
+		            "-b:a", std::to_string(v.kbps) + "k", "-ac", "2" });
+		// Opus in MP4 is "experimental" to ffmpeg before 6.0, which refuses
+		// to write it otherwise.  Segment runs need it in the inner muxer's
+		// options as well; see session_argv().
+		if (v.audio_only == "opus") append(a, { "-strict", "-2" });
+		return;
+		}
 	if (p.copy_video) {
 		append(a, { "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-ac", "2",
 		            "-copypriorss:v", "0" });
@@ -140,12 +155,13 @@ std::vector<std::string> session_init_argv(const Streamer::SongInfo& song,
                                            const HlsPlan& p, const HlsVariant& v)
 	{
 	const double S = p.bounds[0];
-	auto a = front(song, S, p.copy_video);
+	const bool   audio_only = !v.audio_only.empty();
+	auto a = front(song, S, p.copy_video, audio_only);
 	session_codecs(a, p, v);
 	append(a, { "-avoid_negative_ts", "disabled",
-	            "-to", secs(p.copy_video ? S + 1 : 1), "-use_editlist", "0",
-	            "-video_track_timescale", VIDEO_TIMESCALE,
-	            "-f", "mp4", "-movflags", MOVFLAGS, "pipe:1" });
+	            "-to", secs(p.copy_video ? S + 1 : 1), "-use_editlist", "0" });
+	if (!audio_only) append(a, { "-video_track_timescale", VIDEO_TIMESCALE });
+	append(a, { "-f", "mp4", "-movflags", MOVFLAGS, "pipe:1" });
 	return a;
 	}
 
@@ -157,7 +173,8 @@ std::vector<std::string> session_argv(const Streamer::SongInfo& song,
                                       size_t n, const fs::path& dir)
 	{
 	const double S = p.bounds[n];
-	auto a = front(song, S, p.copy_video);
+	const bool   audio_only = !v.audio_only.empty();
+	auto a = front(song, S, p.copy_video, audio_only);
 	session_codecs(a, p, v);
 
 	std::string cuts, keys;
@@ -169,13 +186,18 @@ std::vector<std::string> session_argv(const Streamer::SongInfo& song,
 		cuts += (cuts.empty() ? "" : ",") + secs(p.bounds[k] - S - early);
 		keys += (keys.empty() ? "" : ",") + secs(p.bounds[k] - S);
 		}
-	if (!p.copy_video && !keys.empty()) append(a, { "-force_key_frames", keys });
+	// Every audio packet is a keyframe, so the soundtrack alone is cut on
+	// the times by themselves.
+	if (!p.copy_video && !audio_only && !keys.empty())
+		append(a, { "-force_key_frames", keys });
 	append(a, { "-avoid_negative_ts", "disabled", "-f", "segment" });
 	if (!cuts.empty()) append(a, { "-segment_times", cuts });
 	append(a, { "-segment_start_number", std::to_string(n),
 	            "-segment_format", "mp4",
 	            "-segment_format_options", std::string("movflags=") + MOVFLAGS
-	                                     + ":video_track_timescale=" + VIDEO_TIMESCALE,
+	                + (audio_only ? "" : std::string(":video_track_timescale=")
+	                                     + VIDEO_TIMESCALE)
+	                + (v.audio_only == "opus" ? ":strict=-2" : ""),
 	            "-segment_list", (dir / "list").string(),
 	            "-segment_list_type", "flat",
 	            (dir / "%d.mp4").string() });
@@ -236,9 +258,9 @@ std::optional<std::string> read_file(const fs::path& p)
 	return ss.str();
 	}
 
-void send_mp4(httplib::Response& res, std::string bytes)
+void send_mp4(httplib::Response& res, std::string bytes, bool audio_only = false)
 	{
-	res.set_content(std::move(bytes), "video/mp4");
+	res.set_content(std::move(bytes), audio_only ? "audio/mp4" : "video/mp4");
 	}
 
 }
@@ -486,7 +508,11 @@ HlsPlan Hls::plan(const Streamer::SongInfo& song, const HlsVariant& v)
 	// picture, and a place to cut: Matroska is the one container whose index
 	// is cheap to read here, and it is also the one that most needs this, as
 	// the files an MP4 player cannot open.
-	if (!v.constrained() && song.codec == "mkv" && song.video_codec == "h264") {
+	// The soundtrack alone is always encoded, by one encoder per viewer: an
+	// AAC or Opus encoder primes every run with silence, so cutting each
+	// segment with a run of its own would put a gap at every join.
+	if (v.audio_only.empty() && !v.constrained() && song.codec == "mkv"
+	    && song.video_codec == "h264") {
 		MkvKeyframes kf;
 		{
 		std::lock_guard<std::mutex> lk(cues_mu_);
@@ -533,7 +559,7 @@ void Hls::serve_init(httplib::Response& res, const Streamer::SongInfo& song,
 	auto out  = run_capture(argv);
 	auto run  = out ? fmp4_parse(*out) : std::nullopt;
 	if (!run) { res.status = 500; return; }
-	send_mp4(res, out->substr(0, run->first_moof));
+	send_mp4(res, out->substr(0, run->first_moof), !v.audio_only.empty());
 	}
 
 void Hls::serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
@@ -580,7 +606,7 @@ void Hls::serve_segment(httplib::Response& res, const Streamer::SongInfo& song,
 			s->last_request = k;
 			auto seg = s->segment(k, pending);
 			if (seg) {
-				send_mp4(res, std::move(*seg));
+				send_mp4(res, std::move(*seg), !v.audio_only.empty());
 				return;
 				}
 			// Unfinished is worth waiting for only while something can
@@ -628,7 +654,7 @@ std::shared_ptr<Hls::Session> Hls::session_for(const Streamer::SongInfo& song,
 	const std::string film = std::to_string(song.id) + "/"
 	                       + std::to_string(song.file_modified) + "/"
 	                       + std::to_string(v.kbps) + "/" + v.size + "/"
-	                       + v.audio;
+	                       + v.audio + "/" + v.audio_only;
 	std::shared_ptr<Session> old, s;
 	{
 	std::lock_guard<std::mutex> lk(mu_);

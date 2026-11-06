@@ -490,17 +490,13 @@ class PlaybackService : MediaLibraryService() {
 			val index = player.nextMediaItemIndex
 			if (index == C.INDEX_UNSET) return
 			val item = player.getMediaItemAt(index)
-			// Not for a video being played as one. The prewarmer builds an
-			// *audio* stream URL, so it would ask the server to encode a film's
-			// soundtrack for bytes nothing will ever read.
-			//
-			// A video being played *as* audio is the opposite case, and the one
-			// that most needs this: extracting a film's soundtrack is a
-			// blocking transcode of a multi-gigabyte file, so landing that wait
-			// on the moment the user taps play is the worst place for it.
-			if (item.isVideo()) return
+			// Not for a video, whether played as one or as audio. The prewarmer
+			// builds an audio stream URL, so for a film it would have the
+			// server extract the whole soundtrack for bytes nothing will read:
+			// a soundtrack plays as HLS, or from a copy already held.
+			if (item.isVideo() || item.isAudioOnlyVideo()) return
 			val next = item.itemRef() ?: return
-			scope.launch { prewarm.warm(next, audioOnlyVideo = item.isAudioOnlyVideo()) }
+			scope.launch { prewarm.warm(next) }
 		}
 	}
 
@@ -747,6 +743,19 @@ class PlaybackService : MediaLibraryService() {
 			ref: ItemRef,
 			audioOnlyVideo: Boolean,
 		): MediaItem? {
+			// A soundtrack not held in full plays as HLS, so it starts without
+			// waiting for the server to extract all of it.
+			if (audioOnlyVideo) streamUrls.forSoundtrackHls(ref)?.let { hls ->
+				return item.markedAsAudioOnlyVideo().withQuality(hls.quality).buildUpon()
+					.setUri(hls.url)
+					// Cleared rather than left: an item re-resolved from the
+					// cached path still carries that key, and these segments
+					// do not go through the cache.
+					.setCustomCacheKey(null)
+					.setMimeType(hls.mimeType)
+					.setSubtitleConfigurations(emptyList())
+					.build()
+			}
 			// Declaring the formats media3 takes as they stand, so an MP3 is
 			// not re-encoded to Opus for nothing. Passed here rather than
 			// defaulted in the builder: the Cast route reaches that same

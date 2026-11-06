@@ -48,13 +48,7 @@ class TranscodePrewarmer @Inject constructor(
 	 */
 	private val attempted = Collections.synchronizedSet(mutableSetOf<String>())
 
-	/**
-	 * [audioOnlyVideo] says this ref is a video whose soundtrack is what will
-	 * be fetched. It is the case this class matters most for: extracting a
-	 * film's audio is a blocking transcode over a multi-gigabyte source, so the
-	 * wait it moves out of the user's way is a minute rather than a few seconds.
-	 */
-	suspend fun warm(ref: ItemRef, audioOnlyVideo: Boolean = false) {
+	suspend fun warm(ref: ItemRef) {
 		// Offline mode means requests are not to be made at all, not that they
 		// are expected to fail.
 		if (settings.offlineMode.first()) return
@@ -68,8 +62,7 @@ class TranscodePrewarmer @Inject constructor(
 		// wrote is never read.
 		val target = streamUrls.forPlayback(
 			ref,
-			audioOnlyVideo,
-			MEDIA3_AUDIO,
+			playable = MEDIA3_AUDIO,
 		) ?: return
 		// The original is served straight off disk with no ffmpeg involved, so
 		// there is no transcode to build and nothing to wait for. Not warmed,

@@ -1,6 +1,7 @@
 package org.gaindrive.android.playback
 
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.drm.DrmSessionManagerProvider
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -10,7 +11,13 @@ import androidx.media3.extractor.text.SubtitleParser
 
 /**
  * Picks the loading path for an item: audio through the byte cache, video
- * straight from the network.
+ * and HLS straight from the network.
+ *
+ * HLS here means a film's soundtrack played as audio, see
+ * `StreamUrls.forSoundtrackHls`. Its playlist carries per-instance credentials
+ * in every segment URL, so URL-derived cache keys would never match again, and
+ * no single key says when a playlist's segments are all held. Until both are
+ * solved it stays out of the cache.
  *
  * **Video must not reach the cache.** It is sized in tens of megabytes for
  * tracks, so a single film would evict the whole stored library on its way past;
@@ -33,7 +40,9 @@ class GainDriveMediaSourceFactory(
 	private val video = DefaultMediaSourceFactory(direct)
 
 	private fun factoryFor(mediaItem: MediaItem) =
-		if (mediaItem.isVideo()) video else audio
+		if (mediaItem.isVideo()
+			|| mediaItem.localConfiguration?.mimeType == MimeTypes.APPLICATION_M3U8) video
+		else audio
 
 	override fun createMediaSource(mediaItem: MediaItem): MediaSource =
 		factoryFor(mediaItem).createMediaSource(mediaItem)

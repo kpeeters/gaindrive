@@ -906,8 +906,21 @@ void GainDrive::routes_stream()
 	// because every URI in the body is *relative* - a segment resolves against
 	// /rest/ whichever path was fetched - and the one place that is not true,
 	// a variant URI naming this endpoint again, spells itself from req.path.
-	auto hls_handler = [this, hls_auth](const httplib::Request& req,
-	                                    httplib::Response& res) {
+	// The soundtrack alone, from audioOnly and audioBitRate: what a client asks
+	// for when it wants a film's sound and not its picture.  Leaves `v` alone
+	// when audioOnly is absent.  Only the two codecs below can come out, since
+	// the value is echoed into playlist bodies.
+	auto hls_audio_only = [](const httplib::Request& req, HlsVariant& v) {
+		const std::string codec = req.get_param_value("audioOnly");
+		if (codec != "aac" && codec != "opus") return;
+		v = HlsVariant{};
+		v.audio_only = codec;
+		v.kbps       = std::clamp(to_int(req.get_param_value("audioBitRate"), 160),
+		                          64, 320);
+		};
+
+	auto hls_handler = [this, hls_auth, hls_audio_only](const httplib::Request& req,
+	                                                    httplib::Response& res) {
 		const bool use_json = (fmt_of(req) == "json");
 		auto err = [&](int code, const char* msg) {
 			res.set_content(use_json ? subsonic_error_json(code, msg)
@@ -947,6 +960,9 @@ void GainDrive::routes_stream()
 		// second URL of the sender's choosing. Round-tripping through
 		// to_int/sane_video_size means only a number and a WxH can ever be
 		// emitted, whatever arrived.
+		HlsVariant sound;
+		hls_audio_only(req, sound);
+
 		std::vector<HlsVariant> variants;
 		auto [blo, bhi] = req.params.equal_range("bitRate");
 		for (auto b = blo; b != bhi; ++b) {
@@ -990,6 +1006,9 @@ void GainDrive::routes_stream()
 		const std::string audio = hls_audio_codecs(qp("audioCodecs"));
 		const std::string audio_param = audio.empty()
 		                              ? "" : "&audioCodecs=" + audio;
+
+		// The soundtrack alone has no picture to offer variants of.
+		if (!sound.audio_only.empty()) variants.clear();
 
 		// A master playlist announces each variant's BANDWIDTH, so only a
 		// variant that named a bitrate can be one; a frame size alone still
@@ -1042,11 +1061,18 @@ void GainDrive::routes_stream()
 			}
 
 		HlsVariant variant = variants.empty() ? HlsVariant{} : variants[0];
-		variant.audio = audio;
 		std::string query = "?id=" + std::to_string(song->id);
-		if (variant.kbps > 0)      query += "&maxBitRate=" + std::to_string(variant.kbps);
-		if (!variant.size.empty()) query += "&size=" + variant.size;
-		query += audio_param;
+		if (!sound.audio_only.empty()) {
+			variant = sound;
+			query += "&audioOnly=" + sound.audio_only
+			       + "&audioBitRate=" + std::to_string(sound.kbps);
+			}
+		else {
+			variant.audio = audio;
+			if (variant.kbps > 0)      query += "&maxBitRate=" + std::to_string(variant.kbps);
+			if (!variant.size.empty()) query += "&size=" + variant.size;
+			query += audio_param;
+			}
 
 		auto si   = streamer_song(*song, store_.abs_path(song->path));
 		auto plan = hls_.plan(si, variant);
@@ -1078,8 +1104,11 @@ void GainDrive::routes_stream()
 		std::cout << stamp(client_addr(req)) << "hls: id=" << log_safe(it->second, 64)
 		          << " duration=" << song->duration
 		          << " segments=" << plan.segments()
-		          << " video=" << (plan.copy_video ? "copy" : "encode")
-		          << " audio=" << (plan.copy_audio ? "copy" : "encode")
+		          << " video=" << (!variant.audio_only.empty() ? "none"
+		                          : plan.copy_video ? "copy" : "encode")
+		          << " audio=" << (!variant.audio_only.empty()
+		                          ? variant.audio_only + "/" + std::to_string(variant.kbps)
+		                          : plan.copy_audio ? "copy" : "encode")
 		          << " path=" << req.path << std::endl;
 		// This body contains the caller's credentials, once per segment, and
 		// the player writes it to disk. It is also served under
@@ -1094,8 +1123,9 @@ void GainDrive::routes_stream()
 	// hlsSegment - one segment of a playlist above, or with init=true its init
 	// segment.  A gaindrive extension: the spec leaves segment URLs to the
 	// server, and these are only ever reached through a playlist.
-	server_.Get("/rest/hlsSegment.view", [this, hls_auth](const httplib::Request& req,
-	                                                      httplib::Response& res) {
+	server_.Get("/rest/hlsSegment.view", [this, hls_auth, hls_audio_only](
+	                                     const httplib::Request& req,
+	                                     httplib::Response& res) {
 		const bool use_json = (fmt_of(req) == "json");
 		auto song = store_.get_song(to_int(req.get_param_value("id"), -1));
 		if (!song || !song->is_video) {
@@ -1115,9 +1145,10 @@ void GainDrive::routes_stream()
 			res.status = 403;
 			return;
 			}
-		const HlsVariant v{ to_int(req.get_param_value("maxBitRate"), 0),
-		                    sane_video_size(req.get_param_value("size")),
-		                    hls_audio_codecs(req.get_param_value("audioCodecs")) };
+		HlsVariant v{ to_int(req.get_param_value("maxBitRate"), 0),
+		              sane_video_size(req.get_param_value("size")),
+		              hls_audio_codecs(req.get_param_value("audioCodecs")) };
+		hls_audio_only(req, v);
 		auto si = streamer_song(*song, song_abs);
 		if (req.get_param_value("init") == "true") {
 			hls_.serve_init(res, si, v);

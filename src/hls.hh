@@ -23,7 +23,10 @@ struct HlsVariant {
 	// Canonical, from hls_audio_codecs(): so it can go into a URL and into a
 	// session's identity as it is.
 	std::string audio;
-	bool constrained() const { return kbps > 0 || !size.empty(); }
+	// Set for the soundtrack alone: the codec it is encoded to, "aac" or
+	// "opus", at `kbps`.  Such a rendition has no picture to constrain.
+	std::string audio_only;
+	bool constrained() const { return audio_only.empty() && (kbps > 0 || !size.empty()); }
 	bool takes(const std::string& codec) const;
 	};
 
