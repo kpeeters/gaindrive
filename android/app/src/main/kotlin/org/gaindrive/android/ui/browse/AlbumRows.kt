@@ -121,6 +121,7 @@ fun albumListRows(
 		}
 
 		if (multiChaptered) pending.add(song.title)
+		val ranges = FilmRange.ofMarkers(song.ref, markers, song.duration * 1000L)
 		markers.forEachIndexed { i, chapter ->
 			rows.add(
 				AlbumListRow.Marker(
@@ -128,7 +129,7 @@ fun albumListRows(
 					song = song,
 					queueIndex = index,
 					chapter = chapter,
-					endMs = markers.getOrNull(i + 1)?.startMs ?: (song.duration * 1000L),
+					endMs = ranges[i].endMs,
 				)
 			)
 			pending = mutableListOf()

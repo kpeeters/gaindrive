@@ -177,7 +177,15 @@ private fun albumSubtitle(album: Album, showArtist: Boolean): String {
 		if (showArtist && album.artistName.isNotBlank()) add(album.artistName)
 		album.year?.let { add(it.toString()) }
 		if (album.songCount > 0) {
-			add(if (album.songCount == 1) "1 track" else "${album.songCount} tracks")
+			val stored = album.storedSongCount
+			add(
+				when {
+					stored != null && stored < album.songCount ->
+						"$stored of ${album.songCount} tracks"
+					album.songCount == 1 -> "1 track"
+					else -> "${album.songCount} tracks"
+				}
+			)
 		}
 	}
 	return parts.joinToString(" · ")

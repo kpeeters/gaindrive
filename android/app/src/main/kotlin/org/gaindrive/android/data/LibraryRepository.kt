@@ -91,9 +91,37 @@ class LibraryRepository @Inject constructor(
 	 * whole library, since the connection may come straight back. Only a
 	 * genuinely offline app trims itself to what it can play.
 	 */
-	private suspend fun storedOnly(): StoredFilter? =
-		if (offline) local.storedFilter(audioCache.cachedKeys.value + filmsWithStoredRanges())
-		else null
+	private suspend fun storedOnly(): StoredFilter? {
+		if (!offline) return null
+		val filter = local.storedFilter(audioCache.cachedKeys.value + filmsWithStoredRanges())
+		return filter.copy(storedTracks = storedTrackCounts(filter.albums))
+	}
+
+	/**
+	 * How many of each album's rows are here, counted as the album screen
+	 * lists them: a chaptered recording is its chapters, each one here when
+	 * the film is stored whole or that chapter is. Against the same union
+	 * `AvailabilityState.storedKeys` takes, so the count agrees with the marks
+	 * on the album screen. An album with nothing countable is left out rather
+	 * than reported as "0 of", which would only mean the mirror lacks its
+	 * tracks or markers.
+	 */
+	private suspend fun storedTrackCounts(albums: Set<String>): Map<String, Int> {
+		val here = audioCache.cachedKeys.value + downloads.states.value.completed
+		return albums.mapNotNull(ItemRef::decode).mapNotNull { album ->
+			val chapters = local.chaptersOfAlbum(album)
+			val stored = local.albumDetail(album)?.songs.orEmpty().sumOf { song ->
+				val markers = chapters[song.ref].orEmpty()
+				when {
+					markers.isEmpty() -> if (song.ref.encode() in here) 1 else 0
+					song.ref.encode() in here -> markers.size
+					else -> FilmRange.ofMarkers(song.ref, markers, song.duration * 1000L)
+						.count { it.ref.encode() in here }
+				}
+			}
+			stored.takeIf { it > 0 }?.let { album.encode() to it }
+		}.toMap()
+	}
 
 	/**
 	 * Films with at least one stored chapter, as bare refs. A chapter download

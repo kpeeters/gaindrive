@@ -82,6 +82,12 @@ data class Album(
 	 * has it.
 	 */
 	val refs: List<ItemRef> = listOf(ref),
+	/**
+	 * Offline only: how many of [songCount] are on the device, counted as the
+	 * album screen lists them. Null online, and for an album whose tracks the
+	 * mirror does not know.
+	 */
+	val storedSongCount: Int? = null,
 ) {
 	val isStarred: Boolean get() = starredAt != null
 

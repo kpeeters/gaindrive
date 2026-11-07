@@ -16,7 +16,7 @@ import org.gaindrive.android.data.model.Playlist
  * Individual *tracks* are not filtered by this. Inside an album that survived,
  * knowing which three of its twelve tracks are here is useful, and dropping the
  * rest would misreport the album's length and renumber it. Those rows are dimmed
- * instead - see `AvailabilityState`.
+ * instead - see `AvailabilityState` - and the album row says "3 of 12 tracks".
  *
  * Applied only when genuinely offline. A server that merely failed while online
  * still shows its whole stored library: the connection may come back, and
@@ -33,6 +33,8 @@ data class StoredFilter(
 	val playlists: Set<String>,
 	/** How many albums an artist has *here*, which is not what the server said. */
 	val albumCounts: Map<String, Int>,
+	/** How many of an album's tracks are here; see `Album.storedSongCount`. */
+	val storedTracks: Map<String, Int> = emptyMap(),
 ) {
 
 	// Named apart rather than overloaded: generic erasure gives every
@@ -50,8 +52,9 @@ data class StoredFilter(
 		return artist.copy(albumCount = albumCounts[key] ?: artist.albumCount)
 	}
 
-	fun filterAlbums(albums: List<Album>): List<Album> =
-		albums.filter { it.ref.encode() in this.albums }
+	fun filterAlbums(albums: List<Album>): List<Album> = albums
+		.filter { it.ref.encode() in this.albums }
+		.map { it.copy(storedSongCount = storedTracks[it.ref.encode()]) }
 
 	fun filterPlaylists(playlists: List<Playlist>): List<Playlist> =
 		playlists.filter { it.ref.encode() in this.playlists }

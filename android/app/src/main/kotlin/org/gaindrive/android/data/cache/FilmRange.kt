@@ -1,5 +1,6 @@
 package org.gaindrive.android.data.cache
 
+import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.data.model.ItemRef
 
 /**
@@ -24,6 +25,18 @@ data class FilmRange(val film: ItemRef, val startMs: Long, val endMs: Long) {
 	companion object {
 		/** A Subsonic id is an integer, so it cannot contain this. */
 		private const val SEP = '#'
+
+		/**
+		 * One range per marker, each ending where the next starts and the last
+		 * at the end of the film. In one place because a stored chapter is
+		 * found by its exact bounds: two derivations that drift apart would
+		 * silently stop finding it.
+		 */
+		fun ofMarkers(film: ItemRef, markers: List<Chapter>, filmDurationMs: Long) =
+			markers.mapIndexed { i, chapter ->
+				val endMs = markers.getOrNull(i + 1)?.startMs ?: filmDurationMs
+				FilmRange(film, chapter.startMs, endMs)
+			}
 
 		/** Null for an ordinary ref, which is how a song is told from a range. */
 		fun of(ref: ItemRef): FilmRange? {
