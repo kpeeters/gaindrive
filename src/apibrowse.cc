@@ -1485,7 +1485,8 @@ void GainDrive::routes_browse()
 						{"title",  c.title},
 						{"artist", c.artist},
 						{"album",  c.title},
-						{"videoCount", c.video_count}
+						{"videoCount", c.video_count},
+						{"songCount",  c.song_count}
 						};
 					if (c.cover_art_id >= 0) al["coverArt"] = sid(c.cover_art_id);
 					albums.push_back(al);
@@ -1538,6 +1539,7 @@ void GainDrive::routes_browse()
 					el->SetAttribute("artist", c.artist.c_str());
 					el->SetAttribute("album",  c.title.c_str());
 					el->SetAttribute("videoCount", c.video_count);
+					el->SetAttribute("songCount",  c.song_count);
 					if (c.cover_art_id >= 0) el->SetAttribute("coverArt", c.cover_art_id);
 					result->InsertEndChild(el);
 					}

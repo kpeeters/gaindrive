@@ -91,7 +91,11 @@ fun Modifier.videoSideGestures(
 	// Unconditional for the reason the system bars are restored
 	// unconditionally: a screen that kept the display dimmed on its way out
 	// would leave nothing saying why the rest of the app had gone dark.
+	//
+	// Coming back puts the film's own level back, so a viewer who dimmed it
+	// for a dark room does not have to dim it again for the next one.
 	DisposableEffect(view) {
+		filmBrightness?.let { view.activityWindow()?.setBrightnessLevel(it) }
 		onDispose { view.activityWindow()?.clearBrightnessOverride() }
 	}
 
@@ -112,7 +116,10 @@ fun Modifier.videoSideGestures(
 				SideControl.Brightness -> view.activityWindow()?.let { window ->
 					Effector(
 						read = { window.brightnessLevel(context) },
-						write = { window.setBrightnessLevel(it) },
+						write = {
+							window.setBrightnessLevel(it)
+							filmBrightness = it
+						},
 					)
 				}
 				SideControl.Volume -> audio?.let { manager ->
@@ -240,6 +247,16 @@ private fun Window.setBrightnessLevel(level: Float) {
 		screenBrightness = level.coerceIn(MIN_BRIGHTNESS, 1f)
 	}
 }
+
+/**
+ * The level last set by the gesture, applied again whenever a film is opened.
+ *
+ * Held for the life of the process rather than stored: the room a film is
+ * watched in tomorrow is not today's, and a display that comes up dimmed with
+ * nothing on screen saying why is the failure worth avoiding. Main thread only,
+ * like everything else touching the window.
+ */
+private var filmBrightness: Float? = null
 
 /** Hands the brightness back to the system, adaptive brightness with it. */
 private fun Window.clearBrightnessOverride() {

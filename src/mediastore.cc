@@ -297,14 +297,26 @@ static const std::string ALBUM_ARTIST_ID_SQL =
 // Computed here rather than stored on the album row, unlike every other album
 // aggregate. albums.song_count and albums.duration are written by no scan path
 // at all -- there is one INSERT INTO albums and it names neither, and no UPDATE
-// touches them -- so both have always read 0, and a stored video_count would be
-// a third column waiting for a write that never comes. One index-only seek
+// touches them -- so both always read 0 (song_count is now computed too, see
+// ALBUM_TRACK_COUNT_SQL), and a stored video_count would be a third column
+// waiting for a write that never comes. One index-only seek
 // per album, on songs(album_id, is_video) -- but per album SQLite *sorts*,
 // as result columns are computed before the sort, which is why an ordered
 // list needs an index for its ORDER BY to stop at the listed ones.
 static const std::string ALBUM_VIDEO_COUNT_SQL =
 	",      (SELECT COUNT(*) FROM songs sv"
 	"         WHERE sv.album_id = al.id AND sv.is_video = 1)";
+
+// An album's songCount: its songs, with a chaptered recording counted as its
+// chapters, because that is how many rows a client lists for it once the
+// markers replace the recording's own row. Without this a concert film reads
+// "1 track" above a list of twenty. Sidecar chapters only: container and
+// Blu-ray marks are found per getChapters call and never stored, and an
+// ffprobe per video in a listing is not affordable.
+static const std::string ALBUM_TRACK_COUNT_SQL =
+	"(SELECT COALESCE(SUM(MAX(1, (SELECT COUNT(*) FROM chapters c"
+	"                             WHERE c.path = st.path))), 0)"
+	"   FROM songs st WHERE st.album_id = al.id)";
 
 // Returns sorted list of image paths in dir, excluding cover_path.  Recursive
 // unless the caller says otherwise - see get_extra_image_paths(), where a
@@ -7343,7 +7355,7 @@ std::vector<MediaStore::AlbumEntry> MediaStore::get_album_list(
 		"       COALESCE(a.name,''),"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN f.id ELSE -1 END,"
-		"       COALESCE(al.song_count,0),"
+		"       " + ALBUM_TRACK_COUNT_SQL + ","
 		"       CAST(COALESCE(al.duration,0) AS INTEGER),"
 		"       COALESCE(al.year,0),"
 		"       COALESCE(al.genre,''),"
@@ -7605,7 +7617,7 @@ std::optional<MediaStore::ArtistInfo> MediaStore::get_artist(int folder_id,
 		"       COALESCE(a.name,''),"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN f.id ELSE -1 END,"
-		"       COALESCE(al.song_count,0),"
+		"       " + ALBUM_TRACK_COUNT_SQL + ","
 		"       CAST(COALESCE(al.duration,0) AS INTEGER),"
 		"       COALESCE(al.year,0),"
 		"       COALESCE(al.genre,''),"
@@ -7659,7 +7671,7 @@ std::optional<MediaStore::AlbumInfo> MediaStore::get_album(int folder_id,
 		"       COALESCE(a.name,''),"
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN f.id ELSE -1 END,"
-		"       COALESCE(al.song_count,0),"
+		"       " + ALBUM_TRACK_COUNT_SQL + ","
 		"       CAST(COALESCE(al.duration,0) AS INTEGER),"
 		"       COALESCE(al.year,0),"
 		"       COALESCE(al.genre,''),"
@@ -9005,6 +9017,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& viewer,
 		"       CASE WHEN al.cover_path IS NOT NULL AND al.cover_path != ''"
 		"            THEN f.id ELSE -1 END AS cover_art_id"
 		+ ALBUM_VIDEO_COUNT_SQL +
+		",      " + ALBUM_TRACK_COUNT_SQL +
 		" FROM albums al"
 		" JOIN folders f ON f.id = al.folder_id"
 		" LEFT JOIN album_artists aa ON aa.album_id = al.id AND aa.role = 'albumartist'"
@@ -9028,6 +9041,7 @@ MediaStore::SearchResult MediaStore::search(const std::string& viewer,
 		e.artist       = alq.getColumn(3).getString();
 		e.cover_art_id = alq.getColumn(4).getInt();
 		e.video_count  = alq.getColumn(5).getInt();
+		e.song_count   = alq.getColumn(6).getInt();
 		result.albums.push_back(std::move(e));
 		}
 
