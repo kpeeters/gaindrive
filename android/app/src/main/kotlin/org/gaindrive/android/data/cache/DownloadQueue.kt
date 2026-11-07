@@ -9,6 +9,7 @@ import androidx.media3.exoplayer.offline.DownloadRequest
 import androidx.media3.exoplayer.offline.DownloadService
 import androidx.media3.exoplayer.scheduler.Requirements
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -47,6 +48,18 @@ class DownloadQueue @Inject constructor(
 	private val _states = MutableStateFlow(DownloadStates())
 	val states: StateFlow<DownloadStates> = _states.asStateFlow()
 
+	private val restored = CompletableDeferred<Unit>()
+
+	/**
+	 * [states] once the downloads finished before this process started are in
+	 * it. Until then `completed` is empty, which a caller reading it once
+	 * cannot tell from having downloaded nothing.
+	 */
+	suspend fun restoredStates(): DownloadStates {
+		restored.await()
+		return _states.value
+	}
+
 	init {
 		downloads.addListener(object : DownloadManager.Listener {
 			/**
@@ -55,13 +68,7 @@ class DownloadQueue @Inject constructor(
 			 * that were already under way when the process last died.
 			 */
 			override fun onInitialized(downloadManager: DownloadManager) {
-				scope.launch {
-					val (done, failed) = scanTerminal()
-					_states.update {
-						it.copy(completed = it.completed + done, failed = it.failed + failed)
-					}
-					publish()
-				}
+				restoreTerminal()
 			}
 
 			override fun onDownloadChanged(
@@ -116,6 +123,10 @@ class DownloadQueue @Inject constructor(
 				publish()
 			}
 		})
+		// Initialisation may have finished before the listener was added, and
+		// it is not replayed. Scanning twice in a race is harmless: both add
+		// the same keys.
+		if (downloads.isInitialized) restoreTerminal()
 		publish()
 
 		scope.launch {
@@ -209,6 +220,17 @@ class DownloadQueue @Inject constructor(
 			key,
 			/* foreground = */ false,
 		)
+	}
+
+	private fun restoreTerminal() {
+		scope.launch {
+			val (done, failed) = scanTerminal()
+			_states.update {
+				it.copy(completed = it.completed + done, failed = it.failed + failed)
+			}
+			publish()
+			restored.complete(Unit)
+		}
 	}
 
 	/**

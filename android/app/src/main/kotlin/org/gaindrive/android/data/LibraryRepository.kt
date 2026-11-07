@@ -93,8 +93,13 @@ class LibraryRepository @Inject constructor(
 	 */
 	private suspend fun storedOnly(): StoredFilter? {
 		if (!offline) return null
-		val filter = local.storedFilter(audioCache.cachedKeys.value + filmsWithStoredRanges())
-		return filter.copy(storedTracks = storedTrackCounts(filter.albums))
+		// Awaited rather than read: both load asynchronously at startup, and a
+		// listing drawn before they are in would hide the whole library and
+		// say nothing is stored.
+		val cached = audioCache.loadedCachedKeys()
+		val completed = downloads.restoredStates().completed
+		val filter = local.storedFilter(cached + filmsWithStoredRanges(completed))
+		return filter.copy(storedTracks = storedTrackCounts(filter.albums, cached + completed))
 	}
 
 	/**
@@ -106,9 +111,11 @@ class LibraryRepository @Inject constructor(
 	 * than reported as "0 of", which would only mean the mirror lacks its
 	 * tracks or markers.
 	 */
-	private suspend fun storedTrackCounts(albums: Set<String>): Map<String, Int> {
-		val here = audioCache.cachedKeys.value + downloads.states.value.completed
-		return albums.mapNotNull(ItemRef::decode).mapNotNull { album ->
+	private suspend fun storedTrackCounts(
+		albums: Set<String>,
+		here: Set<String>,
+	): Map<String, Int> =
+		albums.mapNotNull(ItemRef::decode).mapNotNull { album ->
 			val chapters = local.chaptersOfAlbum(album)
 			val stored = local.albumDetail(album)?.songs.orEmpty().sumOf { song ->
 				val markers = chapters[song.ref].orEmpty()
@@ -121,7 +128,6 @@ class LibraryRepository @Inject constructor(
 			}
 			stored.takeIf { it > 0 }?.let { album.encode() to it }
 		}.toMap()
-	}
 
 	/**
 	 * Films with at least one stored chapter, as bare refs. A chapter download
@@ -129,8 +135,8 @@ class LibraryRepository @Inject constructor(
 	 * this the film's album, artist and playlists would all vanish offline
 	 * while the chapter itself is sitting on the device.
 	 */
-	private fun filmsWithStoredRanges(): Set<String> =
-		downloads.states.value.completed.mapNotNullTo(mutableSetOf()) { key ->
+	private fun filmsWithStoredRanges(completed: Set<String>): Set<String> =
+		completed.mapNotNullTo(mutableSetOf()) { key ->
 			ItemRef.decode(key)?.let(FilmRange::of)?.film?.encode()
 		}
 

@@ -8,6 +8,7 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.ContentMetadata
 import androidx.media3.datasource.cache.SimpleCache
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
@@ -61,6 +62,17 @@ class AudioCache @Inject constructor(
 	 * absent, since offline it would stall where the bytes ran out.
 	 */
 	val cachedKeys: StateFlow<Set<String>> = _cachedKeys.asStateFlow()
+
+	private val loaded = CompletableDeferred<Unit>()
+
+	/**
+	 * [cachedKeys] once the first scan of the cache is in. Until then it is
+	 * empty, which a caller reading it once cannot tell from an empty cache.
+	 */
+	suspend fun loadedCachedKeys(): Set<String> {
+		loaded.await()
+		return cachedKeys.value
+	}
 
 	/** Read on the player's thread when a track starts; see [dataSourceFactory]. */
 	@Volatile
@@ -304,6 +316,7 @@ class AudioCache @Inject constructor(
 		// nothing if a quality suffix reached them.
 		_cachedKeys.value = snapshot.complete
 			.mapTo(mutableSetOf()) { CacheKeys.refKeyOf(it) } + films
+		loaded.complete(Unit)
 	}
 
 	/**
