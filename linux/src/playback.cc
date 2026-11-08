@@ -34,17 +34,6 @@ namespace {
 	// minutes; the web client refreshes it every 30 seconds.
 	const unsigned report_every = 30;
 
-	// What the Default Media Receiver decodes, of the types the server
-	// reports. An allowlist, so an unknown type is converted rather than
-	// refused by the receiver.
-	bool cast_plays(const std::string& mime)
-		{
-		for(const char *m: {"audio/flac", "audio/mpeg", "audio/mp4", "audio/aac",
-		                    "audio/ogg", "audio/wav"})
-			if(mime==m) return true;
-		return false;
-		}
-
 	bool flag(const nlohmann::json& j, const std::string& key)
 		{
 		const auto& v = jsub(j, key);
@@ -53,7 +42,7 @@ namespace {
 
 	// What a cast is sent, in the web client's words, from the server's
 	// description of it.
-	std::string cast_how(const nlohmann::json& c)
+	std::string cast_how(const nlohmann::json& c, bool is_video)
 		{
 		std::string suffix = jstr(c, "sentSuffix"), tier = jstr(c, "tier");
 		std::transform(suffix.begin(), suffix.end(), suffix.begin(),
@@ -63,17 +52,10 @@ namespace {
 		std::string how  = flag(c, "audioOnly")
 		                     ? (tier=="remux" ? "soundtrack only, copied" : "soundtrack only, re-encoded")
 		                 : tier=="copy"   ? "HLS, picture copied"
+		                 : tier=="encode" && !is_video ? "converted"
 		                 : tier=="encode" ? "HLS, re-encoded"
 		                 :                  "as stored";
 		return what.empty() ? how : what + " - " + how;
-		}
-
-	std::string mime_of_format(const std::string& format)
-		{
-		if(format=="opus") return "audio/ogg";
-		if(format=="m4a")  return "audio/mp4";
-		if(format=="flac") return "audio/flac";
-		return "audio/mpeg";
 		}
 }
 
@@ -432,90 +414,9 @@ void Playback::cast_start(double offset)
 	const Song *s = current();
 	if(!s || !api_for(*s)) return;
 	picture_stop();
-	if(s->is_video) {
-		cast_film(offset);
-		return;
-		}
-	cast_screen_ = false;
-	caster_.prepare(offset);
-	unsigned gen = ++cast_gen_;
-
-	Params p = {{"id", s->ref.id}};
-	std::string mime = s->content_type;
-	int cap = settings_.cast_original ? 0 : settings_.quality_cap;
-	if(cap>0) {
-		p.push_back({"maxBitRate", std::to_string(cap)});
-		p.push_back({"format", settings_.format});
-		p.push_back({"playable", "adts/aac,mp4/aac,mpeg/mp3,ogg/opus,ogg/vorbis"});
-		mime = mime_of_format(settings_.format);
-		}
-	else if(!cast_plays(s->content_type)) {
-		// Lossless, so a lossy original is not given a second generation
-		// of loss.
-		p.push_back({"format", "flac"});
-		mime = "audio/flac";
-		}
-	// A receiver reads at playback speed and stops once its buffer is full;
-	// unpaced, the server sends the whole track at once and the idle
-	// connection is then cut by a proxy or by the receiver's own timeout.
-	p.push_back({"pace", "true"});
-
-	pool_.submit([this, api=api_for(*s), song=*s, p, mime, gen, offset]() mutable {
-		std::string token;
-		auto r = ApiClient::get_json(api->session(), "getCastToken", {{"id", song.ref.id}});
-		if(r.ok)
-			token = jstr(r.body, "castToken");
-		else
-			std::cout << stamp() << "Cast: no cast token (" << r.error
-			          << "); sending the account's credentials" << std::endl;
-		std::string url = api->cast_url("stream", p, token);
-
-		// Also what a capped track turned out to be: under the cap the
-		// original is sent as it is.
-		std::string type, error, sent;
-		bool ok = ApiClient::probe_stream(url, type, error, &sent);
-		std::string arrived = type.substr(0, type.find(';'));
-		if(!arrived.empty()) mime = arrived;
-
-		nlohmann::json meta = {
-			{"metadataType", 3},
-			{"title",        song.title},
-			{"artist",       song.artist},
-			{"albumName",    song.album}
-			};
-		// Only with a grant, which covers this song's cover.
-		if(!token.empty() && !song.cover_art.empty())
-			meta["images"] = {{{"url", api->cast_url("getCoverArt",
-			                     {{"id", song.cover_art}, {"size", "600"}}, token)}}};
-
-		on_ui([this, ok, error, url, mime, meta, gen, offset, sent, duration=song.duration]() {
-			if(gen!=cast_gen_ || !caster_.active()) return;
-			cast_sent_ = sent;
-			cast_type_ = mime;
-			if(!ok) {
-				std::cout << stamp() << "Cast: stream probe failed: " << error << std::endl;
-				signal_error.emit("Cannot cast this track: " + error);
-				signal_state.emit(false);
-				return;
-				}
-			Caster::Load l;
-			l.url      = url;
-			l.mime     = mime;
-			l.duration = duration;
-			l.start    = offset;
-			l.metadata = meta;
-			caster_.load(l);
-			});
-		});
-	}
-
-void Playback::cast_film(double offset)
-	{
-	const Song *s = current();
-	if(!s || !api_for(*s)) return;
 	// What the receiver is sent is the server's decision, the one it makes
-	// for its own casts, so a film reaches a receiver the same way whichever
-	// player sends it. Only the receiver is ours to describe.
+	// for its own casts, so a track or film reaches a receiver the same way
+	// whichever player sends it. Only the receiver and the quality are ours.
 	cast_screen_ = false;
 	caster_.prepare(offset);
 	unsigned gen = ++cast_gen_;
@@ -523,18 +424,27 @@ void Playback::cast_film(double offset)
 	const auto& dev = caster_.device();
 	Params p = {{"id", s->ref.id}, {"deviceId", dev.id},
 	            {"capabilities", std::to_string(dev.capabilities)}};
-	if(caption_song_==s->ref.server + "|" + s->ref.id && caption_track_>0)
-		p.push_back({"trackId", std::to_string(caption_track_)});
+	if(s->is_video) {
+		if(caption_song_==s->ref.server + "|" + s->ref.id && caption_track_>0)
+			p.push_back({"trackId", std::to_string(caption_track_)});
+		}
+	else {
+		int cap = settings_.cast_original ? 0 : settings_.quality_cap;
+		if(cap>0) {
+			p.push_back({"maxBitRate", std::to_string(cap)});
+			p.push_back({"format", settings_.format});
+			}
+		}
 
 	pool_.submit([this, api=api_for(*s), song=*s, p, gen, offset]() {
-		// The server builds a soundtrack before answering, which for a long
-		// film is a while.
+		// The server builds a conversion or a soundtrack before answering,
+		// which for a long film is a while.
 		auto r = ApiClient::get_json(api->session(), "getCastLoad", p, 300);
 		const auto& c = jsub(r.body, "castLoad");
 		std::string token = jstr(c, "castToken");
 
 		nlohmann::json meta;
-		if(flag(c, "audioOnly"))
+		if(!song.is_video || flag(c, "audioOnly"))
 			meta = {{"metadataType", 3}, {"title", song.title}, {"artist", song.artist},
 			        {"albumName", song.album}};
 		else
@@ -543,15 +453,16 @@ void Playback::cast_film(double offset)
 			meta["images"] = {{{"url", api->cast_url("getCoverArt",
 			                     {{"id", song.cover_art}, {"size", "600"}}, token)}}};
 
-		on_ui([this, r, c, meta, gen, offset, api, p]() {
+		on_ui([this, r, c, meta, gen, offset, api, p, is_video=song.is_video]() {
 			if(gen!=cast_gen_ || !caster_.active()) return;
 			if(!r.ok) {
-				signal_error.emit("Cannot cast this film: " + r.error);
+				signal_error.emit(std::string(is_video ? "Cannot cast this film: "
+				                                       : "Cannot cast this track: ") + r.error);
 				signal_state.emit(false);
 				return;
 				}
 			cast_screen_ = flag(c, "receiverShowsVideo");
-			cast_sent_   = cast_how(c);
+			cast_sent_   = cast_how(c, is_video);
 			cast_type_   = jstr(c, "contentType");
 			Caster::Load l;
 			l.url      = jstr(c, "url");
@@ -579,7 +490,7 @@ void Playback::cast_film(double offset)
 						on_ui([this, fb, gen]() {
 							if(gen!=cast_gen_) return;
 							cast_screen_ = false;
-							cast_sent_   = cast_how(fb);
+							cast_sent_   = cast_how(fb, true);
 							cast_type_   = jstr(fb, "contentType");
 							picture_follow(position());
 							});

@@ -201,8 +201,8 @@ void TrackInfo::refresh()
 	std::weak_ptr<bool> alive = alive_;
 	if(casting) {
 		const auto& sent = playback_.cast_sent();
-		// A film's is in words already; a track's is the server's header.
-		play[1].second = song.is_video ? sent : sent.empty() ? "" : describe_sent(sent, song.suffix);
+		// In words already, from the server's description of the LOAD.
+		play[1].second = sent;
 		fill(playback_grid_, play);
 		}
 	else {

@@ -105,7 +105,6 @@ class Playback {
 		void start(double offset=0);
 		void local_start(double offset);
 		void cast_start(double offset);
-		void cast_film(double offset);
 		void cast_ended();
 		// Starts or stops the local picture of a cast film, whichever the
 		// receiver and the settings now call for.

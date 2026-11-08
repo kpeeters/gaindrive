@@ -51,6 +51,20 @@ static nlohmann::json volume_json(const CastManager::VolumeState& v)
 	return {{"level", v.level}, {"muted", v.muted}, {"fixed", v.fixed}};
 	}
 
+// The client's quality for audio, as stream.view takes it. An encoder we do
+// not have is dropped rather than refused: the original plays, which beats a
+// LOAD that never happens.
+static std::string cast_format_param(const httplib::Request& req)
+	{
+	std::string format = req.get_param_value("format");
+	if (format == "raw") format.clear();
+	if (!format.empty()) {
+		auto t = target_for(format);
+		if (!t || t->encoder.empty()) format.clear();
+		}
+	return format;
+	}
+
 void GainDrive::routes_cast()
 	{
 	// getCastToken - a credential a receiver can fetch one track with, for a
@@ -119,10 +133,11 @@ void GainDrive::routes_cast()
 
 	// getCastLoad - the LOAD this server would send, for a client that drives
 	// a receiver itself (the Linux player).  The decision about what to send
-	// is build_cast_load(), the same one castLoad runs, so a film reaches a
-	// receiver the same way whichever player sent it.  Only the receiver is
-	// the client's: its `deviceId` (for the per-device preference and the
-	// refusal list) and its mDNS `capabilities`.
+	// is build_cast_load(), the same one castLoad runs, so a track or film
+	// reaches a receiver the same way whichever player sent it.  Only the
+	// receiver and the quality are the client's: its `deviceId` (for the
+	// per-device preference and the refusal list), its mDNS `capabilities`,
+	// and `format`/`maxBitRate` as castLoad takes them.
 	//
 	// Gated as getCastToken is, and for its reasons; the grant it mints is
 	// the same one.
@@ -176,11 +191,18 @@ void GainDrive::routes_cast()
 		// Named as castLoad names them.
 		const float offset = std::max(0.0f, to_float(req.get_param_value("timeOffset"), 0.0f));
 		const int   track  = to_int(req.get_param_value("trackId"), 0);
+		const int   cap    = std::max(0, to_int(req.get_param_value("maxBitRate"), 0));
 		CastStreamInfo stream, fb;
 		CastManager::LoadRequest lr = build_cast_load(req, *song, song_id, offset,
-		                                              track, "", 0, target,
-		                                              stream, &fb);
+		                                              track, cast_format_param(req),
+		                                              cap, target, stream, &fb);
 		if (lr.url.empty()) { err(0, "Nothing to cast for this song."); return; }
+		// This server is not the one talking to the receiver, so it never
+		// hears a position to pace a track by; the wall clock stands in, as it
+		// does for the apps' own direct casts. Unpaced, the receiver's buffer
+		// fills, the connection goes idle and a 60 s timer on the path cuts
+		// it. Films are left as they were confirmed working.
+		if (!song->is_video) lr.url += "&pace=true";
 		if (lr.prepare && !lr.prepare()) {
 			err(0, "The stream for this song could not be prepared.");
 			return;
@@ -854,15 +876,7 @@ void GainDrive::routes_cast()
 		// cannot say "none" - SIDECAR_CAPTION_INDEX is -1 and so is a missing
 		// parameter, so "off" and "the sidecar file" would be one value.
 		int track_id = to_int(req.get_param_value("trackId"), 0);
-		// The client's quality for audio, as stream.view takes it. An encoder
-		// we do not have is dropped rather than refused: the original plays,
-		// which beats a LOAD that never happens.
-		std::string format = req.get_param_value("format");
-		if (format == "raw") format.clear();
-		if (!format.empty()) {
-			auto t = target_for(format);
-			if (!t || t->encoder.empty()) format.clear();
-			}
+		std::string format = cast_format_param(req);
 		int max_bitrate = std::max(0, to_int(req.get_param_value("maxBitRate"), 0));
 		last_cast_format_      = format;
 		last_cast_max_bitrate_ = max_bitrate;

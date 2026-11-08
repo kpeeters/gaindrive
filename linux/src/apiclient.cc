@@ -381,42 +381,6 @@ std::string ApiClient::sent_of(const std::string& url)
 	return sent;
 	}
 
-bool ApiClient::probe_stream(const std::string& url, std::string& content_type,
-                             std::string& error, std::string *sent)
-	{
-	std::string origin, path;
-	split_url(url, origin, path);
-	try {
-		httplib::Client cli(origin);
-		cli.set_connection_timeout(5);
-		cli.set_read_timeout(300);
-		cli.set_follow_location(true);
-		cli.set_default_headers({{"User-Agent", "gaindrive-player/" GAINDRIVE_VERSION},
-		                         {"Range", "bytes=0-0"}});
-		auto res = cli.Get(path);
-		if(!res) {
-			error = httplib::to_string(res.error());
-			return false;
-			}
-		if(res->status!=200 && res->status!=206) {
-			error = "Server returned HTTP " + std::to_string(res->status);
-			return false;
-			}
-		content_type = res->get_header_value("Content-Type");
-		if(sent) *sent = res->get_header_value("X-Gaindrive-Sent");
-		// An error document is JSON; audio never is.
-		if(content_type.find("json")!=std::string::npos || content_type.find("xml")!=std::string::npos) {
-			error = "Server sent " + content_type + " instead of audio";
-			return false;
-			}
-		return true;
-		}
-	catch(const std::exception& ex) {
-		error = ex.what();
-		return false;
-		}
-	}
-
 ApiResult ApiClient::get_json(const Session& s, const std::string& endpoint, const Params& params,
                               int read_timeout)
 	{
