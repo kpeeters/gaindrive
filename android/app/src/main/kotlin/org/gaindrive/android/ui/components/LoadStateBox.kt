@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -55,7 +54,7 @@ fun <T> LoadStateBox(
 				if (onRetry != null) {
 					OutlinedButton(
 						onClick = onRetry,
-						modifier = Modifier.tvFocusHighlight(CircleShape),
+						modifier = Modifier.tvFocusHighlight(),
 					) { Text("Try again") }
 				}
 			}

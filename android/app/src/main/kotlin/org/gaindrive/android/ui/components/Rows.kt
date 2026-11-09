@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -362,15 +361,18 @@ fun TrackRow(
 }
 
 /**
- * Marks the row whose contents the pane beside it shows. A fill rather than
- * the TV focus ring's outline: the two answer different questions, "what is
- * open" and "where am I", and are often on screen together. Inside the
- * clickable, so the TV focus scale grows the fill with the row.
+ * Marks the row whose contents the pane beside it shows: the web client's
+ * tinted pill at rest. The TV focus tint is the same accent at twice the
+ * strength, so "what is open" and "where am I" read as two tones of one
+ * colour when they are on the same row.
  */
 @Composable
 private fun Modifier.openMark(open: Boolean): Modifier =
 	if (!open) this
-	else background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
+	else background(
+		MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+		RoundedCornerShape(8.dp),
+	)
 
 /**
  * The d-pad stand-in for long-press. Compact rather than the 48dp Material
@@ -382,7 +384,7 @@ private fun RowOverflowButton(onClick: () -> Unit) {
 		onClick = onClick,
 		modifier = Modifier
 			.size(32.dp)
-			.tvFocusHighlight(CircleShape),
+			.tvFocusHighlight(),
 	) {
 		Icon(
 			imageVector = Icons.Default.MoreVert,

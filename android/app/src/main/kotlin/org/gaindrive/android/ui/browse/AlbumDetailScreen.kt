@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -253,7 +252,7 @@ fun AlbumDetailScreen(
 						var menuOpen by remember { mutableStateOf(false) }
 						IconButton(
 							onClick = { menuOpen = true },
-							modifier = Modifier.tvFocusHighlight(CircleShape),
+							modifier = Modifier.tvFocusHighlight(),
 						) {
 							Icon(Icons.Default.MoreVert, contentDescription = "More")
 						}
@@ -412,7 +411,7 @@ fun AlbumDetailScreen(
 							val song = detail.songs[next]
 							FilledTonalButton(
 								onClick = { player.play(detail.songs, next, watched.resumeMs(song)) },
-								modifier = Modifier.padding(top = 12.dp).tvFocusHighlight(CircleShape),
+								modifier = Modifier.padding(top = 12.dp).tvFocusHighlight(),
 							) {
 								Icon(
 									Icons.Default.PlayArrow,
@@ -554,7 +553,7 @@ private fun PromoteDialog(
 						OutlinedButton(
 							enabled = !busy,
 							onClick = { open = true },
-							modifier = Modifier.tvFocusHighlight(CircleShape),
+							modifier = Modifier.tvFocusHighlight(),
 						) {
 							Text(chosen?.name ?: "Choose a library")
 							Icon(Icons.Default.ArrowDropDown, contentDescription = null)

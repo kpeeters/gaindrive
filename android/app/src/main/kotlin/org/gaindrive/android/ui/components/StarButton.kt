@@ -1,6 +1,5 @@
 package org.gaindrive.android.ui.components
 
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -34,7 +33,7 @@ fun StarButton(
 		onClick = { stars.toggle(ref, kind, fallback) },
 		// Disabled while a write is in flight: see StarStore.busy.
 		enabled = enabled && !stars.isBusy(ref),
-		modifier = modifier.tvFocusHighlight(CircleShape),
+		modifier = modifier.tvFocusHighlight(),
 	) {
 		Icon(
 			imageVector = if (starred) Icons.Default.Star else Icons.Default.StarBorder,

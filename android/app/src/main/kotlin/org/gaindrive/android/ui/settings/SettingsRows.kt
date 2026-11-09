@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -56,7 +55,7 @@ fun SettingsScaffold(
 				title = { Text(title) },
 				navigationIcon = {
 					onBack?.let { back ->
-						IconButton(onClick = back, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+						IconButton(onClick = back, modifier = Modifier.tvFocusHighlight()) {
 							Icon(
 								Icons.AutoMirrored.Filled.ArrowBack,
 								contentDescription = "Back",

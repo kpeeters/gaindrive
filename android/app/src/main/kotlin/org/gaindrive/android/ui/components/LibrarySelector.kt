@@ -2,7 +2,6 @@ package org.gaindrive.android.ui.components
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Dns
@@ -54,7 +53,7 @@ fun LibrarySelector(
 	val showServers = servers.size >= 2
 
 	Box {
-		IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+		IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight()) {
 			Icon(
 				// The icon carries the state, so being offline is visible
 				// without opening anything.

@@ -31,7 +31,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Toc
@@ -634,7 +633,7 @@ private fun Controls(
 				.padding(horizontal = 4.dp),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			IconButton(onClick = onBack, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+			IconButton(onClick = onBack, modifier = Modifier.tvFocusHighlight()) {
 				Icon(
 					Icons.AutoMirrored.Filled.ArrowBack,
 					contentDescription = "Back",
@@ -679,7 +678,7 @@ private fun Controls(
 			if (hasChapters) {
 				IconButton(
 					onClick = onToggleChapters,
-					modifier = Modifier.tvFocusHighlight(CircleShape),
+					modifier = Modifier.tvFocusHighlight(),
 				) {
 					Icon(
 						imageVector = Icons.AutoMirrored.Filled.Toc,
@@ -703,7 +702,7 @@ private fun Controls(
 			// Now Playing sheet is one a film never reaches. It answers most
 			// for a video, which is where remuxing and the cast route are
 			// hardest to guess at.
-			IconButton(onClick = onInfo, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+			IconButton(onClick = onInfo, modifier = Modifier.tvFocusHighlight()) {
 				Icon(Icons.Default.Info, contentDescription = "Track info", tint = Color.White)
 			}
 			// The only way to reach a Chromecast from here. The Now Playing
@@ -718,7 +717,7 @@ private fun Controls(
 			// since deciding it here would need a reachability probe a
 			// composable cannot await.
 			if (onCast != null) {
-				IconButton(onClick = onCast, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+				IconButton(onClick = onCast, modifier = Modifier.tvFocusHighlight()) {
 					Icon(
 						imageVector = if (casting) {
 							Icons.Default.CastConnected
@@ -745,7 +744,7 @@ private fun Controls(
 				IconButton(
 					onClick = onPrevious,
 					enabled = state.hasPrevious,
-					modifier = Modifier.tvFocusHighlight(CircleShape),
+					modifier = Modifier.tvFocusHighlight(),
 				) {
 					Icon(
 						Icons.Default.SkipPrevious,
@@ -764,7 +763,7 @@ private fun Controls(
 				IconButton(
 					onClick = { onSkip(-SKIP_MS) },
 					enabled = state.durationMs > 0,
-					modifier = Modifier.tvFocusHighlight(CircleShape),
+					modifier = Modifier.tvFocusHighlight(),
 				) {
 					Icon(
 						Icons.Default.Replay10,
@@ -777,7 +776,7 @@ private fun Controls(
 					onClick = onTogglePlay,
 					modifier = Modifier
 						.focusRequester(playFocus)
-						.tvFocusHighlight(CircleShape),
+						.tvFocusHighlight(),
 				) {
 					Icon(
 						imageVector = if (state.isPlaying) {
@@ -793,7 +792,7 @@ private fun Controls(
 				IconButton(
 					onClick = { onSkip(SKIP_MS) },
 					enabled = state.durationMs > 0,
-					modifier = Modifier.tvFocusHighlight(CircleShape),
+					modifier = Modifier.tvFocusHighlight(),
 				) {
 					Icon(
 						Icons.Default.Forward10,
@@ -805,7 +804,7 @@ private fun Controls(
 				IconButton(
 					onClick = onNext,
 					enabled = state.hasNext,
-					modifier = Modifier.tvFocusHighlight(CircleShape),
+					modifier = Modifier.tvFocusHighlight(),
 				) {
 					Icon(
 						Icons.Default.SkipNext,
@@ -832,7 +831,7 @@ private fun SubtitleMenu(
 ) {
 	var open by remember { mutableStateOf(false) }
 	Box {
-		IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+		IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight()) {
 			Icon(
 				Icons.Default.ClosedCaption,
 				contentDescription = "Subtitles",

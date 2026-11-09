@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -219,7 +218,7 @@ private fun SearchHeader(
 				leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
 				trailingIcon = {
 					if (query.isNotEmpty()) {
-						IconButton(onClick = onClear, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+						IconButton(onClick = onClear, modifier = Modifier.tvFocusHighlight()) {
 							Icon(Icons.Default.Close, contentDescription = "Clear")
 						}
 					}

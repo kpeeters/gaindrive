@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.DropdownMenu
@@ -151,7 +150,7 @@ private fun SortAction(current: AlbumSort, onSelect: (AlbumSort) -> Unit) {
 	var open by remember { mutableStateOf(false) }
 
 	Box {
-		IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+		IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight()) {
 			Icon(
 				imageVector = Icons.AutoMirrored.Filled.Sort,
 				contentDescription = "Sort albums, currently by ${current.label.lowercase()}",

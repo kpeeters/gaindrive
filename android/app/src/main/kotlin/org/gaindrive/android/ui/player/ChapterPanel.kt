@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -76,10 +75,10 @@ fun ChapterPanel(
 				// Arrows rather than skip-previous/skip-next: those already mean
 				// "the next item in the queue" a few dp away in the transport
 				// row, and stepping between markers is not that.
-				IconButton(onClick = onPrevious, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+				IconButton(onClick = onPrevious, modifier = Modifier.tvFocusHighlight()) {
 					Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous chapter")
 				}
-				IconButton(onClick = onNext, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+				IconButton(onClick = onNext, modifier = Modifier.tvFocusHighlight()) {
 					Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next chapter")
 				}
 				Text(
@@ -87,7 +86,7 @@ fun ChapterPanel(
 					style = MaterialTheme.typography.titleSmall,
 					modifier = Modifier.weight(1f),
 				)
-				IconButton(onClick = onClose, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+				IconButton(onClick = onClose, modifier = Modifier.tvFocusHighlight()) {
 					Icon(Icons.Default.Close, contentDescription = "Close")
 				}
 			}

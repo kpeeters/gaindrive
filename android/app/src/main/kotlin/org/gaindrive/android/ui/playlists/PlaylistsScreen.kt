@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
@@ -164,7 +163,7 @@ fun PlaylistsScreen(
 private fun PlaylistMenu(onDelete: () -> Unit) {
 	var open by remember { mutableStateOf(false) }
 
-	IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+	IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight()) {
 		Icon(Icons.Default.MoreVert, contentDescription = "Playlist actions")
 		DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
 			DropdownMenuItem(

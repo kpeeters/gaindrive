@@ -3,7 +3,6 @@ package org.gaindrive.android.ui.components
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
@@ -61,7 +60,7 @@ fun PinAction(
 	val status = statuses[ref.encode()]
 	IconButton(
 		onClick = { viewModel.toggle(ref, kind) },
-		modifier = Modifier.tvFocusHighlight(CircleShape),
+		modifier = Modifier.tvFocusHighlight(),
 	) {
 		DownloadIndicator(status)
 	}

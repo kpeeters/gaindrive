@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.Close
@@ -87,7 +86,7 @@ fun FetchStrip(
 				if (live.isEmpty() && notice != null) {
 					IconButton(
 						onClick = { onDismiss(notice.job.id) },
-						modifier = Modifier.tvFocusHighlight(CircleShape),
+						modifier = Modifier.tvFocusHighlight(),
 					) {
 						Icon(
 							Icons.Default.Close,

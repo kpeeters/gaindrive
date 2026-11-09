@@ -20,7 +20,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,7 +60,7 @@ fun ServersSettingsScreen(
 		floatingActionButton = {
 			FloatingActionButton(
 				onClick = { onEditServer(null) },
-				modifier = Modifier.tvFocusHighlight(FloatingActionButtonDefaults.shape),
+				modifier = Modifier.tvFocusHighlight(),
 			) {
 				Icon(Icons.Default.Add, contentDescription = "Add server")
 			}
@@ -148,7 +147,7 @@ private fun ServerRow(
 			Box {
 				IconButton(
 					onClick = { menuOpen = true },
-					modifier = Modifier.tvFocusHighlight(CircleShape),
+					modifier = Modifier.tvFocusHighlight(),
 				) {
 					Icon(Icons.Default.MoreVert, contentDescription = "More")
 				}

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddLink
@@ -88,7 +87,7 @@ fun ArtistsScreen(
 				title = { Text(if (uploads) "Uploads" else "Library") },
 				navigationIcon = {
 					if (onBack != null) {
-						IconButton(onClick = onBack, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+						IconButton(onClick = onBack, modifier = Modifier.tvFocusHighlight()) {
 							Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 						}
 					}
@@ -100,7 +99,7 @@ fun ArtistsScreen(
 					if (onOpenUploads != null && canUpload) {
 						IconButton(
 							onClick = onOpenUploads,
-							modifier = Modifier.tvFocusHighlight(CircleShape),
+							modifier = Modifier.tvFocusHighlight(),
 						) {
 							Icon(Icons.Default.Upload, contentDescription = "Uploads")
 						}

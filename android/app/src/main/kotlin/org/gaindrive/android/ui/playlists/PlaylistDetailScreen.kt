@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -132,7 +131,7 @@ fun PlaylistDetailScreen(
 								// position, and a second one issued now would
 								// carry an index the server has already shifted.
 								enabled = !removing,
-								modifier = Modifier.tvFocusHighlight(CircleShape),
+								modifier = Modifier.tvFocusHighlight(),
 							) {
 								Icon(
 									Icons.Default.Close,

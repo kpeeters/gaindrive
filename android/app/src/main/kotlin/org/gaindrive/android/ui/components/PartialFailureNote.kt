@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
@@ -62,7 +61,7 @@ fun PartialFailureNote(
 				}
 			}
 			TextButton(onClick = onRetry) { Text("Retry") }
-			IconButton(onClick = onDismiss, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+			IconButton(onClick = onDismiss, modifier = Modifier.tvFocusHighlight()) {
 				Icon(Icons.Default.Close, contentDescription = "Dismiss")
 			}
 		}

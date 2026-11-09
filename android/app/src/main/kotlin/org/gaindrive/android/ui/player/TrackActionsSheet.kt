@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -264,7 +263,7 @@ private fun PlaylistPicker(song: Song, playlists: AddToPlaylistViewModel) {
 					playlists.create(song.ref.server, newName, song.ref.id)
 				},
 				enabled = !busy && newName.isNotBlank(),
-				modifier = Modifier.tvFocusHighlight(CircleShape),
+				modifier = Modifier.tvFocusHighlight(),
 			) {
 				Icon(Icons.Default.Check, contentDescription = "Create playlist")
 			}

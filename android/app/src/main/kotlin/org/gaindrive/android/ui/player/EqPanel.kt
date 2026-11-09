@@ -138,7 +138,7 @@ internal fun PresetRow(
 			OutlinedButton(
 				onClick = { menuOpen = true },
 				enabled = enabled,
-				modifier = Modifier.tvFocusHighlight(CircleShape),
+				modifier = Modifier.tvFocusHighlight(),
 			) {
 				Text(
 					text = preset ?: "Custom",
@@ -183,7 +183,7 @@ internal fun PresetRow(
 			IconButton(
 				onClick = { saving = !saving },
 				enabled = enabled,
-				modifier = Modifier.tvFocusHighlight(CircleShape),
+				modifier = Modifier.tvFocusHighlight(),
 			) {
 				Icon(Icons.Default.Save, contentDescription = "Save preset")
 			}
@@ -192,7 +192,7 @@ internal fun PresetRow(
 				// Only what the user saved can be deleted; the device's own
 				// presets and an unsaved custom curve cannot.
 				enabled = enabled && preset?.let { it in saved } == true,
-				modifier = Modifier.tvFocusHighlight(CircleShape),
+				modifier = Modifier.tvFocusHighlight(),
 			) {
 				Icon(Icons.Default.Delete, contentDescription = "Delete preset")
 			}
@@ -237,7 +237,7 @@ internal fun PresetRow(
 					}
 				},
 				enabled = saveName.isNotBlank(),
-				modifier = Modifier.tvFocusHighlight(CircleShape),
+				modifier = Modifier.tvFocusHighlight(),
 			) {
 				Icon(Icons.Default.Check, contentDescription = "Save as preset")
 			}
@@ -268,7 +268,7 @@ internal fun VolumeRow(
 			IconButton(
 				onClick = onDown,
 				enabled = fraction != null,
-				modifier = Modifier.size(VOLUME_BUTTON_SIZE).tvFocusHighlight(CircleShape),
+				modifier = Modifier.size(VOLUME_BUTTON_SIZE).tvFocusHighlight(),
 			) {
 				Icon(
 					Icons.AutoMirrored.Filled.VolumeDown,
@@ -283,7 +283,7 @@ internal fun VolumeRow(
 			IconButton(
 				onClick = onUp,
 				enabled = fraction != null,
-				modifier = Modifier.size(VOLUME_BUTTON_SIZE).tvFocusHighlight(CircleShape),
+				modifier = Modifier.size(VOLUME_BUTTON_SIZE).tvFocusHighlight(),
 			) {
 				Icon(
 					Icons.AutoMirrored.Filled.VolumeUp,
@@ -323,7 +323,7 @@ internal fun TransportRow(
 		IconButton(
 			onClick = onPrevious,
 			enabled = hasPrevious,
-			modifier = Modifier.tvFocusHighlight(CircleShape),
+			modifier = Modifier.tvFocusHighlight(),
 		) {
 			Icon(
 				Icons.Default.SkipPrevious,
@@ -331,7 +331,7 @@ internal fun TransportRow(
 				modifier = Modifier.size(36.dp),
 			)
 		}
-		IconButton(onClick = onTogglePlay, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+		IconButton(onClick = onTogglePlay, modifier = Modifier.tvFocusHighlight()) {
 			Icon(
 				imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
 				contentDescription = if (playing) "Pause" else "Play",
@@ -341,7 +341,7 @@ internal fun TransportRow(
 		IconButton(
 			onClick = onNext,
 			enabled = hasNext,
-			modifier = Modifier.tvFocusHighlight(CircleShape),
+			modifier = Modifier.tvFocusHighlight(),
 		) {
 			Icon(
 				Icons.Default.SkipNext,

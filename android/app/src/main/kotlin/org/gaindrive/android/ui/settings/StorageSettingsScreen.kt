@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
@@ -210,7 +209,7 @@ fun StorageSettingsScreen(
 			OutlinedButton(
 				onClick = { confirmFlush = true },
 				enabled = evictable > 0,
-				modifier = Modifier.tvFocusHighlight(CircleShape),
+				modifier = Modifier.tvFocusHighlight(),
 			) {
 				Text("Free ${formatBytes(evictable)}")
 			}
@@ -239,7 +238,7 @@ fun StorageSettingsScreen(
 			// only ones left and nothing could fetch them back.
 			OutlinedButton(
 				onClick = viewModel::clearImageCache,
-				modifier = Modifier.tvFocusHighlight(CircleShape),
+				modifier = Modifier.tvFocusHighlight(),
 			) {
 				Text("Clear cover art (${formatBytes(storage.imageBytes)})")
 			}
@@ -408,7 +407,7 @@ private fun PinnedRow(
 				},
 			)
 		}
-		IconButton(onClick = onRemove, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+		IconButton(onClick = onRemove, modifier = Modifier.tvFocusHighlight()) {
 			Icon(Icons.Default.Delete, contentDescription = "Remove download")
 		}
 	}

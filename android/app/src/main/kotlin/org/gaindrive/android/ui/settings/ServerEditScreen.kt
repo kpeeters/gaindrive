@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -76,7 +75,7 @@ fun ServerEditScreen(
 				title = { Text(if (state.isNew) "Add server" else "Edit server") },
 				navigationIcon = {
 					if (!state.firstRun) {
-						IconButton(onClick = onDone, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+						IconButton(onClick = onDone, modifier = Modifier.tvFocusHighlight()) {
 							Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 						}
 					}
@@ -181,7 +180,7 @@ fun ServerEditScreen(
 						enabled = !state.testing && state.url.isNotBlank() &&
 							state.username.isNotBlank() && state.password.isNotBlank(),
 						onClick = viewModel::test,
-						modifier = Modifier.tvFocusHighlight(CircleShape),
+						modifier = Modifier.tvFocusHighlight(),
 					) {
 						if (state.testing) {
 							CircularProgressIndicator(
@@ -196,7 +195,7 @@ fun ServerEditScreen(
 					Button(
 						enabled = state.canSave,
 						onClick = viewModel::save,
-						modifier = Modifier.tvFocusHighlight(CircleShape),
+						modifier = Modifier.tvFocusHighlight(),
 					) {
 						Text("Save")
 					}

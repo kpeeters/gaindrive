@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
@@ -246,7 +245,7 @@ fun NowPlayingSheet(
 						IconButton(
 							onClick = onPrevious,
 							enabled = state.hasPrevious,
-							modifier = Modifier.tvFocusHighlight(CircleShape),
+							modifier = Modifier.tvFocusHighlight(),
 						) {
 							Icon(
 								Icons.Default.SkipPrevious,
@@ -256,7 +255,7 @@ fun NowPlayingSheet(
 						}
 						IconButton(
 							onClick = onTogglePlay,
-							modifier = Modifier.tvFocusHighlight(CircleShape),
+							modifier = Modifier.tvFocusHighlight(),
 						) {
 							Icon(
 								imageVector = if (state.isPlaying) {
@@ -271,7 +270,7 @@ fun NowPlayingSheet(
 						IconButton(
 							onClick = onNext,
 							enabled = state.hasNext,
-							modifier = Modifier.tvFocusHighlight(CircleShape),
+							modifier = Modifier.tvFocusHighlight(),
 						) {
 							Icon(
 								Icons.Default.SkipNext,
@@ -294,7 +293,7 @@ fun NowPlayingSheet(
 						// is nowhere else in the UI. On this side rather than
 						// with the device controls, because three trailing
 						// buttons ran into the transport on a phone.
-						IconButton(onClick = onInfo, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+						IconButton(onClick = onInfo, modifier = Modifier.tvFocusHighlight()) {
 							Icon(
 								Icons.Default.Info,
 								contentDescription = "Track info",
@@ -308,7 +307,7 @@ fun NowPlayingSheet(
 						if (state.isVideo) {
 							IconButton(
 								onClick = onWatch,
-								modifier = Modifier.tvFocusHighlight(CircleShape),
+								modifier = Modifier.tvFocusHighlight(),
 							) {
 								Icon(
 									imageVector = Icons.Default.Movie,
@@ -334,7 +333,7 @@ fun NowPlayingSheet(
 						if (!casting) {
 							IconButton(
 								onClick = onEqualizer,
-								modifier = Modifier.tvFocusHighlight(CircleShape),
+								modifier = Modifier.tvFocusHighlight(),
 							) {
 								Icon(
 									Icons.Default.GraphicEq,
@@ -350,7 +349,7 @@ fun NowPlayingSheet(
 						if (casting) {
 							IconButton(
 								onClick = onSpeakerControls,
-								modifier = Modifier.tvFocusHighlight(CircleShape),
+								modifier = Modifier.tvFocusHighlight(),
 							) {
 								Icon(
 									Icons.Default.Tune,
@@ -370,7 +369,7 @@ fun NowPlayingSheet(
 						if (onCast != null) {
 							IconButton(
 								onClick = onCast,
-								modifier = Modifier.tvFocusHighlight(CircleShape),
+								modifier = Modifier.tvFocusHighlight(),
 							) {
 								Icon(
 									imageVector = if (casting) {
@@ -449,7 +448,7 @@ fun NowPlayingSheet(
 								if (!isCurrent) {
 									IconButton(
 										onClick = { onRemoveFromQueue(index) },
-										modifier = Modifier.tvFocusHighlight(CircleShape),
+										modifier = Modifier.tvFocusHighlight(),
 									) {
 										Icon(
 											Icons.Default.Close,
@@ -463,14 +462,14 @@ fun NowPlayingSheet(
 									IconButton(
 										onClick = { onMoveInQueue(index, index - 1) },
 										enabled = index > 0,
-										modifier = Modifier.tvFocusHighlight(CircleShape),
+										modifier = Modifier.tvFocusHighlight(),
 									) {
 										Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up")
 									}
 									IconButton(
 										onClick = { onMoveInQueue(index, index + 1) },
 										enabled = index < rows.size - 1,
-										modifier = Modifier.tvFocusHighlight(CircleShape),
+										modifier = Modifier.tvFocusHighlight(),
 									) {
 										Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
 									}
@@ -513,7 +512,7 @@ fun NowPlayingSheet(
 					modifier = Modifier.fillMaxWidth().padding(16.dp),
 					horizontalArrangement = Arrangement.Center,
 				) {
-					IconButton(onClick = onDismiss, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+					IconButton(onClick = onDismiss, modifier = Modifier.tvFocusHighlight()) {
 						Icon(Icons.Default.Close, contentDescription = "Close")
 					}
 				}

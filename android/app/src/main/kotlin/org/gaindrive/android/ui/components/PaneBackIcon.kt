@@ -1,6 +1,5 @@
 package org.gaindrive.android.ui.components
 
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
@@ -21,7 +20,7 @@ import org.gaindrive.android.ui.tvFocusHighlight
 @Composable
 fun PaneBackIcon(onBack: (() -> Unit)?) {
 	if (onBack == null) return
-	IconButton(onClick = onBack, modifier = Modifier.tvFocusHighlight(CircleShape)) {
+	IconButton(onClick = onBack, modifier = Modifier.tvFocusHighlight()) {
 		Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 	}
 }
