@@ -384,13 +384,15 @@ fun GainDriveApp(
 		}
 		stacks.getValue(tab).focusRoot()
 	}
-	// A TV draws its own rail: the suite's pins its items to the top, which
-	// leaves them in a corner of a screen watched from across the room.
-	val tvRail = isTv && layoutType != NavigationSuiteType.None
+	// Wherever there is a rail we draw our own: the suite's pins its items to
+	// the top, which on a tablet or a TV leaves them in a corner of a tall
+	// screen. A TV always gets the rail, whatever the suite would pick.
+	val ownRail = layoutType == NavigationSuiteType.NavigationRail ||
+		(isTv && layoutType != NavigationSuiteType.None)
 
-	TvRailFrame(show = tvRail, selected = selectedTab, onSelect = selectTab) {
+	CenteredRailFrame(show = ownRail, selected = selectedTab, onSelect = selectTab) {
 		NavigationSuiteScaffold(
-			layoutType = if (tvRail) NavigationSuiteType.None else layoutType,
+			layoutType = if (ownRail) NavigationSuiteType.None else layoutType,
 			navigationSuiteItems = {
 				// `tab`, not `item`: the loop variable would otherwise shadow this
 				// scope's own `item` function at every call below.
@@ -809,7 +811,7 @@ private fun Padded(insets: PaddingValues, content: @Composable () -> Unit) {
  * just [content] when [show] is false.
  */
 @Composable
-private fun TvRailFrame(
+private fun CenteredRailFrame(
 	show: Boolean,
 	selected: TopLevel,
 	onSelect: (TopLevel) -> Unit,
