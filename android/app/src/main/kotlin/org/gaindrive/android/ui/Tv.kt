@@ -266,7 +266,7 @@ private class TvFocusNode(
 			if (ripple != null) {
 				with(ripple) { this@draw.draw() }
 			} else {
-				drawContent()
+				this@draw.drawContent()
 			}
 			if (focused) drawFocusRing(RingShape)
 		}
