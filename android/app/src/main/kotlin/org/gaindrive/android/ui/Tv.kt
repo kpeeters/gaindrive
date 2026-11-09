@@ -7,8 +7,11 @@ import android.content.res.Configuration
 import android.util.Log
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.material.ripple.RippleAlpha
@@ -36,6 +39,7 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
@@ -46,6 +50,8 @@ import androidx.compose.ui.node.DelegatingNode
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 /**
@@ -201,6 +207,45 @@ fun Modifier.claimsFocus(): Modifier = composed {
 	Modifier.focusRequester(requester)
 }
 
+/**
+ * [content] with focus scrolling that moves a list only when the focused
+ * item is not fully on screen, and then just far enough. A TV's default
+ * scrolls every newly focused item towards a fixed line near the top, which
+ * on a screen with a header (an album's cover) scrolls the header away even
+ * when the item was already in view. A no-op off TV.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun TvMinimalScroll(content: @Composable () -> Unit) {
+	if (!LocalIsTv.current) {
+		content()
+		return
+	}
+	CompositionLocalProvider(
+		LocalBringIntoViewSpec provides MinimalBringIntoViewSpec,
+		content = content,
+	)
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+private object MinimalBringIntoViewSpec : BringIntoViewSpec {
+	override fun calculateScrollDistance(
+		offset: Float,
+		size: Float,
+		containerSize: Float,
+	): Float {
+		val trailing = offset + size
+		return when {
+			offset >= 0f && trailing <= containerSize -> 0f
+			// Larger than the viewport and already covering it: any move
+			// would hide part of what is showing.
+			offset < 0f && trailing > containerSize -> 0f
+			abs(offset) < abs(trailing - containerSize) -> offset
+			else -> trailing - containerSize
+		}
+	}
+}
+
 private const val CLAIM_FRAMES = 10
 
 private const val BUMP_SCALE = 1.1f
@@ -217,14 +262,16 @@ private const val TAG = "GainDriveTv"
  * as focus arrives: a still tint is easy to lose track of when the d-pad
  * moves it, a flash says where it went. The steady tint is our own rather
  * than the ripple's: the accent at ripple strength is a maroon that reads as
- * black on a TV's dark surface, where a row needs to look lifted.
+ * black on a TV's dark surface, where a row needs to look lifted. The ripple
+ * is kept from seeing focus at all, so its square layer does not show at the
+ * corners of our rounded one.
  */
 private class TvIndication(
 	private val ripple: IndicationNodeFactory,
 	private val accent: Color,
 ) : IndicationNodeFactory {
 	override fun create(interactionSource: InteractionSource): DelegatableNode =
-		TvFocusNode(interactionSource, ripple.create(interactionSource), accent)
+		TvFocusNode(interactionSource, ripple.create(PressOnly(interactionSource)), accent)
 
 	// Value semantics delegate to the ripple's, so recomposition sees the
 	// same indication and does not detach nodes.
@@ -232,6 +279,11 @@ private class TvIndication(
 		other is TvIndication && other.ripple == ripple && other.accent == accent
 
 	override fun hashCode() = 31 * ripple.hashCode() + accent.hashCode()
+}
+
+/** [source] without its focus interactions. */
+private class PressOnly(source: InteractionSource) : InteractionSource {
+	override val interactions = source.interactions.filter { it !is FocusInteraction }
 }
 
 private class TvFocusNode(
@@ -278,7 +330,9 @@ private class TvFocusNode(
 		} else {
 			drawContent()
 		}
-		if (focused) drawRect(steady)
-		if (pulse.value > 0f) drawRect(accent.copy(alpha = pulse.value))
+		// The corners of the open row's fill in Rows.kt, so the two line up.
+		val corner = CornerRadius(8.dp.toPx())
+		if (focused) drawRoundRect(steady, cornerRadius = corner)
+		if (pulse.value > 0f) drawRoundRect(accent.copy(alpha = pulse.value), cornerRadius = corner)
 	}
 }

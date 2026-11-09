@@ -58,6 +58,7 @@ import org.gaindrive.android.ui.Availability
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.LocalWatched
+import org.gaindrive.android.ui.TvMinimalScroll
 import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.ChapterRow
 import org.gaindrive.android.ui.components.ExternalLink
@@ -352,149 +353,162 @@ fun AlbumDetailScreen(
 				}
 			}
 
-			LazyColumn(
-				modifier = Modifier.fillMaxSize(),
-				// contentPadding rather than a spacer item: it scrolls with the
-				// content and needs no key. The last track otherwise ends flush
-				// against the mini-player, which reads as a cut-off list.
-				contentPadding = PaddingValues(bottom = 16.dp),
-			) {
-				// The placeholder already occupies the full square, so the
-				// artwork arriving later does not move anything below it.
-				item(key = "hero") {
-					// Capped and centred rather than simply filling the width.
-					// A 1:1 ratio over fillMaxWidth makes the cover as tall as
-					// its pane is wide, so on a wide one - or on the
-					// full-window album the Now Playing sheet opens - it pushes
-					// the entire track list below the fold.
-					Box(
-						modifier = Modifier.fillMaxWidth(),
-						contentAlignment = Alignment.TopCenter,
-					) {
-						AlbumHero(
-							urls = extras.heroUrls,
-							contentDescription = detail.album.title,
-							modifier = Modifier
-								.widthIn(max = HERO_MAX_WIDTH)
-								.fillMaxWidth(),
-						)
+			// The first item not yet watched, at its resume point, which skips
+			// the resume prompt since the answer is already given. Only once
+			// something has been started: before that, a tap on the first row
+			// says the same.
+			val next = detail.songs.indexOfFirst {
+				it.isResumable && !watched.isWatched(it)
+			}
+			val started = detail.songs.any {
+				it.isResumable && (watched.isWatched(it) || watched.progress(it) > 0f)
+			}
+			val hasContinue = next >= 0 && started
+
+			// Focus landing on Continue or a visible first track must not
+			// scroll the cover away.
+			TvMinimalScroll {
+				LazyColumn(
+					modifier = Modifier.fillMaxSize(),
+					// contentPadding rather than a spacer item: it scrolls with the
+					// content and needs no key. The last track otherwise ends flush
+					// against the mini-player, which reads as a cut-off list.
+					contentPadding = PaddingValues(bottom = 16.dp),
+				) {
+					// The placeholder already occupies the full square, so the
+					// artwork arriving later does not move anything below it.
+					item(key = "hero") {
+						// Capped and centred rather than simply filling the width.
+						// A 1:1 ratio over fillMaxWidth makes the cover as tall as
+						// its pane is wide, so on a wide one - or on the
+						// full-window album the Now Playing sheet opens - it pushes
+						// the entire track list below the fold.
+						Box(
+							modifier = Modifier.fillMaxWidth(),
+							contentAlignment = Alignment.TopCenter,
+						) {
+							AlbumHero(
+								urls = extras.heroUrls,
+								contentDescription = detail.album.title,
+								modifier = Modifier
+									.widthIn(max = if (LocalIsTv.current) HERO_MAX_WIDTH_TV else HERO_MAX_WIDTH)
+									.fillMaxWidth(),
+							)
+						}
 					}
-				}
 
-				item(key = "heading") {
-					Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-						Text(
-							text = detail.album.title,
-							style = MaterialTheme.typography.headlineSmall,
-						)
-						Text(
-							text = listOfNotNull(
-								detail.album.artistName.takeIf { it.isNotBlank() },
-								detail.album.year?.toString(),
-								detail.album.genre,
-							).joinToString(" · "),
-							style = MaterialTheme.typography.bodyMedium,
-							color = MaterialTheme.colorScheme.onSurfaceVariant,
-						)
+					item(key = "heading") {
+						Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+							Text(
+								text = detail.album.title,
+								style = MaterialTheme.typography.headlineSmall,
+							)
+							Text(
+								text = listOfNotNull(
+									detail.album.artistName.takeIf { it.isNotBlank() },
+									detail.album.year?.toString(),
+									detail.album.genre,
+								).joinToString(" · "),
+								style = MaterialTheme.typography.bodyMedium,
+								color = MaterialTheme.colorScheme.onSurfaceVariant,
+							)
 
-						// The first item not yet watched, at its resume point,
-						// which skips the resume prompt since the answer is
-						// already given. Only once something has been started:
-						// before that, a tap on the first row says the same.
-						val next = detail.songs.indexOfFirst {
-							it.isResumable && !watched.isWatched(it)
-						}
-						val started = detail.songs.any {
-							it.isResumable && (watched.isWatched(it) || watched.progress(it) > 0f)
-						}
-						if (next >= 0 && started) {
-							val song = detail.songs[next]
-							FilledTonalButton(
-								onClick = { player.play(detail.songs, next, watched.resumeMs(song)) },
-								modifier = Modifier.padding(top = 12.dp).tvFocusHighlight(),
-							) {
-								Icon(
-									Icons.Default.PlayArrow,
-									contentDescription = null,
-									modifier = Modifier.size(18.dp),
-								)
-								Spacer(Modifier.width(8.dp))
-								Text(
-									"Continue: ${song.title}",
-									maxLines = 1,
-									overflow = TextOverflow.Ellipsis,
+							if (hasContinue) {
+								val song = detail.songs[next]
+								FilledTonalButton(
+									onClick = { player.play(detail.songs, next, watched.resumeMs(song)) },
+									modifier = Modifier
+										.padding(top = 12.dp)
+										.claimsFocus()
+										.tvFocusHighlight(),
+								) {
+									Icon(
+										Icons.Default.PlayArrow,
+										contentDescription = null,
+										modifier = Modifier.size(18.dp),
+									)
+									Spacer(Modifier.width(8.dp))
+									Text(
+										"Continue: ${song.title}",
+										maxLines = 1,
+										overflow = TextOverflow.Ellipsis,
+									)
+								}
+							}
+
+							// Inside the heading rather than an item of its own:
+							// the notes arrive after the tracks are on screen, and
+							// a new item above the list would shift the rows out
+							// from under the user's finger.
+							extras.notes?.let { notes ->
+								NotesSection(
+									text = notes.notes,
+									links = buildList {
+										notes.wikiUrl?.let { add(ExternalLink("Wikipedia", it)) }
+										notes.allMusicUrl?.let { add(ExternalLink("AllMusic", it)) }
+									},
+									modifier = Modifier.padding(vertical = 12.dp),
 								)
 							}
 						}
-
-						// Inside the heading rather than an item of its own:
-						// the notes arrive after the tracks are on screen, and
-						// a new item above the list would shift the rows out
-						// from under the user's finger.
-						extras.notes?.let { notes ->
-							NotesSection(
-								text = notes.notes,
-								links = buildList {
-									notes.wikiUrl?.let { add(ExternalLink("Wikipedia", it)) }
-									notes.allMusicUrl?.let { add(ExternalLink("AllMusic", it)) }
-								},
-								modifier = Modifier.padding(vertical = 12.dp),
-							)
-						}
 					}
-				}
 
-				items(items = rows, key = { it.key }) { row ->
-					// The headings ride along with the row beneath them rather
-					// than being items of their own, so the list keys stay one
-					// per row. The first row rather than the list takes a
-					// claimed focus: the hero and notes above it would
-					// otherwise put the tracks a press or more away.
-					Column(
-						modifier = if (row.key == rows.first().key) Modifier.claimsFocus()
-						else Modifier,
-					) {
-						row.headings.forEach { SectionHeading(it) }
-						when (row) {
-							is AlbumListRow.Track -> TrackRow(
-								song = row.song,
-								// Queues the whole album and starts here, which
-								// is what tapping a track in an album listing
-								// should mean.
-								onClick = { player.play(detail.songs, row.queueIndex) },
-								onLongClick = { actionsFor = row.song; actionsChapter = null },
-								playback = playerState.trackStateOf(row.song.ref),
-								number = row.number,
-							)
+					items(items = rows, key = { it.key }) { row ->
+						// The headings ride along with the row beneath them rather
+						// than being items of their own, so the list keys stay one
+						// per row. The first row rather than the list takes a
+						// claimed focus: the hero and notes above it would
+						// otherwise put the tracks a press or more away. Unless
+						// there is a Continue button, which is the likelier pick.
+						Column(
+							modifier = if (!hasContinue && row.key == rows.first().key) {
+								Modifier.claimsFocus()
+							} else {
+								Modifier
+							},
+						) {
+							row.headings.forEach { SectionHeading(it) }
+							when (row) {
+								is AlbumListRow.Track -> TrackRow(
+									song = row.song,
+									// Queues the whole album and starts here, which
+									// is what tapping a track in an album listing
+									// should mean.
+									onClick = { player.play(detail.songs, row.queueIndex) },
+									onLongClick = { actionsFor = row.song; actionsChapter = null },
+									playback = playerState.trackStateOf(row.song.ref),
+									number = row.number,
+								)
 
-							is AlbumListRow.Marker -> ChapterRow(
-								number = row.chapter.index,
-								title = row.chapter.displayName,
-								duration = row.chapter.duration,
-								playing = playingMarker ==
-									(row.song.ref to row.chapter.index),
-								// The album queue, starting at the recording,
-								// positioned at the marker.
-								onClick = {
-									player.play(
-										detail.songs,
-										row.queueIndex,
-										row.chapter.startMs,
-									)
-								},
-								// The recording's own row is gone, so this is
-								// the only way left to reach its actions.
-								onLongClick = {
-									actionsFor = row.song
-									actionsChapter = row.range
-								},
-								stored = row.range,
-								filmDurationMs = row.song.duration * 1000L,
-								// Offline, a chapter plays when its film is
-								// stored whole or the chapter itself is.
-								playable = availability.of(row.song.ref) != Availability.UNAVAILABLE
-									|| availability.of(row.range.ref) == Availability.STORED,
-							)
+								is AlbumListRow.Marker -> ChapterRow(
+									number = row.chapter.index,
+									title = row.chapter.displayName,
+									duration = row.chapter.duration,
+									playing = playingMarker ==
+										(row.song.ref to row.chapter.index),
+									// The album queue, starting at the recording,
+									// positioned at the marker.
+									onClick = {
+										player.play(
+											detail.songs,
+											row.queueIndex,
+											row.chapter.startMs,
+										)
+									},
+									// The recording's own row is gone, so this is
+									// the only way left to reach its actions.
+									onLongClick = {
+										actionsFor = row.song
+										actionsChapter = row.range
+									},
+									stored = row.range,
+									filmDurationMs = row.song.duration * 1000L,
+									// Offline, a chapter plays when its film is
+									// stored whole or the chapter itself is.
+									playable = availability.of(row.song.ref) != Availability.UNAVAILABLE
+										|| availability.of(row.range.ref) == Availability.STORED,
+								)
+							}
 						}
 					}
 				}
@@ -660,3 +674,7 @@ private const val SUGGESTION_LIMIT = 6
  * wants to be - beyond this it is only crowding the tracks out.
  */
 private val HERO_MAX_WIDTH = 400.dp
+
+// A TV pane is about 540dp tall; at the full size the cover leaves little
+// room for the heading and first track above the fold.
+private val HERO_MAX_WIDTH_TV = 360.dp
