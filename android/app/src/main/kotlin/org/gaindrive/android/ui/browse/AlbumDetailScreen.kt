@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -38,15 +39,25 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import org.gaindrive.android.data.cache.FilmRange
 import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.model.ItemRef
@@ -104,6 +115,10 @@ fun AlbumDetailScreen(
 	player: PlayerViewModel = hiltViewModel(),
 ) {
 	val state by viewModel.state.collectAsStateWithLifecycle()
+	val listState = rememberLazyListState()
+	val scope = rememberCoroutineScope()
+	val isTv = LocalIsTv.current
+	val focusManager = LocalFocusManager.current
 	val extras by viewModel.extras.collectAsStateWithLifecycle()
 	val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 	val playerState by player.state.collectAsStateWithLifecycle()
@@ -219,7 +234,15 @@ fun AlbumDetailScreen(
 	Scaffold(
 		topBar = {
 			TopAppBar(
-				modifier = Modifier.paneFocusAccent(),
+				// On a TV, pressing up off the top of the list lands in this bar
+				// (the overflow menu, or the back arrow), but the list does not
+				// move: a focused bar is not part of it. Scrolling to the top
+				// then is what brings the cover back into view.
+				modifier = Modifier
+					.paneFocusAccent()
+					.onFocusChanged {
+						if (isTv && it.hasFocus) scope.launch { listState.animateScrollToItem(0) }
+					},
 				colors = paneTopBarColors(),
 				title = {
 					Text(viewModel.albumTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -229,7 +252,7 @@ fun AlbumDetailScreen(
 					// Neither on a TV: it streams from a server on its own
 					// network, and starring is curation done from a phone. Every
 					// icon dropped is one d-pad stop fewer on the way to the list.
-					if (!LocalIsTv.current) {
+					if (!isTv) {
 						// Ahead of Pin because it is the reversible one: another
 						// tap undoes it, where a download commits the device to
 						// the whole album.
@@ -369,7 +392,23 @@ fun AlbumDetailScreen(
 			// scroll the cover away.
 			TvMinimalScroll {
 				LazyColumn(
-					modifier = Modifier.fillMaxSize(),
+					modifier = Modifier
+						.fillMaxSize()
+						// On a TV, up from the topmost row with nothing above to
+						// take the focus (no back arrow, no menu in the bar)
+						// would do nothing; scroll to the cover instead. Moving
+						// the focus by hand here, rather than leaving it to the
+						// framework, is what tells us whether anything took it.
+						.onKeyEvent {
+							if (!isTv || it.type != KeyEventType.KeyDown || it.key != Key.DirectionUp) {
+								return@onKeyEvent false
+							}
+							if (!focusManager.moveFocus(FocusDirection.Up)) {
+								scope.launch { listState.animateScrollToItem(0) }
+							}
+							true
+						},
+					state = listState,
 					// contentPadding rather than a spacer item: it scrolls with the
 					// content and needs no key. The last track otherwise ends flush
 					// against the mini-player, which reads as a cut-off list.
@@ -391,7 +430,7 @@ fun AlbumDetailScreen(
 								urls = extras.heroUrls,
 								contentDescription = detail.album.title,
 								modifier = Modifier
-									.widthIn(max = if (LocalIsTv.current) HERO_MAX_WIDTH_TV else HERO_MAX_WIDTH)
+									.widthIn(max = if (isTv) HERO_MAX_WIDTH_TV else HERO_MAX_WIDTH)
 									.fillMaxWidth(),
 							)
 						}

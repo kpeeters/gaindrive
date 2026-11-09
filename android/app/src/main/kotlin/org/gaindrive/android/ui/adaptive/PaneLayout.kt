@@ -1,5 +1,6 @@
 package org.gaindrive.android.ui.adaptive
 
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,7 +26,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -215,6 +218,7 @@ fun PaneStrip(
 	}
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun Slot(
 	content: Pane,
@@ -238,7 +242,12 @@ private fun Slot(
 		is Pane.At -> path.getOrNull(content.index)?.let { route ->
 			val isTv = LocalIsTv.current
 			var focused by remember { mutableStateOf(false) }
-			Box(Modifier.fillMaxSize().onFocusChanged { focused = it.hasFocus }) {
+			// On a TV, coming back into a pane returns to the row last focused
+			// there. Without it the d-pad picks whatever row sits level with
+			// the one being left, so stepping back from a long track list
+			// lands on some other album than the one that is open.
+			val restore = if (isTv) Modifier.focusRestorer().focusGroup() else Modifier
+			Box(Modifier.fillMaxSize().onFocusChanged { focused = it.hasFocus }.then(restore)) {
 				CompositionLocalProvider(
 					LocalPaneBack provides back.takeIf { level == backAt },
 					LocalFocusClaim provides claim?.takeIf { it.route == route },
