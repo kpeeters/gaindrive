@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -58,6 +59,7 @@ import org.gaindrive.android.ui.LocalStars
 import org.gaindrive.android.ui.LocalWatched
 import org.gaindrive.android.ui.Route
 import org.gaindrive.android.ui.adaptive.LocalOpenChild
+import org.gaindrive.android.ui.adaptive.LocalOpenRowFocus
 import org.gaindrive.android.ui.tvFocusHighlight
 
 /** Shared row composables. Every browse screen is built from these. */
@@ -85,6 +87,7 @@ fun ArtistRow(artist: Artist, onClick: () -> Unit, badges: List<String> = emptyL
 			// close together. There is no divider between them - with rows this
 			// dense, one line per artist reads better than a ruled list.
 			.heightIn(min = 40.dp)
+			.openFocus(open)
 			.clickable(onClick = onClick)
 			.openMark(open)
 			.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -130,6 +133,7 @@ fun AlbumRow(
 	Row(
 		modifier = modifier
 			.fillMaxWidth()
+			.openFocus(open)
 			.clickable(onClick = onClick)
 			.openMark(open)
 			.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -210,6 +214,7 @@ fun PlaylistRow(
 		modifier = Modifier
 			.fillMaxWidth()
 			.heightIn(min = 56.dp)
+			.openFocus(open)
 			.clickable(onClick = onClick)
 			.openMark(open)
 			.padding(start = 16.dp, top = 8.dp, bottom = 8.dp),
@@ -358,6 +363,13 @@ fun TrackRow(
 			trailing?.invoke()
 		}
 	}
+}
+
+/** On a TV, lets stepping left out of the next pane land on the open row. */
+@Composable
+private fun Modifier.openFocus(open: Boolean): Modifier {
+	val requester = LocalOpenRowFocus.current
+	return if (open && requester != null) focusRequester(requester) else this
 }
 
 /**

@@ -1,6 +1,6 @@
 package org.gaindrive.android.ui.adaptive
 
-import androidx.compose.foundation.focusGroup
+import android.util.Log
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,10 +26,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -195,30 +201,32 @@ fun PaneStrip(
 		// composition local, and a lambda rebuilt each frame would recompose them
 		// for nothing.
 		val back = remember(stack) { { stack.back() } }
+		// Per path level, the requester its open row attaches. Keyed by level
+		// rather than pane position, so it survives the window sliding.
+		val openRows = remember(stack) { mutableMapOf<Int, FocusRequester>() }
 
 		ListDetailPaneScaffold(
 			directive = paneDirective(panes, maxWidth),
 			value = assigned.scaffoldValue(),
 			listPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 0)) {
-					Slot(assigned.list, 0, backAt, back, path, claim, retention, waiting, pane)
+					Slot(assigned.list, 0, backAt, back, path, claim, openRows, retention, waiting, pane)
 				}
 			},
 			detailPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 1)) {
-					Slot(assigned.detail, 1, backAt, back, path, claim, retention, waiting, pane)
+					Slot(assigned.detail, 1, backAt, back, path, claim, openRows, retention, waiting, pane)
 				}
 			},
 			extraPane = {
 				AnimatedPane(modifier = Modifier.paneName(titles, 2)) {
-					Slot(assigned.extra, 2, backAt, back, path, claim, retention, waiting, pane)
+					Slot(assigned.extra, 2, backAt, back, path, claim, openRows, retention, waiting, pane)
 				}
 			},
 		)
 	}
 }
 
-@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun Slot(
 	content: Pane,
@@ -227,6 +235,7 @@ private fun Slot(
 	back: () -> Unit,
 	path: List<Route>,
 	claim: FocusClaim?,
+	openRows: MutableMap<Int, FocusRequester>,
 	retention: PaneRetention,
 	waiting: @Composable (level: Int) -> Unit,
 	pane: @Composable (Route) -> Unit,
@@ -241,17 +250,31 @@ private fun Slot(
 		// the right answer is an empty pane a moment early.
 		is Pane.At -> path.getOrNull(content.index)?.let { route ->
 			val isTv = LocalIsTv.current
+			val focusManager = LocalFocusManager.current
 			var focused by remember { mutableStateOf(false) }
-			// On a TV, coming back into a pane returns to the row last focused
-			// there. Without it the d-pad picks whatever row sits level with
-			// the one being left, so stepping back from a long track list
-			// lands on some other album than the one that is open.
-			val restore = if (isTv) Modifier.focusRestorer().focusGroup() else Modifier
-			Box(Modifier.fillMaxSize().onFocusChanged { focused = it.hasFocus }.then(restore)) {
+			val ownOpenRow = openRows.getOrPut(content.index) { FocusRequester() }
+			// On a TV, left out of this pane lands on the row that opened it.
+			// Left to itself the d-pad picks whatever row sits level with the
+			// one being left, so stepping back from a long track list lands on
+			// some other album. The move is made first, so a left that stays
+			// inside the pane (a row's overflow button back to its row) is
+			// untouched; only one that left the pane is redirected.
+			val stepBack = if (!isTv) Modifier else Modifier.onKeyEvent {
+				if (it.type != KeyEventType.KeyDown || it.key != Key.DirectionLeft) {
+					return@onKeyEvent false
+				}
+				val target = openRows[content.index - 1] ?: return@onKeyEvent false
+				if (focusManager.moveFocus(FocusDirection.Left) && !focused) {
+					focusOpenRow(target)
+				}
+				true
+			}
+			Box(Modifier.fillMaxSize().onFocusChanged { focused = it.hasFocus }.then(stepBack)) {
 				CompositionLocalProvider(
 					LocalPaneBack provides back.takeIf { level == backAt },
 					LocalFocusClaim provides claim?.takeIf { it.route == route },
 					LocalOpenChild provides path.getOrNull(content.index + 1),
+					LocalOpenRowFocus provides ownOpenRow.takeIf { isTv },
 					LocalPaneFocused provides (isTv && focused),
 				) {
 					retention.Retained(route) { pane(route) }
@@ -281,6 +304,24 @@ val LocalPaneBack = compositionLocalOf<(() -> Unit)?> { null }
  * choices stays readable once the focus has moved on from it.
  */
 val LocalOpenChild = compositionLocalOf<Route?> { null }
+
+/**
+ * On a TV, the requester a list's open row (see [LocalOpenChild]) attaches,
+ * so that stepping left out of the pane beside it can land there. Null off TV.
+ */
+val LocalOpenRowFocus = compositionLocalOf<FocusRequester?> { null }
+
+private fun focusOpenRow(target: FocusRequester) {
+	// Not attached when the open row has been scrolled out of composition;
+	// the geometric move already made then stands.
+	try {
+		target.requestFocus(FocusDirection.Left)
+	} catch (e: IllegalStateException) {
+		Log.w(TAG, "open row not focusable: ${e.message}")
+	}
+}
+
+private const val TAG = "GainDrivePanes"
 
 /**
  * `getOrElse` rather than an index: a tab with two levels still declares three
