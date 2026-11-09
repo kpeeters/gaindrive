@@ -154,6 +154,13 @@ void throttle_record_failure(const std::string& key)
 	if (now - e.last > THROTTLE_FORGET) e.count = 0;
 	e.count++;
 	e.last = now;
+	// A blocked caller is refused with an ordinary wrong-password answer and
+	// no log line of its own, so without this a user locked out with the
+	// right password has nothing on the server to point at the throttle.
+	// Logged once, on the failure that starts the block, not per refusal.
+	if (e.count == THROTTLE_BLOCK_AFTER)
+		std::cout << stamp() << "auth throttle: blocking " << key << " for "
+		          << THROTTLE_BLOCK_FOR.count() << " min" << std::endl;
 	}
 
 void throttle_record_success(const std::string& key)
