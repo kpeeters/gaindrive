@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
@@ -15,6 +16,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.DEFAULT_CAST_PORT
 import org.gaindrive.android.data.ManualCastDevice
 import org.gaindrive.android.ui.rememberLocalNetworkPermission
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /** What a Chromecast is sent, which is not always what this phone would play. */
 @Composable
@@ -53,7 +56,10 @@ fun CastSettingsScreen(
 		title = "Casting",
 		onBack = onBack,
 		floatingActionButton = {
-			FloatingActionButton(onClick = devicesViewModel::add) {
+			FloatingActionButton(
+				onClick = devicesViewModel::add,
+				modifier = Modifier.tvFocusHighlight(FloatingActionButtonDefaults.shape),
+			) {
 				Icon(Icons.Default.Add, contentDescription = "Add device")
 			}
 		},
@@ -198,7 +204,10 @@ private fun ManualDeviceRow(
 			}
 
 			Box {
-				IconButton(onClick = { menuOpen = true }) {
+				IconButton(
+					onClick = { menuOpen = true },
+					modifier = Modifier.tvFocusHighlight(CircleShape),
+				) {
 					Icon(Icons.Default.MoreVert, contentDescription = "More")
 				}
 				DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {

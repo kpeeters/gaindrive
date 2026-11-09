@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddLink
 import androidx.compose.material.icons.filled.Close
@@ -23,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.data.FetchJobRef
 import org.gaindrive.android.data.model.FetchState
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * A fetch running on a server, reported from wherever the user happens to be.
@@ -83,7 +85,10 @@ fun FetchStrip(
 				// user's to hide from themselves - Cancel, in the panel, is the
 				// control that ends it.
 				if (live.isEmpty() && notice != null) {
-					IconButton(onClick = { onDismiss(notice.job.id) }) {
+					IconButton(
+						onClick = { onDismiss(notice.job.id) },
+						modifier = Modifier.tvFocusHighlight(CircleShape),
+					) {
 						Icon(
 							Icons.Default.Close,
 							contentDescription = "Dismiss",

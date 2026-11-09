@@ -3,6 +3,7 @@ package org.gaindrive.android.ui.components
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
@@ -26,6 +27,7 @@ import org.gaindrive.android.data.cache.PinPhase
 import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.ui.PinViewModel
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * The download control for an album or a playlist, for a top app bar.
@@ -57,7 +59,10 @@ fun PinAction(
 	}
 
 	val status = statuses[ref.encode()]
-	IconButton(onClick = { viewModel.toggle(ref, kind) }) {
+	IconButton(
+		onClick = { viewModel.toggle(ref, kind) },
+		modifier = Modifier.tvFocusHighlight(CircleShape),
+	) {
 		DownloadIndicator(status)
 	}
 }

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import org.gaindrive.android.playback.PlayerState
 import org.gaindrive.android.ui.adaptive.paneCount
 import org.gaindrive.android.ui.components.CoverThumb
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * The persistent bar at the bottom of the content column. Sits in the app shell
@@ -127,14 +129,18 @@ fun MiniPlayer(
 				}
 
 				if (wide) {
-					IconButton(onClick = onPrevious, enabled = state.hasPrevious) {
+					IconButton(
+						onClick = onPrevious,
+						enabled = state.hasPrevious,
+						modifier = Modifier.tvFocusHighlight(CircleShape),
+					) {
 						Icon(
 							Icons.Default.SkipPrevious,
 							contentDescription = "Previous",
 						)
 					}
 				}
-				IconButton(onClick = onTogglePlay) {
+				IconButton(onClick = onTogglePlay, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 					Icon(
 						imageVector = if (state.isPlaying) {
 							Icons.Default.Pause
@@ -144,7 +150,11 @@ fun MiniPlayer(
 						contentDescription = if (state.isPlaying) "Pause" else "Play",
 					)
 				}
-				IconButton(onClick = onNext, enabled = state.hasNext) {
+				IconButton(
+					onClick = onNext,
+					enabled = state.hasNext,
+					modifier = Modifier.tvFocusHighlight(CircleShape),
+				) {
 					Icon(Icons.Default.SkipNext, contentDescription = "Next")
 				}
 
@@ -154,7 +164,7 @@ fun MiniPlayer(
 				// move. The scrub bar after them takes up the slack, so
 				// nothing to the left of it shifts either.
 				if (wide) {
-					IconButton(onClick = onInfo) {
+					IconButton(onClick = onInfo, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 						Icon(Icons.Default.Info, contentDescription = "Track info")
 					}
 					// Offered for every video now that a film the server can
@@ -165,7 +175,7 @@ fun MiniPlayer(
 					// answering it here would mean a reachability probe this
 					// composable cannot await.
 					if (onCast != null) {
-						IconButton(onClick = onCast) {
+						IconButton(onClick = onCast, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 							Icon(
 								imageVector = if (casting) {
 									Icons.Default.CastConnected

@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -56,6 +57,8 @@ import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.LocalStars
 import org.gaindrive.android.ui.LocalWatched
+import org.gaindrive.android.ui.Route
+import org.gaindrive.android.ui.adaptive.LocalOpenChild
 import org.gaindrive.android.ui.tvFocusHighlight
 
 /** Shared row composables. Every browse screen is built from these. */
@@ -73,6 +76,8 @@ fun SectionHeading(text: String) {
 
 @Composable
 fun ArtistRow(artist: Artist, onClick: () -> Unit, badges: List<String> = emptyList()) {
+	val open = (LocalOpenChild.current as? Route.Albums)?.artistRefs ==
+		ItemRef.encodeAll(artist.refs)
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
@@ -82,6 +87,7 @@ fun ArtistRow(artist: Artist, onClick: () -> Unit, badges: List<String> = emptyL
 			// dense, one line per artist reads better than a ruled list.
 			.heightIn(min = 40.dp)
 			.clickable(onClick = onClick)
+			.openMark(open)
 			.padding(horizontal = 16.dp, vertical = 4.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -121,10 +127,12 @@ fun AlbumRow(
 	showArtist: Boolean = false,
 	modifier: Modifier = Modifier,
 ) {
+	val open = (LocalOpenChild.current as? Route.Album)?.albumRef == album.ref.encode()
 	Row(
 		modifier = modifier
 			.fillMaxWidth()
 			.clickable(onClick = onClick)
+			.openMark(open)
 			.padding(horizontal = 16.dp, vertical = 8.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -198,11 +206,13 @@ fun PlaylistRow(
 	onClick: () -> Unit,
 	trailing: @Composable (() -> Unit)? = null,
 ) {
+	val open = (LocalOpenChild.current as? Route.Playlist)?.playlistRef == playlist.ref.encode()
 	Row(
 		modifier = Modifier
 			.fillMaxWidth()
 			.heightIn(min = 56.dp)
 			.clickable(onClick = onClick)
+			.openMark(open)
 			.padding(start = 16.dp, top = 8.dp, bottom = 8.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -352,6 +362,17 @@ fun TrackRow(
 }
 
 /**
+ * Marks the row whose contents the pane beside it shows. A fill rather than
+ * the TV focus ring's outline: the two answer different questions, "what is
+ * open" and "where am I", and are often on screen together. Inside the
+ * clickable, so the TV focus scale grows the fill with the row.
+ */
+@Composable
+private fun Modifier.openMark(open: Boolean): Modifier =
+	if (!open) this
+	else background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
+
+/**
  * The d-pad stand-in for long-press. Compact rather than the 48dp Material
  * minimum, because there is no finger to miss with and the rows are dense.
  */
@@ -361,7 +382,7 @@ private fun RowOverflowButton(onClick: () -> Unit) {
 		onClick = onClick,
 		modifier = Modifier
 			.size(32.dp)
-			.tvFocusHighlight(),
+			.tvFocusHighlight(CircleShape),
 	) {
 		Icon(
 			imageVector = Icons.Default.MoreVert,
@@ -700,6 +721,7 @@ fun ChapterHitRow(hit: ChapterHit, onClick: () -> Unit) {
  */
 @Composable
 private fun ContainerDownloadMark(refs: List<ItemRef>) {
+	if (LocalIsTv.current) return
 	when (val mark = LocalAvailability.current.containerMark(refs)) {
 		null -> Unit
 
@@ -745,6 +767,8 @@ private fun ChapterDownloadMark(range: FilmRange, filmDurationMs: Long) {
 
 @Composable
 private fun DownloadMarkIcon(mark: DownloadMark?) {
+	// A TV has no downloads, and what its cache holds is not worth a mark.
+	if (LocalIsTv.current) return
 	when (mark) {
 		null -> Unit
 

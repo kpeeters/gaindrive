@@ -20,6 +20,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +39,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * The configured servers: add, edit, reorder, enable, remove.
@@ -57,7 +59,10 @@ fun ServersSettingsScreen(
 		title = "Servers",
 		onBack = onBack,
 		floatingActionButton = {
-			FloatingActionButton(onClick = { onEditServer(null) }) {
+			FloatingActionButton(
+				onClick = { onEditServer(null) },
+				modifier = Modifier.tvFocusHighlight(FloatingActionButtonDefaults.shape),
+			) {
 				Icon(Icons.Default.Add, contentDescription = "Add server")
 			}
 		},
@@ -141,7 +146,10 @@ private fun ServerRow(
 			}
 
 			Box {
-				IconButton(onClick = { menuOpen = true }) {
+				IconButton(
+					onClick = { menuOpen = true },
+					modifier = Modifier.tvFocusHighlight(CircleShape),
+				) {
 					Icon(Icons.Default.MoreVert, contentDescription = "More")
 				}
 				DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {

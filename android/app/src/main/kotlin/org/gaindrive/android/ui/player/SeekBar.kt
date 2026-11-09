@@ -110,7 +110,7 @@ fun SeekBar(
 						else -> false
 					}
 				}
-				.tvFocusHighlight(),
+				.tvFocusHighlight(grow = false),
 			value = fraction,
 			onValueChange = {
 				dragging = true

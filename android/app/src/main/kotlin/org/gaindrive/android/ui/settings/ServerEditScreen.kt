@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -38,6 +39,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.net.ConnectionTest
 import org.gaindrive.android.ui.LocalIsTv
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * Adding a server and editing one are the same screen. That is deliberate:
@@ -74,7 +76,7 @@ fun ServerEditScreen(
 				title = { Text(if (state.isNew) "Add server" else "Edit server") },
 				navigationIcon = {
 					if (!state.firstRun) {
-						IconButton(onClick = onDone) {
+						IconButton(onClick = onDone, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 							Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 						}
 					}
@@ -179,6 +181,7 @@ fun ServerEditScreen(
 						enabled = !state.testing && state.url.isNotBlank() &&
 							state.username.isNotBlank() && state.password.isNotBlank(),
 						onClick = viewModel::test,
+						modifier = Modifier.tvFocusHighlight(CircleShape),
 					) {
 						if (state.testing) {
 							CircularProgressIndicator(
@@ -193,6 +196,7 @@ fun ServerEditScreen(
 					Button(
 						enabled = state.canSave,
 						onClick = viewModel::save,
+						modifier = Modifier.tvFocusHighlight(CircleShape),
 					) {
 						Text("Save")
 					}

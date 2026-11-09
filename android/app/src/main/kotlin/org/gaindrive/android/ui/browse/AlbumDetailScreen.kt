@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -56,6 +57,7 @@ import org.gaindrive.android.data.model.StarKind
 import org.gaindrive.android.data.model.currentAt
 import org.gaindrive.android.ui.Availability
 import org.gaindrive.android.ui.LocalAvailability
+import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.LocalWatched
 import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.ChapterRow
@@ -67,8 +69,11 @@ import org.gaindrive.android.ui.components.NotesSection
 import org.gaindrive.android.ui.components.SectionHeading
 import org.gaindrive.android.ui.components.StarButton
 import org.gaindrive.android.ui.components.TrackRow
+import org.gaindrive.android.ui.paneFocusAccent
+import org.gaindrive.android.ui.paneTopBarColors
 import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackActionsSheet
+import org.gaindrive.android.ui.tvFocusHighlight
 import org.gaindrive.android.ui.valueOrNull
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -214,32 +219,42 @@ fun AlbumDetailScreen(
 	Scaffold(
 		topBar = {
 			TopAppBar(
+				modifier = Modifier.paneFocusAccent(),
+				colors = paneTopBarColors(),
 				title = {
 					Text(viewModel.albumTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
 				},
 				navigationIcon = { PaneBackIcon(onBack) },
 				actions = {
-					// Ahead of Pin because it is the reversible one: another tap
-					// undoes it, where a download commits the device to the whole
-					// album.
-					StarButton(
-						ref = viewModel.albumRef,
-						kind = StarKind.ALBUM,
-						fallback = loadedAlbum?.isStarred == true,
-						noun = "album",
-						// Drawn from the first frame and merely disabled until the
-						// album is known, so the bar does not grow a button under
-						// the finger heading for Pin.
-						enabled = loadedAlbum != null,
-					)
-					PinAction(ref = viewModel.albumRef, kind = PinKind.ALBUM)
+					// Neither on a TV: it streams from a server on its own
+					// network, and starring is curation done from a phone. Every
+					// icon dropped is one d-pad stop fewer on the way to the list.
+					if (!LocalIsTv.current) {
+						// Ahead of Pin because it is the reversible one: another
+						// tap undoes it, where a download commits the device to
+						// the whole album.
+						StarButton(
+							ref = viewModel.albumRef,
+							kind = StarKind.ALBUM,
+							fallback = loadedAlbum?.isStarred == true,
+							noun = "album",
+							// Drawn from the first frame and merely disabled until
+							// the album is known, so the bar does not grow a
+							// button under the finger heading for Pin.
+							enabled = loadedAlbum != null,
+						)
+						PinAction(ref = viewModel.albumRef, kind = PinKind.ALBUM)
+					}
 					// An overflow rather than icons of their own: both are rare
 					// one-way actions and neither belongs a tap away from Pin.
 					// Delete is offered to whoever owns the upload, Move only to
 					// an admin, so the menu itself appears for either.
 					if (canPromote || viewModel.canDelete || canMarkAll) {
 						var menuOpen by remember { mutableStateOf(false) }
-						IconButton(onClick = { menuOpen = true }) {
+						IconButton(
+							onClick = { menuOpen = true },
+							modifier = Modifier.tvFocusHighlight(CircleShape),
+						) {
 							Icon(Icons.Default.MoreVert, contentDescription = "More")
 						}
 						DropdownMenu(
@@ -397,7 +412,7 @@ fun AlbumDetailScreen(
 							val song = detail.songs[next]
 							FilledTonalButton(
 								onClick = { player.play(detail.songs, next, watched.resumeMs(song)) },
-								modifier = Modifier.padding(top = 12.dp),
+								modifier = Modifier.padding(top = 12.dp).tvFocusHighlight(CircleShape),
 							) {
 								Icon(
 									Icons.Default.PlayArrow,
@@ -536,7 +551,11 @@ private fun PromoteDialog(
 				if (roots.size > 1) {
 					var open by remember { mutableStateOf(false) }
 					Box {
-						OutlinedButton(enabled = !busy, onClick = { open = true }) {
+						OutlinedButton(
+							enabled = !busy,
+							onClick = { open = true },
+							modifier = Modifier.tvFocusHighlight(CircleShape),
+						) {
 							Text(chosen?.name ?: "Choose a library")
 							Icon(Icons.Default.ArrowDropDown, contentDescription = null)
 						}

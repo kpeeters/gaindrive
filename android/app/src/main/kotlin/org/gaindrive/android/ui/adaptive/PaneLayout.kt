@@ -20,9 +20,13 @@ import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -30,6 +34,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.ui.FocusClaim
 import org.gaindrive.android.ui.LocalFocusClaim
+import org.gaindrive.android.ui.LocalIsTv
+import org.gaindrive.android.ui.LocalPaneFocused
 import org.gaindrive.android.ui.Route
 import kotlin.math.min
 
@@ -230,11 +236,17 @@ private fun Slot(
 		// a pop is recomposing, and an index past the end would be a crash where
 		// the right answer is an empty pane a moment early.
 		is Pane.At -> path.getOrNull(content.index)?.let { route ->
-			CompositionLocalProvider(
-				LocalPaneBack provides back.takeIf { level == backAt },
-				LocalFocusClaim provides claim?.takeIf { it.route == route },
-			) {
-				retention.Retained(route) { pane(route) }
+			val isTv = LocalIsTv.current
+			var focused by remember { mutableStateOf(false) }
+			Box(Modifier.fillMaxSize().onFocusChanged { focused = it.hasFocus }) {
+				CompositionLocalProvider(
+					LocalPaneBack provides back.takeIf { level == backAt },
+					LocalFocusClaim provides claim?.takeIf { it.route == route },
+					LocalOpenChild provides path.getOrNull(content.index + 1),
+					LocalPaneFocused provides (isTv && focused),
+				) {
+					retention.Retained(route) { pane(route) }
+				}
 			}
 		}
 	}
@@ -253,6 +265,13 @@ private fun Slot(
  * to hold.
  */
 val LocalPaneBack = compositionLocalOf<(() -> Unit)?> { null }
+
+/**
+ * The route open one level deeper than the pane being composed, or null.
+ * Lets a list mark the row whose contents the next pane shows, so the path of
+ * choices stays readable once the focus has moved on from it.
+ */
+val LocalOpenChild = compositionLocalOf<Route?> { null }
 
 /**
  * `getOrElse` rather than an index: a tab with two levels still declares three

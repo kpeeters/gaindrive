@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * The pieces the sound-control sheets share: a fader with its readout and
@@ -134,7 +135,11 @@ internal fun PresetRow(
 		Box(modifier = Modifier.weight(1f)) {
 			// The app's labelled-picker idiom (the fetch panel's library
 			// picker): a button naming the choice, over a DropdownMenu.
-			OutlinedButton(onClick = { menuOpen = true }, enabled = enabled) {
+			OutlinedButton(
+				onClick = { menuOpen = true },
+				enabled = enabled,
+				modifier = Modifier.tvFocusHighlight(CircleShape),
+			) {
 				Text(
 					text = preset ?: "Custom",
 					maxLines = 1,
@@ -175,7 +180,11 @@ internal fun PresetRow(
 			}
 		}
 		if (savable) {
-			IconButton(onClick = { saving = !saving }, enabled = enabled) {
+			IconButton(
+				onClick = { saving = !saving },
+				enabled = enabled,
+				modifier = Modifier.tvFocusHighlight(CircleShape),
+			) {
 				Icon(Icons.Default.Save, contentDescription = "Save preset")
 			}
 			IconButton(
@@ -183,6 +192,7 @@ internal fun PresetRow(
 				// Only what the user saved can be deleted; the device's own
 				// presets and an unsaved custom curve cannot.
 				enabled = enabled && preset?.let { it in saved } == true,
+				modifier = Modifier.tvFocusHighlight(CircleShape),
 			) {
 				Icon(Icons.Default.Delete, contentDescription = "Delete preset")
 			}
@@ -227,6 +237,7 @@ internal fun PresetRow(
 					}
 				},
 				enabled = saveName.isNotBlank(),
+				modifier = Modifier.tvFocusHighlight(CircleShape),
 			) {
 				Icon(Icons.Default.Check, contentDescription = "Save as preset")
 			}
@@ -257,7 +268,7 @@ internal fun VolumeRow(
 			IconButton(
 				onClick = onDown,
 				enabled = fraction != null,
-				modifier = Modifier.size(VOLUME_BUTTON_SIZE),
+				modifier = Modifier.size(VOLUME_BUTTON_SIZE).tvFocusHighlight(CircleShape),
 			) {
 				Icon(
 					Icons.AutoMirrored.Filled.VolumeDown,
@@ -272,7 +283,7 @@ internal fun VolumeRow(
 			IconButton(
 				onClick = onUp,
 				enabled = fraction != null,
-				modifier = Modifier.size(VOLUME_BUTTON_SIZE),
+				modifier = Modifier.size(VOLUME_BUTTON_SIZE).tvFocusHighlight(CircleShape),
 			) {
 				Icon(
 					Icons.AutoMirrored.Filled.VolumeUp,
@@ -309,21 +320,29 @@ internal fun TransportRow(
 		horizontalArrangement = Arrangement.Center,
 		verticalAlignment = Alignment.CenterVertically,
 	) {
-		IconButton(onClick = onPrevious, enabled = hasPrevious) {
+		IconButton(
+			onClick = onPrevious,
+			enabled = hasPrevious,
+			modifier = Modifier.tvFocusHighlight(CircleShape),
+		) {
 			Icon(
 				Icons.Default.SkipPrevious,
 				contentDescription = "Previous",
 				modifier = Modifier.size(36.dp),
 			)
 		}
-		IconButton(onClick = onTogglePlay) {
+		IconButton(onClick = onTogglePlay, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 			Icon(
 				imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
 				contentDescription = if (playing) "Pause" else "Play",
 				modifier = Modifier.size(48.dp),
 			)
 		}
-		IconButton(onClick = onNext, enabled = hasNext) {
+		IconButton(
+			onClick = onNext,
+			enabled = hasNext,
+			modifier = Modifier.tvFocusHighlight(CircleShape),
+		) {
 			Icon(
 				Icons.Default.SkipNext,
 				contentDescription = "Next",

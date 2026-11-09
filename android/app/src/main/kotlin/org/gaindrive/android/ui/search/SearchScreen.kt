@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -58,6 +59,7 @@ import org.gaindrive.android.ui.components.LibrarySelector
 import org.gaindrive.android.ui.components.SongRow
 import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackActionsSheet
+import org.gaindrive.android.ui.tvFocusHighlight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -217,7 +219,7 @@ private fun SearchHeader(
 				leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
 				trailingIcon = {
 					if (query.isNotEmpty()) {
-						IconButton(onClick = onClear) {
+						IconButton(onClick = onClear, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 							Icon(Icons.Default.Close, contentDescription = "Clear")
 						}
 					}

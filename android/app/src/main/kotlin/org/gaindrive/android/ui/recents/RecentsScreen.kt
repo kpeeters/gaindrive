@@ -30,6 +30,8 @@ import org.gaindrive.android.ui.components.SectionHeading
 import org.gaindrive.android.ui.components.LibrarySelector
 import org.gaindrive.android.ui.components.SongRow
 import org.gaindrive.android.ui.components.relativeTime
+import org.gaindrive.android.ui.paneFocusAccent
+import org.gaindrive.android.ui.paneTopBarColors
 import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackActionsSheet
 
@@ -63,6 +65,8 @@ fun RecentsScreen(
 	Scaffold(
 		topBar = {
 			TopAppBar(
+				modifier = Modifier.paneFocusAccent(),
+				colors = paneTopBarColors(),
 				title = { Text("Recents") },
 				actions = {
 					LibrarySelector(

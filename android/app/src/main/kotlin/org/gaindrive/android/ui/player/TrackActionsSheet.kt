@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -49,12 +50,14 @@ import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.model.Song
 import org.gaindrive.android.data.model.StarKind
 import org.gaindrive.android.ui.Load
+import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.LocalStars
 import org.gaindrive.android.ui.LocalWatched
 import org.gaindrive.android.ui.PinViewModel
 import org.gaindrive.android.ui.components.DownloadIndicator
 import org.gaindrive.android.ui.components.chapterDownloadLabel
 import org.gaindrive.android.ui.components.downloadActionLabel
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * What a long press on a track offers. Kept separate from the album screen so
@@ -186,7 +189,9 @@ fun TrackActionsSheet(
 				// copy complete - the row would sit at "downloading" for good.
 				// With "Play videos as audio only" on, what would be fetched is
 				// an ordinary audio transcode and neither objection holds.
-				if (!song.isVideo || videoDownloadable) {
+				// None on a TV: it streams from a server on the same network.
+				val canDownload = !LocalIsTv.current
+				if (canDownload && (!song.isVideo || videoDownloadable)) {
 					val status = pinStatuses[song.ref.encode()]
 					SheetAction(
 						leading = { DownloadIndicator(status) },
@@ -199,7 +204,7 @@ fun TrackActionsSheet(
 				// Under the same condition as the film's: what a chapter stores
 				// is its soundtrack, and only an audio-only film is played from
 				// that rather than fetched as a film.
-				if (videoDownloadable) chapter?.let { range ->
+				if (canDownload && videoDownloadable) chapter?.let { range ->
 					val status = pinStatuses[range.ref.encode()]
 					SheetAction(
 						leading = { DownloadIndicator(status) },
@@ -259,6 +264,7 @@ private fun PlaylistPicker(song: Song, playlists: AddToPlaylistViewModel) {
 					playlists.create(song.ref.server, newName, song.ref.id)
 				},
 				enabled = !busy && newName.isNotBlank(),
+				modifier = Modifier.tvFocusHighlight(CircleShape),
 			) {
 				Icon(Icons.Default.Check, contentDescription = "Create playlist")
 			}

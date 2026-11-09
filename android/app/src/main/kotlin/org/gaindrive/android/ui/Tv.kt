@@ -5,10 +5,20 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.util.Log
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.ripple.RippleAlpha
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RippleConfiguration
+import androidx.compose.material3.TopAppBarColors
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -27,11 +37,15 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DelegatingNode
 import androidx.compose.ui.node.DrawModifierNode
@@ -65,6 +79,7 @@ fun isTvDevice(context: Context): Boolean {
  * browse row is a bare clickable that resolves LocalIndication: one override
  * here gives all of them a visible focus without touching any of them.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TvEnvironment(isTv: Boolean, content: @Composable () -> Unit) {
 	if (!isTv) {
@@ -73,25 +88,79 @@ fun TvEnvironment(isTv: Boolean, content: @Composable () -> Unit) {
 		CompositionLocalProvider(
 			LocalIsTv provides true,
 			LocalIndication provides remember { TvIndication(ripple()) },
+			// The safety net for M3 components that carry their own ripple and
+			// were not given a tvFocusHighlight(): their focus tint, nearly
+			// invisible at the default alpha, becomes readable on a TV.
+			LocalRippleConfiguration provides TvRippleConfiguration,
 			content = content,
 		)
 	}
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+private val TvRippleConfiguration = RippleConfiguration(
+	rippleAlpha = RippleAlpha(
+		draggedAlpha = 0.16f,
+		focusedAlpha = 0.35f,
+		hoveredAlpha = 0.08f,
+		pressedAlpha = 0.12f,
+	),
+)
+
 /**
  * A focus ring for the components whose ripple is built in rather than taken
- * from [LocalIndication] (IconButton, Slider), which the [TvIndication]
- * override therefore cannot reach. A no-op off TV.
+ * from [LocalIndication] (Button, IconButton, Slider), which the [TvIndication]
+ * override therefore cannot reach. [shape] should follow the component's own
+ * outline: an 8dp rectangle around a round icon reads as a different control.
+ * [grow] is for compact controls; a full-width one (a seek bar) would push
+ * past the screen edge. A no-op off TV.
  */
-fun Modifier.tvFocusHighlight(): Modifier = composed {
+fun Modifier.tvFocusHighlight(shape: Shape = RingShape, grow: Boolean = true): Modifier = composed {
 	if (!LocalIsTv.current) return@composed Modifier
 	var focused by remember { mutableStateOf(false) }
+	val target = if (focused && grow) CONTROL_SCALE else 1f
+	val scale by animateFloatAsState(target, label = "tvFocusScale")
 	Modifier
 		.onFocusChanged { focused = it.isFocused }
+		.graphicsLayer {
+			scaleX = scale
+			scaleY = scale
+		}
 		.drawWithContent {
 			drawContent()
-			if (focused) drawFocusRing()
+			if (focused) drawFocusRing(shape)
 		}
+}
+
+/**
+ * Whether the pane being composed holds the d-pad focus. Only ever true on
+ * a TV, where three panes side by side otherwise give no hint which one the
+ * next press will move in.
+ */
+val LocalPaneFocused = compositionLocalOf { false }
+
+/** A pane's app bar colours: the title in the accent while its pane holds the focus. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun paneTopBarColors(): TopAppBarColors =
+	if (!LocalPaneFocused.current) TopAppBarDefaults.topAppBarColors()
+	else TopAppBarDefaults.topAppBarColors(titleContentColor = MaterialTheme.colorScheme.primary)
+
+/** For a pane's app bar: an underline in the accent while its pane holds the focus. */
+fun Modifier.paneFocusAccent(): Modifier = composed {
+	if (!LocalPaneFocused.current) return@composed Modifier
+	val color = MaterialTheme.colorScheme.primary
+	// Over the content, not behind it: the bar paints its own background.
+	Modifier.drawWithContent {
+		drawContent()
+		val width = 2.dp.toPx()
+		drawLine(
+			color = color,
+			start = Offset(0f, size.height - width / 2),
+			end = Offset(size.width, size.height - width / 2),
+			strokeWidth = width,
+		)
+	}
 }
 
 /**
@@ -134,6 +203,13 @@ fun Modifier.claimsFocus(): Modifier = composed {
 }
 
 private const val CLAIM_FRAMES = 10
+
+// Small for rows: they span a whole pane, and a few percent of that width is
+// already a visible jump. Controls are small, so they can grow more.
+private const val ROW_SCALE = 1.02f
+private const val CONTROL_SCALE = 1.08f
+
+private val RingShape = RoundedCornerShape(8.dp)
 private const val TAG = "GainDriveTv"
 
 /**
@@ -161,32 +237,39 @@ private class TvFocusNode(
 	// delegate's draw to us; the reference is what we forward through.
 	private val rippleDraw = delegate(rippleNode) as? DrawModifierNode
 	private var focused = false
+	private val zoom = Animatable(1f)
 
 	override fun onAttach() {
 		coroutineScope.launch {
 			interactionSource.interactions.collect {
 				when (it) {
-					is FocusInteraction.Focus -> {
-						focused = true
-						invalidateDraw()
-					}
-					is FocusInteraction.Unfocus -> {
-						focused = false
-						invalidateDraw()
-					}
+					is FocusInteraction.Focus -> setFocused(true)
+					is FocusInteraction.Unfocus -> setFocused(false)
 				}
 			}
 		}
 	}
 
-	override fun ContentDrawScope.draw() {
-		val ripple = rippleDraw
-		if (ripple != null) {
-			with(ripple) { this@draw.draw() }
-		} else {
-			drawContent()
+	private fun setFocused(value: Boolean) {
+		focused = value
+		invalidateDraw()
+		coroutineScope.launch {
+			zoom.animateTo(if (value) ROW_SCALE else 1f) { invalidateDraw() }
 		}
-		if (focused) drawFocusRing()
+	}
+
+	// Scaled at draw time rather than in layout: the row keeps its slot, so
+	// the list does not reflow under the moving focus.
+	override fun ContentDrawScope.draw() {
+		scale(zoom.value) {
+			val ripple = rippleDraw
+			if (ripple != null) {
+				with(ripple) { this@draw.draw() }
+			} else {
+				drawContent()
+			}
+			if (focused) drawFocusRing(RingShape)
+		}
 	}
 }
 
@@ -194,15 +277,8 @@ private class TvFocusNode(
  * Sand over the brand red, hardcoded because a Modifier.Node has no theme
  * access: visible on both color schemes, on artwork, and on video chrome.
  */
-private fun DrawScope.drawFocusRing() {
-	val corner = CornerRadius(8.dp.toPx())
-	drawRoundRect(
-		color = Color.White.copy(alpha = 0.10f),
-		cornerRadius = corner,
-	)
-	drawRoundRect(
-		color = Color(0xFFF4D58D),
-		style = Stroke(width = 3.dp.toPx()),
-		cornerRadius = corner,
-	)
+private fun DrawScope.drawFocusRing(shape: Shape) {
+	val outline = shape.createOutline(size, layoutDirection, this)
+	drawOutline(outline, color = Color.White.copy(alpha = 0.10f))
+	drawOutline(outline, color = Color(0xFFF4D58D), style = Stroke(width = 3.dp.toPx()))
 }

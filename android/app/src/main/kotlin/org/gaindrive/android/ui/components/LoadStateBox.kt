@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -15,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.ui.Load
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * Renders the loading and failure arms of a [Load] so no screen has to repeat
@@ -51,7 +53,10 @@ fun <T> LoadStateBox(
 					textAlign = TextAlign.Center,
 				)
 				if (onRetry != null) {
-					OutlinedButton(onClick = onRetry) { Text("Try again") }
+					OutlinedButton(
+						onClick = onRetry,
+						modifier = Modifier.tvFocusHighlight(CircleShape),
+					) { Text("Try again") }
 				}
 			}
 

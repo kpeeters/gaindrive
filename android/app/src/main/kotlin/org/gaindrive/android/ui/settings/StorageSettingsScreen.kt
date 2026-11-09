@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
@@ -32,8 +33,10 @@ import org.gaindrive.android.data.cache.PinStatus
 import org.gaindrive.android.data.cache.PinnedItem
 import org.gaindrive.android.data.model.AudioFormat
 import org.gaindrive.android.data.model.AudioQuality
+import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.components.ChipRow
 import org.gaindrive.android.ui.components.formatBytes
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * What is stored on the device, and whether to use the network at all.
@@ -50,6 +53,9 @@ fun StorageSettingsScreen(
 	val state by viewModel.state.collectAsStateWithLifecycle()
 	val pinStatuses by viewModel.pinStatuses.collectAsStateWithLifecycle()
 	val storage = state.storage
+	// A TV has no downloads to manage: it streams from a server on its own
+	// network. Pins made before this was hidden still show, so they can go.
+	val isTv = LocalIsTv.current
 	var confirmFlush by remember { mutableStateOf(false) }
 	// The item awaiting confirmation, not a boolean: the dialog names what it is
 	// about to delete, and the row it came from may scroll away underneath it.
@@ -188,7 +194,7 @@ fun StorageSettingsScreen(
 			)
 		}
 
-		item {
+		if (!isTv) item {
 			SwitchRow(
 				title = "Download on Wi-Fi only",
 				// Says why it does not cover the other switch, which is the
@@ -201,7 +207,11 @@ fun StorageSettingsScreen(
 		}
 
 		item {
-			OutlinedButton(onClick = { confirmFlush = true }, enabled = evictable > 0) {
+			OutlinedButton(
+				onClick = { confirmFlush = true },
+				enabled = evictable > 0,
+				modifier = Modifier.tvFocusHighlight(CircleShape),
+			) {
 				Text("Free ${formatBytes(evictable)}")
 			}
 		}
@@ -227,7 +237,10 @@ fun StorageSettingsScreen(
 			// nothing to do and nothing here is lost by pressing it again.
 			// Offline it leaves a download's copies alone, since those are the
 			// only ones left and nothing could fetch them back.
-			OutlinedButton(onClick = viewModel::clearImageCache) {
+			OutlinedButton(
+				onClick = viewModel::clearImageCache,
+				modifier = Modifier.tvFocusHighlight(CircleShape),
+			) {
 				Text("Clear cover art (${formatBytes(storage.imageBytes)})")
 			}
 		}
@@ -395,7 +408,7 @@ private fun PinnedRow(
 				},
 			)
 		}
-		IconButton(onClick = onRemove) {
+		IconButton(onClick = onRemove, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 			Icon(Icons.Default.Delete, contentDescription = "Remove download")
 		}
 	}

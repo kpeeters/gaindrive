@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddLink
@@ -45,6 +46,9 @@ import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.LibrarySelector
+import org.gaindrive.android.ui.paneFocusAccent
+import org.gaindrive.android.ui.paneTopBarColors
+import org.gaindrive.android.ui.tvFocusHighlight
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -79,10 +83,12 @@ fun ArtistsScreen(
 	Scaffold(
 		topBar = {
 			TopAppBar(
+				modifier = Modifier.paneFocusAccent(),
+				colors = paneTopBarColors(),
 				title = { Text(if (uploads) "Uploads" else "Library") },
 				navigationIcon = {
 					if (onBack != null) {
-						IconButton(onClick = onBack) {
+						IconButton(onClick = onBack, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 							Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 						}
 					}
@@ -92,7 +98,10 @@ fun ArtistsScreen(
 					// listing itself the icon would be a door into the room
 					// you are standing in.
 					if (onOpenUploads != null && canUpload) {
-						IconButton(onClick = onOpenUploads) {
+						IconButton(
+							onClick = onOpenUploads,
+							modifier = Modifier.tvFocusHighlight(CircleShape),
+						) {
 							Icon(Icons.Default.Upload, contentDescription = "Uploads")
 						}
 					}

@@ -2,6 +2,7 @@ package org.gaindrive.android.ui.components
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Dns
@@ -19,9 +20,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import org.gaindrive.android.data.model.BrowseScope
 import org.gaindrive.android.data.model.ServerConfig
 import org.gaindrive.android.data.model.ServerId
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * Picks what the library is showing: everything at once, one named server, or
@@ -51,7 +54,7 @@ fun LibrarySelector(
 	val showServers = servers.size >= 2
 
 	Box {
-		IconButton(onClick = { open = true }) {
+		IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 			Icon(
 				// The icon carries the state, so being offline is visible
 				// without opening anything.

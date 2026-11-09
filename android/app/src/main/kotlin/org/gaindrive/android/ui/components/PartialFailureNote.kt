@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.data.ServerFailure
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * Names the servers that did not answer, above content built from the ones
@@ -60,7 +62,7 @@ fun PartialFailureNote(
 				}
 			}
 			TextButton(onClick = onRetry) { Text("Retry") }
-			IconButton(onClick = onDismiss) {
+			IconButton(onClick = onDismiss, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 				Icon(Icons.Default.Close, contentDescription = "Dismiss")
 			}
 		}

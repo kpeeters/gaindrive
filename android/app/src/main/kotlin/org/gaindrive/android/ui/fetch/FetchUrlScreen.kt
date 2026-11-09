@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -52,6 +53,7 @@ import org.gaindrive.android.data.model.ServerId
 import org.gaindrive.android.net.FetchJobDto
 import org.gaindrive.android.ui.LocalAvailability
 import org.gaindrive.android.ui.components.relativeTime
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * What a URL shared with the app opens onto: the link, somewhere to put it, and
@@ -83,7 +85,7 @@ fun FetchUrlScreen(
 			TopAppBar(
 				title = { Text("Fetch to library") },
 				navigationIcon = {
-					IconButton(onClick = onDone) {
+					IconButton(onClick = onDone, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 						Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
 					}
 				},

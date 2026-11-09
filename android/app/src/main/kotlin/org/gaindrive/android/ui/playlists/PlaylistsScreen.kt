@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
@@ -39,6 +40,9 @@ import org.gaindrive.android.ui.components.PlaylistRow
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.SectionHeading
 import org.gaindrive.android.ui.components.LibrarySelector
+import org.gaindrive.android.ui.paneFocusAccent
+import org.gaindrive.android.ui.paneTopBarColors
+import org.gaindrive.android.ui.tvFocusHighlight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -87,6 +91,8 @@ fun PlaylistsScreen(
 	Scaffold(
 		topBar = {
 			TopAppBar(
+				modifier = Modifier.paneFocusAccent(),
+				colors = paneTopBarColors(),
 				title = { Text("Playlists") },
 				actions = {
 					LibrarySelector(
@@ -158,7 +164,7 @@ fun PlaylistsScreen(
 private fun PlaylistMenu(onDelete: () -> Unit) {
 	var open by remember { mutableStateOf(false) }
 
-	IconButton(onClick = { open = true }) {
+	IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 		Icon(Icons.Default.MoreVert, contentDescription = "Playlist actions")
 		DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
 			DropdownMenuItem(

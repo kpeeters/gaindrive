@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.DropdownMenu
@@ -45,6 +46,9 @@ import org.gaindrive.android.ui.components.PaneBackIcon
 import org.gaindrive.android.ui.components.PartialFailureNote
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.NotesSection
+import org.gaindrive.android.ui.paneFocusAccent
+import org.gaindrive.android.ui.paneTopBarColors
+import org.gaindrive.android.ui.tvFocusHighlight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +68,8 @@ fun AlbumsScreen(
 	Scaffold(
 		topBar = {
 			TopAppBar(
+				modifier = Modifier.paneFocusAccent(),
+				colors = paneTopBarColors(),
 				title = {
 					Text(
 						text = viewModel.artistName,
@@ -145,7 +151,7 @@ private fun SortAction(current: AlbumSort, onSelect: (AlbumSort) -> Unit) {
 	var open by remember { mutableStateOf(false) }
 
 	Box {
-		IconButton(onClick = { open = true }) {
+		IconButton(onClick = { open = true }, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 			Icon(
 				imageVector = Icons.AutoMirrored.Filled.Sort,
 				contentDescription = "Sort albums, currently by ${current.label.lowercase()}",

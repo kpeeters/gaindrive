@@ -1,5 +1,6 @@
 package org.gaindrive.android.ui.components
 
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
@@ -12,6 +13,7 @@ import androidx.compose.ui.Modifier
 import org.gaindrive.android.data.model.ItemRef
 import org.gaindrive.android.data.model.StarKind
 import org.gaindrive.android.ui.LocalStars
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * The visible star toggle, for a header or the player. [fallback] is what the
@@ -32,7 +34,7 @@ fun StarButton(
 		onClick = { stars.toggle(ref, kind, fallback) },
 		// Disabled while a write is in flight: see StarStore.busy.
 		enabled = enabled && !stars.isBusy(ref),
-		modifier = modifier,
+		modifier = modifier.tvFocusHighlight(CircleShape),
 	) {
 		Icon(
 			imageVector = if (starred) Icons.Default.Star else Icons.Default.StarBorder,

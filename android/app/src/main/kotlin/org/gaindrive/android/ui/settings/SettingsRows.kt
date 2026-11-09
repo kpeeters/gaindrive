@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -27,6 +28,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.gaindrive.android.ui.claimsFocus
+import org.gaindrive.android.ui.paneFocusAccent
+import org.gaindrive.android.ui.paneTopBarColors
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /** Pieces every settings screen is built from. */
 
@@ -47,10 +51,12 @@ fun SettingsScaffold(
 	Scaffold(
 		topBar = {
 			TopAppBar(
+				modifier = Modifier.paneFocusAccent(),
+				colors = paneTopBarColors(),
 				title = { Text(title) },
 				navigationIcon = {
 					onBack?.let { back ->
-						IconButton(onClick = back) {
+						IconButton(onClick = back, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 							Icon(
 								Icons.AutoMirrored.Filled.ArrowBack,
 								contentDescription = "Back",

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
@@ -60,6 +61,7 @@ import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.components.CoverHero
 import org.gaindrive.android.ui.components.CoverThumb
 import org.gaindrive.android.ui.components.StarButton
+import org.gaindrive.android.ui.tvFocusHighlight
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -241,14 +243,21 @@ fun NowPlayingSheet(
 						horizontalArrangement = Arrangement.Center,
 						verticalAlignment = Alignment.CenterVertically,
 					) {
-						IconButton(onClick = onPrevious, enabled = state.hasPrevious) {
+						IconButton(
+							onClick = onPrevious,
+							enabled = state.hasPrevious,
+							modifier = Modifier.tvFocusHighlight(CircleShape),
+						) {
 							Icon(
 								Icons.Default.SkipPrevious,
 								contentDescription = "Previous",
 								modifier = Modifier.size(36.dp),
 							)
 						}
-						IconButton(onClick = onTogglePlay) {
+						IconButton(
+							onClick = onTogglePlay,
+							modifier = Modifier.tvFocusHighlight(CircleShape),
+						) {
 							Icon(
 								imageVector = if (state.isPlaying) {
 									Icons.Default.Pause
@@ -259,7 +268,11 @@ fun NowPlayingSheet(
 								modifier = Modifier.size(48.dp),
 							)
 						}
-						IconButton(onClick = onNext, enabled = state.hasNext) {
+						IconButton(
+							onClick = onNext,
+							enabled = state.hasNext,
+							modifier = Modifier.tvFocusHighlight(CircleShape),
+						) {
 							Icon(
 								Icons.Default.SkipNext,
 								contentDescription = "Next",
@@ -281,7 +294,7 @@ fun NowPlayingSheet(
 						// is nowhere else in the UI. On this side rather than
 						// with the device controls, because three trailing
 						// buttons ran into the transport on a phone.
-						IconButton(onClick = onInfo) {
+						IconButton(onClick = onInfo, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 							Icon(
 								Icons.Default.Info,
 								contentDescription = "Track info",
@@ -293,7 +306,10 @@ fun NowPlayingSheet(
 						// it the only route back would be to start the film
 						// again.
 						if (state.isVideo) {
-							IconButton(onClick = onWatch) {
+							IconButton(
+								onClick = onWatch,
+								modifier = Modifier.tvFocusHighlight(CircleShape),
+							) {
 								Icon(
 									imageVector = Icons.Default.Movie,
 									contentDescription = "Watch",
@@ -316,7 +332,10 @@ fun NowPlayingSheet(
 						// before cast always means controls for the device
 						// making the sound, and exactly one of the two applies.
 						if (!casting) {
-							IconButton(onClick = onEqualizer) {
+							IconButton(
+								onClick = onEqualizer,
+								modifier = Modifier.tvFocusHighlight(CircleShape),
+							) {
 								Icon(
 									Icons.Default.GraphicEq,
 									contentDescription = "Equalizer",
@@ -329,7 +348,10 @@ fun NowPlayingSheet(
 						// the cast button so the one that is always there keeps
 						// its position as this one comes and goes.
 						if (casting) {
-							IconButton(onClick = onSpeakerControls) {
+							IconButton(
+								onClick = onSpeakerControls,
+								modifier = Modifier.tvFocusHighlight(CircleShape),
+							) {
 								Icon(
 									Icons.Default.Tune,
 									contentDescription = "Speaker controls",
@@ -346,7 +368,10 @@ fun NowPlayingSheet(
 						// by PlayerConnection, since deciding it here would need
 						// a reachability probe a composable cannot await.
 						if (onCast != null) {
-							IconButton(onClick = onCast) {
+							IconButton(
+								onClick = onCast,
+								modifier = Modifier.tvFocusHighlight(CircleShape),
+							) {
 								Icon(
 									imageVector = if (casting) {
 										Icons.Default.CastConnected
@@ -422,7 +447,10 @@ fun NowPlayingSheet(
 								// what skip is for. It can be moved; Media3 keeps
 								// it playing through that.
 								if (!isCurrent) {
-									IconButton(onClick = { onRemoveFromQueue(index) }) {
+									IconButton(
+										onClick = { onRemoveFromQueue(index) },
+										modifier = Modifier.tvFocusHighlight(CircleShape),
+									) {
 										Icon(
 											Icons.Default.Close,
 											contentDescription = "Remove from queue",
@@ -435,12 +463,14 @@ fun NowPlayingSheet(
 									IconButton(
 										onClick = { onMoveInQueue(index, index - 1) },
 										enabled = index > 0,
+										modifier = Modifier.tvFocusHighlight(CircleShape),
 									) {
 										Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up")
 									}
 									IconButton(
 										onClick = { onMoveInQueue(index, index + 1) },
 										enabled = index < rows.size - 1,
+										modifier = Modifier.tvFocusHighlight(CircleShape),
 									) {
 										Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
 									}
@@ -483,7 +513,7 @@ fun NowPlayingSheet(
 					modifier = Modifier.fillMaxWidth().padding(16.dp),
 					horizontalArrangement = Arrangement.Center,
 				) {
-					IconButton(onClick = onDismiss) {
+					IconButton(onClick = onDismiss, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 						Icon(Icons.Default.Close, contentDescription = "Close")
 					}
 				}

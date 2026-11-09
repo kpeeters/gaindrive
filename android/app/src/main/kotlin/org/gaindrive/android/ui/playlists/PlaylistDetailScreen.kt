@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -28,14 +29,18 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.gaindrive.android.data.cache.PinKind
 import org.gaindrive.android.data.model.Song
+import org.gaindrive.android.ui.LocalIsTv
 import org.gaindrive.android.ui.claimsFocus
 import org.gaindrive.android.ui.components.EmptyMessage
 import org.gaindrive.android.ui.components.PaneBackIcon
 import org.gaindrive.android.ui.components.PinAction
 import org.gaindrive.android.ui.components.RefreshableLoadBox
 import org.gaindrive.android.ui.components.SongRow
+import org.gaindrive.android.ui.paneFocusAccent
+import org.gaindrive.android.ui.paneTopBarColors
 import org.gaindrive.android.ui.player.PlayerViewModel
 import org.gaindrive.android.ui.player.TrackActionsSheet
+import org.gaindrive.android.ui.tvFocusHighlight
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,11 +77,19 @@ fun PlaylistDetailScreen(
 	Scaffold(
 		topBar = {
 			TopAppBar(
+				modifier = Modifier.paneFocusAccent(),
+				colors = paneTopBarColors(),
 				title = {
 					Text(viewModel.playlistName, maxLines = 1, overflow = TextOverflow.Ellipsis)
 				},
 				navigationIcon = { PaneBackIcon(onBack) },
-				actions = { PinAction(ref = viewModel.playlistRef, kind = PinKind.PLAYLIST) },
+				actions = {
+					// A TV streams from a server on its own network; there is
+					// nowhere it needs to take a playlist.
+					if (!LocalIsTv.current) {
+						PinAction(ref = viewModel.playlistRef, kind = PinKind.PLAYLIST)
+					}
+				},
 			)
 		},
 		snackbarHost = { SnackbarHost(snackbar) },
@@ -119,6 +132,7 @@ fun PlaylistDetailScreen(
 								// position, and a second one issued now would
 								// carry an index the server has already shifted.
 								enabled = !removing,
+								modifier = Modifier.tvFocusHighlight(CircleShape),
 							) {
 								Icon(
 									Icons.Default.Close,

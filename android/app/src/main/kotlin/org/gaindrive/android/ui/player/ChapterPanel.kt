@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -31,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import org.gaindrive.android.data.model.Chapter
 import org.gaindrive.android.data.model.ChapterSource
 import org.gaindrive.android.ui.components.formatChapterTime
+import org.gaindrive.android.ui.tvFocusHighlight
 
 /**
  * The markers inside the recording being played, over the picture.
@@ -74,10 +76,10 @@ fun ChapterPanel(
 				// Arrows rather than skip-previous/skip-next: those already mean
 				// "the next item in the queue" a few dp away in the transport
 				// row, and stepping between markers is not that.
-				IconButton(onClick = onPrevious) {
+				IconButton(onClick = onPrevious, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 					Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous chapter")
 				}
-				IconButton(onClick = onNext) {
+				IconButton(onClick = onNext, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 					Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next chapter")
 				}
 				Text(
@@ -85,7 +87,7 @@ fun ChapterPanel(
 					style = MaterialTheme.typography.titleSmall,
 					modifier = Modifier.weight(1f),
 				)
-				IconButton(onClick = onClose) {
+				IconButton(onClick = onClose, modifier = Modifier.tvFocusHighlight(CircleShape)) {
 					Icon(Icons.Default.Close, contentDescription = "Close")
 				}
 			}

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
@@ -391,6 +392,9 @@ fun GainDriveApp(
 					},
 					icon = { Icon(tab.icon, contentDescription = tab.label) },
 					label = { Text(tab.label) },
+					// Around icon and label both: the rail's own pill marks the
+					// selected tab, which is a different thing from the focus.
+					modifier = Modifier.tvFocusHighlight(RoundedCornerShape(16.dp)),
 				)
 			}
 		},
