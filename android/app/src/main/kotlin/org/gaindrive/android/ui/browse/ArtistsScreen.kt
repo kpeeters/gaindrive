@@ -95,8 +95,9 @@ fun ArtistsScreen(
 				actions = {
 					// Only where it leads somewhere else: on the uploads
 					// listing itself the icon would be a door into the room
-					// you are standing in.
-					if (onOpenUploads != null && canUpload) {
+					// you are standing in. Not on a TV: managing uploads is
+					// work for a phone or the web, not for a remote.
+					if (onOpenUploads != null && canUpload && !LocalIsTv.current) {
 						IconButton(
 							onClick = onOpenUploads,
 							modifier = Modifier.tvFocusHighlight(),

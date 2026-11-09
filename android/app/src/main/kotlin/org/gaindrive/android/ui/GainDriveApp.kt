@@ -9,6 +9,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -21,6 +23,8 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -367,271 +371,277 @@ fun GainDriveApp(
 		NavigationSuiteType.None
 	}
 
-	NavigationSuiteScaffold(
-		layoutType = layoutType,
-		navigationSuiteItems = {
-			// `tab`, not `item`: the loop variable would otherwise shadow this
-			// scope's own `item` function at every call below.
-			TopLevel.entries.forEach { tab ->
-				item(
-					selected = tab == selectedTab,
-					onClick = {
-						// Tapping the tab you are already in sheds its
-						// drill-down. Without it, a tab that restored to an
-						// album screen has no way back to its own list except
-						// walking the back gesture up the hierarchy.
-						if (tab == selectedTab) {
-							stacks.getValue(tab).reset()
-							navController.popToTabRoot()
-						} else {
-							selectedTab = tab
-							navController.switchTo(tab.route)
-						}
-						stacks.getValue(tab).focusRoot()
-					},
-					icon = { Icon(tab.icon, contentDescription = tab.label) },
-					label = { Text(tab.label) },
-					modifier = Modifier.tvFocusHighlight(),
-				)
-			}
-		},
-	) {
-		Scaffold(
-			bottomBar = {
-				// Absent, not empty. Scaffold measures the bar to decide the
-				// body's bottom padding, and a bar holding nothing but an inset
-				// is a zero-height placeable - which fallback it then takes is
-				// a question not worth having. Before the navigation bar moved
-				// into the suite this could not arise, because the bar was
-				// always there.
-				if (showNavAndPlayer &&
-					(!availability.online || playerState.current != null ||
-						fetchStatus.showing)) {
-					// One surface for the whole strip, with the window inset
-					// applied *inside* it, which is how NavigationBar is built
-					// and is not optional here: Scaffold pads its body by the
-					// bar's height and leaves the bar itself to clear the
-					// system bars. NavigationBar used to do that for this
-					// column and cannot any more, having moved into the
-					// navigation suite - without this the player is drawn
-					// behind the system navigation bar, visible only as a
-					// sliver. Inside the surface rather than around it so the
-					// bar's own colour continues behind the gesture pill.
-					//
-					// windowInsetsPadding adds only what an ancestor has not
-					// already consumed, so at compact width - where the suite
-					// consumes the bottom inset for its own bar - this
-					// correctly contributes nothing, and the rail layout,
-					// which consumes only the leading edge, gets the whole of
-					// it. The insets are named rather than taken from
-					// safeDrawing because that includes the IME, and a player
-					// bar climbing over the keyboard on the search screen is
-					// not wanted.
-					Surface(tonalElevation = 3.dp) {
-						Column(
-							modifier = Modifier.windowInsetsPadding(
-								WindowInsets.systemBars
-									.union(WindowInsets.displayCutout)
-									.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
-							),
-						) {
-							// Sits with the player rather than in each screen's app bar:
-							// having no network is a fact about the whole app, and one
-							// banner is better than five that have to agree.
-							OfflineNote(
-								online = availability.online,
-								byChoice = availability.offlineByChoice,
-							)
-							// Beside the offline banner and for its stated
-							// reason: a fetch running is a fact about the whole
-							// app, not about one screen. Above the player, so the
-							// transport stays where the thumb expects it.
-							FetchStrip(
-								state = fetchStatus,
-								onOpen = { navController.navigate(Route.FetchUrl("")) },
-								onDismiss = fetchViewModel::dismiss,
-							)
-							// The bottom of the *content* column, not of the window -
-							// which at compact width is above the navigation bar, as
-							// before, and beside the rail at medium and expanded. Both
-							// match the web client, where #player is a grid row that
-							// the full-height sidebar sits next to. Outside the NavHost
-							// either way, so it persists across navigation.
-							MiniPlayer(
-								state = playerState,
-								seekWindow = seekWindow,
-								// A film's bar leads back to the film. Opening the
-								// audio-shaped sheet instead would make the user find
-								// the way back to the picture from inside it.
-								onExpand = {
-									if (playerState.isVideo) {
-										navController.navigate(Route.Video)
-									} else {
-										nowPlayingOpen = true
-									}
-								},
-								onTogglePlay = playerViewModel::togglePlayPause,
-								onNext = playerViewModel::next,
-								onPrevious = playerViewModel::previous,
-								onSeek = playerViewModel::seekTo,
-								// The same two the Now Playing sheet opens, and
-								// the same state behind them - the bar only
-								// draws them where there is room, which is
-								// where the web client's own player bar has
-								// carried them all along.
-								casting = castDevice != null,
-								onCast = openCastPicker,
-								onInfo = { trackInfoOpen = true },
-							)
-						}
-					}
+	val selectTab: (TopLevel) -> Unit = { tab ->
+		// Choosing the tab you are already in sheds its drill-down. Without
+		// it, a tab that restored to an album screen has no way back to its
+		// own list except walking the back gesture up the hierarchy.
+		if (tab == selectedTab) {
+			stacks.getValue(tab).reset()
+			navController.popToTabRoot()
+		} else {
+			selectedTab = tab
+			navController.switchTo(tab.route)
+		}
+		stacks.getValue(tab).focusRoot()
+	}
+	// A TV draws its own rail: the suite's pins its items to the top, which
+	// leaves them in a corner of a screen watched from across the room.
+	val tvRail = isTv && layoutType != NavigationSuiteType.None
+
+	TvRailFrame(show = tvRail, selected = selectedTab, onSelect = selectTab) {
+		NavigationSuiteScaffold(
+			layoutType = if (tvRail) NavigationSuiteType.None else layoutType,
+			navigationSuiteItems = {
+				// `tab`, not `item`: the loop variable would otherwise shadow this
+				// scope's own `item` function at every call below.
+				TopLevel.entries.forEach { tab ->
+					item(
+						selected = tab == selectedTab,
+						onClick = { selectTab(tab) },
+						icon = { Icon(tab.icon, contentDescription = tab.label) },
+						label = { Text(tab.label) },
+						modifier = Modifier.tvFocusHighlight(),
+					)
 				}
 			},
-		) { insets ->
-			NavHost(
-				navController = navController,
-				startDestination = startDestination,
-				// Drilling in slides left, going back slides right, which makes the
-				// Artists → Albums → Album hierarchy visible the way the web
-				// client's sliding panes do. Switching tabs is a lateral move, not
-				// a descent, so it cross-fades instead.
-				// slideInHorizontally rather than slideIntoContainer: the latter
-				// derives its distance from the difference in container sizes, which
-				// between two full-screen destinations is nearly nothing - hence a
-				// slide you can barely see. These offsets are explicit multiples of
-				// the screen width.
-				enterTransition = {
-					if (targetState.destination.isDetail()) {
-						slideInHorizontally(tween(TRANSITION_MS)) { width -> width }
-					} else {
-						fadeIn(tween(TRANSITION_MS))
+		) {
+			Scaffold(
+				bottomBar = {
+					// Absent, not empty. Scaffold measures the bar to decide the
+					// body's bottom padding, and a bar holding nothing but an inset
+					// is a zero-height placeable - which fallback it then takes is
+					// a question not worth having. Before the navigation bar moved
+					// into the suite this could not arise, because the bar was
+					// always there.
+					if (showNavAndPlayer &&
+						(!availability.online || playerState.current != null ||
+							fetchStatus.showing)) {
+						// One surface for the whole strip, with the window inset
+						// applied *inside* it, which is how NavigationBar is built
+						// and is not optional here: Scaffold pads its body by the
+						// bar's height and leaves the bar itself to clear the
+						// system bars. NavigationBar used to do that for this
+						// column and cannot any more, having moved into the
+						// navigation suite - without this the player is drawn
+						// behind the system navigation bar, visible only as a
+						// sliver. Inside the surface rather than around it so the
+						// bar's own colour continues behind the gesture pill.
+						//
+						// windowInsetsPadding adds only what an ancestor has not
+						// already consumed, so at compact width - where the suite
+						// consumes the bottom inset for its own bar - this
+						// correctly contributes nothing, and the rail layout,
+						// which consumes only the leading edge, gets the whole of
+						// it. The insets are named rather than taken from
+						// safeDrawing because that includes the IME, and a player
+						// bar climbing over the keyboard on the search screen is
+						// not wanted.
+						Surface(tonalElevation = 3.dp) {
+							Column(
+								modifier = Modifier.windowInsetsPadding(
+									WindowInsets.systemBars
+										.union(WindowInsets.displayCutout)
+										.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+								),
+							) {
+								// Sits with the player rather than in each screen's app bar:
+								// having no network is a fact about the whole app, and one
+								// banner is better than five that have to agree.
+								OfflineNote(
+									online = availability.online,
+									byChoice = availability.offlineByChoice,
+								)
+								// Beside the offline banner and for its stated
+								// reason: a fetch running is a fact about the whole
+								// app, not about one screen. Above the player, so the
+								// transport stays where the thumb expects it.
+								FetchStrip(
+									state = fetchStatus,
+									onOpen = { navController.navigate(Route.FetchUrl("")) },
+									onDismiss = fetchViewModel::dismiss,
+								)
+								// The bottom of the *content* column, not of the window -
+								// which at compact width is above the navigation bar, as
+								// before, and beside the rail at medium and expanded. Both
+								// match the web client, where #player is a grid row that
+								// the full-height sidebar sits next to. Outside the NavHost
+								// either way, so it persists across navigation.
+								MiniPlayer(
+									state = playerState,
+									seekWindow = seekWindow,
+									// A film's bar leads back to the film. Opening the
+									// audio-shaped sheet instead would make the user find
+									// the way back to the picture from inside it.
+									onExpand = {
+										if (playerState.isVideo) {
+											navController.navigate(Route.Video)
+										} else {
+											nowPlayingOpen = true
+										}
+									},
+									onTogglePlay = playerViewModel::togglePlayPause,
+									onNext = playerViewModel::next,
+									onPrevious = playerViewModel::previous,
+									onSeek = playerViewModel::seekTo,
+									// The same two the Now Playing sheet opens, and
+									// the same state behind them - the bar only
+									// draws them where there is room, which is
+									// where the web client's own player bar has
+									// carried them all along.
+									casting = castDevice != null,
+									onCast = openCastPicker,
+									onInfo = { trackInfoOpen = true },
+								)
+							}
+						}
 					}
 				},
-				exitTransition = {
-					if (targetState.destination.isDetail()) {
-						// The outgoing screen travels a third of the way. That reads
-						// as depth, and moves far fewer pixels than sliding both
-						// screens the full width would.
-						slideOutHorizontally(tween(TRANSITION_MS)) { width -> -width / 3 }
-					} else {
-						fadeOut(tween(TRANSITION_MS))
+			) { insets ->
+				NavHost(
+					navController = navController,
+					startDestination = startDestination,
+					// Drilling in slides left, going back slides right, which makes the
+					// Artists → Albums → Album hierarchy visible the way the web
+					// client's sliding panes do. Switching tabs is a lateral move, not
+					// a descent, so it cross-fades instead.
+					// slideInHorizontally rather than slideIntoContainer: the latter
+					// derives its distance from the difference in container sizes, which
+					// between two full-screen destinations is nearly nothing - hence a
+					// slide you can barely see. These offsets are explicit multiples of
+					// the screen width.
+					enterTransition = {
+						if (targetState.destination.isDetail()) {
+							slideInHorizontally(tween(TRANSITION_MS)) { width -> width }
+						} else {
+							fadeIn(tween(TRANSITION_MS))
+						}
+					},
+					exitTransition = {
+						if (targetState.destination.isDetail()) {
+							// The outgoing screen travels a third of the way. That reads
+							// as depth, and moves far fewer pixels than sliding both
+							// screens the full width would.
+							slideOutHorizontally(tween(TRANSITION_MS)) { width -> -width / 3 }
+						} else {
+							fadeOut(tween(TRANSITION_MS))
+						}
+					},
+					// On the way back the roles reverse: what matters is whether the
+					// screen being left was a detail, not the one being returned to.
+					popEnterTransition = {
+						if (initialState.destination.isDetail()) {
+							slideInHorizontally(tween(TRANSITION_MS)) { width -> -width / 3 }
+						} else {
+							fadeIn(tween(TRANSITION_MS))
+						}
+					},
+					popExitTransition = {
+						if (initialState.destination.isDetail()) {
+							slideOutHorizontally(tween(TRANSITION_MS)) { width -> width }
+						} else {
+							fadeOut(tween(TRANSITION_MS))
+						}
+					},
+					// No padding here: each destination but the film takes the
+					// shell's insets through Padded, see there.
+				) {
+					composable<Route.Artists> {
+						Padded(insets) {
+							LibraryTab(
+								stack = stacks.getValue(TopLevel.ARTISTS),
+								// The same panel a shared URL opens, with nothing in its URL
+								// field. A form wants the whole window, so it is pushed onto
+								// the shell's own host rather than into a pane.
+								onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
+								onOpenUploads = {
+									uploadsStack.focusRoot()
+									navController.navigate(Route.Uploads)
+								},
+							)
+						}
 					}
-				},
-				// On the way back the roles reverse: what matters is whether the
-				// screen being left was a detail, not the one being returned to.
-				popEnterTransition = {
-					if (initialState.destination.isDetail()) {
-						slideInHorizontally(tween(TRANSITION_MS)) { width -> -width / 3 }
-					} else {
-						fadeIn(tween(TRANSITION_MS))
-					}
-				},
-				popExitTransition = {
-					if (initialState.destination.isDetail()) {
-						slideOutHorizontally(tween(TRANSITION_MS)) { width -> width }
-					} else {
-						fadeOut(tween(TRANSITION_MS))
-					}
-				},
-				// No padding here: each destination but the film takes the
-				// shell's insets through Padded, see there.
-			) {
-				composable<Route.Artists> {
-					Padded(insets) {
-						LibraryTab(
-							stack = stacks.getValue(TopLevel.ARTISTS),
-							// The same panel a shared URL opens, with nothing in its URL
-							// field. A form wants the whole window, so it is pushed onto
-							// the shell's own host rather than into a pane.
-							onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
-							onOpenUploads = {
-								uploadsStack.focusRoot()
-								navController.navigate(Route.Uploads)
-							},
-						)
-					}
-				}
 
-				// The uploads listing: the Library tab's own pane strip a second
-				// time, rooted at the personal slice. The bottom bar and player
-				// stay - it is a listing, not a form.
-				composable<Route.Uploads> {
-					Padded(insets) {
-						LibraryTab(
-							stack = uploadsStack,
-							onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
+					// The uploads listing: the Library tab's own pane strip a second
+					// time, rooted at the personal slice. The bottom bar and player
+					// stay - it is a listing, not a form.
+					composable<Route.Uploads> {
+						Padded(insets) {
+							LibraryTab(
+								stack = uploadsStack,
+								onFetchUrl = { navController.navigate(Route.FetchUrl("")) },
+								onBack = { navController.popBackStack() },
+							)
+						}
+					}
+
+					composable<Route.Playlists> {
+						Padded(insets) {
+							PlaylistsTab(stacks.getValue(TopLevel.PLAYLISTS))
+						}
+					}
+
+					composable<Route.Recents> {
+						Padded(insets) {
+							RecentsTab(stacks.getValue(TopLevel.RECENTS))
+						}
+					}
+
+					composable<Route.Search> {
+						Padded(insets) {
+							SearchTab(stacks.getValue(TopLevel.SEARCH))
+						}
+					}
+
+					composable<Route.Settings> {
+						Padded(insets) {
+							SettingsTab(
+								stack = stacks.getValue(TopLevel.SETTINGS),
+								// A form with a validating action, so it takes the window
+								// rather than a pane - see SettingsTab.
+								onEditServer = { id: ServerId? ->
+									navController.navigate(Route.ServerEdit(id?.value))
+								},
+							)
+						}
+					}
+
+					// The one album that is not a pane of some tab. It is reached only
+					// from the Now Playing sheet, where there is no list beside it to
+					// go back to and no tab whose strip it belongs in - the sheet
+					// covers whatever the user was doing, and Back should return them
+					// to exactly that. Leaving this path on the shell's own host is
+					// what keeps that true, and unchanged.
+					composable<Route.Album> {
+						Padded(insets) {
+							AlbumDetailScreen(
+								onBack = { navController.popBackStack() },
+								onPromoted = { navController.popBackStack() },
+							)
+						}
+					}
+
+					composable<Route.ServerEdit> {
+						Padded(insets) {
+							ServerEditScreen(onDone = { navController.popBackStack() })
+						}
+					}
+
+					// Always navigated *onto* the start destination, never the start
+					// destination itself, so there is something to pop back to even when
+					// a share is what launched the app.
+					composable<Route.FetchUrl> {
+						Padded(insets) {
+							FetchUrlScreen(onDone = { navController.popBackStack() })
+						}
+					}
+
+					composable<Route.Video> {
+						VideoScreen(
 							onBack = { navController.popBackStack() },
+							onCast = openCastPicker,
+							onInfo = { trackInfoOpen = true },
 						)
 					}
-				}
-
-				composable<Route.Playlists> {
-					Padded(insets) {
-						PlaylistsTab(stacks.getValue(TopLevel.PLAYLISTS))
-					}
-				}
-
-				composable<Route.Recents> {
-					Padded(insets) {
-						RecentsTab(stacks.getValue(TopLevel.RECENTS))
-					}
-				}
-
-				composable<Route.Search> {
-					Padded(insets) {
-						SearchTab(stacks.getValue(TopLevel.SEARCH))
-					}
-				}
-
-				composable<Route.Settings> {
-					Padded(insets) {
-						SettingsTab(
-							stack = stacks.getValue(TopLevel.SETTINGS),
-							// A form with a validating action, so it takes the window
-							// rather than a pane - see SettingsTab.
-							onEditServer = { id: ServerId? ->
-								navController.navigate(Route.ServerEdit(id?.value))
-							},
-						)
-					}
-				}
-
-				// The one album that is not a pane of some tab. It is reached only
-				// from the Now Playing sheet, where there is no list beside it to
-				// go back to and no tab whose strip it belongs in - the sheet
-				// covers whatever the user was doing, and Back should return them
-				// to exactly that. Leaving this path on the shell's own host is
-				// what keeps that true, and unchanged.
-				composable<Route.Album> {
-					Padded(insets) {
-						AlbumDetailScreen(
-							onBack = { navController.popBackStack() },
-							onPromoted = { navController.popBackStack() },
-						)
-					}
-				}
-
-				composable<Route.ServerEdit> {
-					Padded(insets) {
-						ServerEditScreen(onDone = { navController.popBackStack() })
-					}
-				}
-
-				// Always navigated *onto* the start destination, never the start
-				// destination itself, so there is something to pop back to even when
-				// a share is what launched the app.
-				composable<Route.FetchUrl> {
-					Padded(insets) {
-						FetchUrlScreen(onDone = { navController.popBackStack() })
-					}
-				}
-
-				composable<Route.Video> {
-					VideoScreen(
-						onBack = { navController.popBackStack() },
-						onCast = openCastPicker,
-						onInfo = { trackInfoOpen = true },
-					)
 				}
 			}
 		}
@@ -791,5 +801,38 @@ private fun NavHostController.switchTo(route: Route) {
 private fun Padded(insets: PaddingValues, content: @Composable () -> Unit) {
 	Box(modifier = Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets)) {
 		content()
+	}
+}
+
+/**
+ * [content] beside a navigation rail whose items sit centred vertically, or
+ * just [content] when [show] is false.
+ */
+@Composable
+private fun TvRailFrame(
+	show: Boolean,
+	selected: TopLevel,
+	onSelect: (TopLevel) -> Unit,
+	content: @Composable () -> Unit,
+) {
+	if (!show) {
+		content()
+		return
+	}
+	Row(Modifier.fillMaxSize()) {
+		NavigationRail {
+			Spacer(Modifier.weight(1f))
+			TopLevel.entries.forEach { tab ->
+				NavigationRailItem(
+					selected = tab == selected,
+					onClick = { onSelect(tab) },
+					icon = { Icon(tab.icon, contentDescription = tab.label) },
+					label = { Text(tab.label) },
+					modifier = Modifier.tvFocusHighlight(),
+				)
+			}
+			Spacer(Modifier.weight(1f))
+		}
+		Box(Modifier.weight(1f)) { content() }
 	}
 }

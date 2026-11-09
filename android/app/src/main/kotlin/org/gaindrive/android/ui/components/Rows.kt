@@ -361,18 +361,15 @@ fun TrackRow(
 }
 
 /**
- * Marks the row whose contents the pane beside it shows: the web client's
- * tinted pill at rest. The TV focus tint is the same accent at twice the
- * strength, so "what is open" and "where am I" read as two tones of one
- * colour when they are on the same row.
+ * Marks the row whose contents the pane beside it shows. Grey rather than the
+ * accent: the TV focus tint is light red, and "what is open" and "where am I"
+ * are often on screen together. (The accent at the web pill's 12% was tried
+ * and is too dark on a TV.)
  */
 @Composable
 private fun Modifier.openMark(open: Boolean): Modifier =
 	if (!open) this
-	else background(
-		MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-		RoundedCornerShape(8.dp),
-	)
+	else background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(8.dp))
 
 /**
  * The d-pad stand-in for long-press. Compact rather than the 48dp Material

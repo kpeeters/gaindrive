@@ -40,6 +40,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DelegatingNode
 import androidx.compose.ui.node.DrawModifierNode
@@ -206,15 +207,17 @@ private const val BUMP_SCALE = 1.1f
 private const val BUMP_UP_MS = 120
 private const val BUMP_DOWN_MS = 220
 
-// Starts above the ripple's steady focus tint and fades into it.
-private const val PULSE_ALPHA = 0.30f
+// Starts above the steady row tint and fades into it.
+private const val PULSE_ALPHA = 0.35f
 private const val PULSE_MS = 400
 private const val TAG = "GainDriveTv"
 
 /**
- * The ripple, whose focus tint [TvEnvironment] has made the accent, plus a
- * brighter flash of [accent] as focus arrives: a still tint is easy to lose
- * track of when the d-pad moves it, a flash says where it went.
+ * The ripple, plus a steady light tint while focused and a flash of [accent]
+ * as focus arrives: a still tint is easy to lose track of when the d-pad
+ * moves it, a flash says where it went. The steady tint is our own rather
+ * than the ripple's: the accent at ripple strength is a maroon that reads as
+ * black on a TV's dark surface, where a row needs to look lifted.
  */
 private class TvIndication(
 	private val ripple: IndicationNodeFactory,
@@ -239,6 +242,8 @@ private class TvFocusNode(
 	// Both this node and the ripple draw, so the framework leaves the
 	// delegate's draw to us; the reference is what we forward through.
 	private val rippleDraw = delegate(rippleNode) as? DrawModifierNode
+	private val steady = lerp(accent, Color.White, 0.45f).copy(alpha = 0.28f)
+	private var focused = false
 	private val pulse = Animatable(0f)
 
 	override fun onAttach() {
@@ -253,6 +258,8 @@ private class TvFocusNode(
 	}
 
 	private fun setFocused(value: Boolean) {
+		focused = value
+		invalidateDraw()
 		coroutineScope.launch {
 			if (value) {
 				pulse.snapTo(PULSE_ALPHA)
@@ -271,6 +278,7 @@ private class TvFocusNode(
 		} else {
 			drawContent()
 		}
+		if (focused) drawRect(steady)
 		if (pulse.value > 0f) drawRect(accent.copy(alpha = pulse.value))
 	}
 }
